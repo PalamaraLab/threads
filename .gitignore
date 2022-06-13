@@ -1,0 +1,5 @@
+build
+_deps
+pybind11
+.vscode
+venv
