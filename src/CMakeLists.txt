@@ -2,17 +2,21 @@
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
 # find_package(Boost COMPONENTS iostreams REQUIRED)
+# Node.cpp
+# TDPBWT.cpp
+# Node.hpp
+# TDPBWT.hpp
 
 set(
         TDPBWT_src
-        Node.cpp
-        TDPBWT.cpp
+        Gnode.cpp
+        DPBWT.cpp
 )
 
 set(
         TDPBWT_hdr
-        Node.hpp
-        TDPBWT.hpp
+        Gnode.hpp
+        DPBWT.hpp
 )
 
 add_library(TDPBWT STATIC ${TDPBWT_src} ${TDPBWT_hdr})

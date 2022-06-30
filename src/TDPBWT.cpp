@@ -21,15 +21,42 @@ TDPBWT::TDPBWT(std::vector<int> _physical_positions, std::vector<float> _genetic
   assert(mutation_rate > 0);
   num_sites = physical_positions.size();
   num_samples = 0;
-  virtual_top.next_0 = &virtual_top;
-  virtual_top.next_1 = &virtual_top;
-  virtual_top.prev_0 = &virtual_top;
-  virtual_top.prev_1 = &virtual_top;
-  virtual_bottom.next_0 = &virtual_bottom;
-  virtual_bottom.next_1 = &virtual_bottom;
-  virtual_bottom.prev_0 = &virtual_bottom;
-  virtual_bottom.prev_1 = &virtual_bottom;
 }
+
+// void TDPBWT::insert(std::vector<bool> genotype) {
+//   // If nothing in here, make a pointer to all tops,
+//   // then insert genotype
+//   int current_ID = num_samples;
+//   if (genotype.size() != num_sites) {
+//     throw std::invalid_argument(THROW_LINE("Number of input markers does not match map."));
+//   }
+//   cout << "Doing sample " << current_ID << endl;
+
+//   t0 = cols[0].back();
+//   z0 = Node(current_ID, 0, genotype[0]);
+//   // Inserts z0 above t0
+//   t0->insert_above(z0);
+
+//   z_k = z0;
+//   for (int k = 0; k < N; k++) {
+//     bool g_k = genotype[k];
+//     Node z_next = Node(current_ID, k + 1, genotype[k + 1]);
+//     Node* tmp = z_k->above;
+
+//     while (tmp->genotype != g_k) {
+//       tmp->w[g_k] = z_next;
+//       tmp = tmp->above;
+//     }
+//     z_k->w[g_k] = z_next;
+//     Node* t_k = z_k->below;
+//     z_k->w[!g_k] = t_k->w[!g_k];
+//     Node* t_next = t_k->w[g_k];
+//     z_next->ID = current_ID;
+//     t_next->insert_above(z_next);
+//   }
+//   num_samples++;
+// }
+
 
 void TDPBWT::insert(std::vector<bool> genotype) {
   // If nothing in here, make a pointer to all tops,
@@ -155,10 +182,10 @@ void TDPBWT::insert(std::vector<bool> genotype) {
   }
 
   // Update divergence arrays
-  for (int j = 0; j something; ++j) {
-    //profit
-    // see dpbwt insertion algorithm
-  }
+  // for (int j = 0; j something; ++j) {
+  //   //profit
+  //   // see dpbwt insertion algorithm
+  // }
 
 
   ++num_samples;
@@ -236,7 +263,7 @@ std::pair<int, int> TDPBWT::longest_suffix(std::vector<bool> genotype) {
     } else {
       cout << "nullptr\n";
     }
-    // This is going to be a bit weird:
+    // This is going to be a bit weird and I need proof that it works
     if (!have_matched) {
       have_matched = next_ts != nullptr && next_te != nullptr && next_ts->equivalent_to(next_te);
       ts = next_ts->left;
