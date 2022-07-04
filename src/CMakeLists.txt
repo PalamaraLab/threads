@@ -9,13 +9,13 @@
 
 set(
         TDPBWT_src
-        Gnode.cpp
+        Node.cpp
         DPBWT.cpp
 )
 
 set(
         TDPBWT_hdr
-        Gnode.hpp
+        Node.hpp
         DPBWT.hpp
 )
 

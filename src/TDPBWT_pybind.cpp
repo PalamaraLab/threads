@@ -33,5 +33,8 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def_readonly("num_sites", &DPBWT::num_sites)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
         .def("insert", &DPBWT::insert)
-        .def("print_sorting", &DPBWT::print_sorting);
+        .def("print_sorting", &DPBWT::print_sorting)
+        .def("print_divergence", &DPBWT::print_divergence)
+        .def("longest_prefix", &DPBWT::longest_prefix)
+        .def("fastLS", &DPBWT::fastLS);
 }
