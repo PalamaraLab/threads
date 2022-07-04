@@ -31,8 +31,7 @@ ostream& operator<<(ostream& os, State& state) {
 
 
 DPBWT::DPBWT(std::vector<int> _physical_positions, std::vector<float> _genetic_positions, float _mutation_rate) :
-  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate),
-  virtual_top(Node(-1, -1, 0)), virtual_bottom(Node(-1, -1, 1))
+  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate)
 {
   if (physical_positions.size() != genetic_positions.size()) {
     throw std::invalid_argument(THROW_LINE("Map lengths don't match."));
@@ -41,10 +40,10 @@ DPBWT::DPBWT(std::vector<int> _physical_positions, std::vector<float> _genetic_p
     throw std::invalid_argument(THROW_LINE("Need a strictly positive mutation rate."));
   }
 
-  assert(mutation_rate > 0);
   num_sites = physical_positions.size();
   num_samples = 0;
 
+  // Initialize both ends of the linked-list columns
   for (int i = 0; i < physical_positions.size() + 1; i++) {
     tops.emplace_back(std::make_unique<Node>(-1, i, 0));
     bottoms.emplace_back(std::make_unique<Node>(-1, i, 1));
@@ -61,8 +60,14 @@ DPBWT::DPBWT(std::vector<int> _physical_positions, std::vector<float> _genetic_p
   }
 }
 
+/**
+ * @brief Find the next insert position
+ * 
+ * @param t 
+ * @param g 
+ * @return Node* 
+ */
 Node* DPBWT::extend_node(Node* t, bool g) {
-  // Node* t = node->below;
   if (!g && t->w[g]->sample_ID == -1) {
     // Logic is that if we're at the bottom and have a "0" genotype we jump up to last
     // 0-spot in next column
@@ -73,6 +78,11 @@ Node* DPBWT::extend_node(Node* t, bool g) {
   return t;
 }
 
+/**
+ * @brief Insert a new sequence into the dynamic panel
+ * 
+ * @param genotype 
+ */
 void DPBWT::insert(std::vector<bool> genotype) {
   int current_ID = num_samples;
   if (genotype.size() != num_sites) {
@@ -145,6 +155,10 @@ void DPBWT::insert(std::vector<bool> genotype) {
   num_samples++;
 }
 
+/**
+ * @brief For debugging: print the sample-IDs of the arrayified panel.
+ * 
+ */
 void DPBWT::print_sorting() {
   for (int j = 0; j < num_sites + 1; ++j) {
     Node* node = tops[j].get();
@@ -156,6 +170,10 @@ void DPBWT::print_sorting() {
   }
 }
 
+/**
+ * @brief For debugging: print the divergence values of the arrayified panel.
+ * 
+ */
 void DPBWT::print_divergence() {
   for (int j = 0; j < num_sites + 1; ++j) {
     Node* node = tops[j].get();
@@ -184,7 +202,6 @@ std::vector<int> DPBWT::longest_prefix(std::vector<bool> genotype) {
     k++;
     t = extend_node(t, genotype[k]);
   }
-  // Here is a comment to explain this logic:
   // We only need to consider the longest set of sequences with div=0,
   // or the single first above-sequence after we first find div>0.
   int last_match = t->above->sample_ID;
@@ -214,22 +231,28 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
     throw std::runtime_error(THROW_LINE("Still states on stack when there shouldn't be any"));
   }
   std::vector<State*> current_states;
+  // Just like with insertion, we start at the bottom of the first column.
   states.emplace_back(std::make_unique<State>(bottoms[0].get(), 0, nullptr, 0, genotype[0], true, -1));
   current_states.push_back(states.back().get());
-  int i = 0;
   // gm is the best score for the current level of the stack
   double gm = 0;
+  // gm_next holds temporary values for updates of gm
   double gm_next;
   double mu = mutation_penalty();
   double rho = recombination_penalty();
-  // all will be made clear
+  // Whether a sequence has been successfully extended at a given site 
   bool extended;
-  Node* t_next;
+  // Whether a sequence can be extended
   bool extensible;
+  Node* t_next;
+  // Whether a sequence can be extended by only looking at divergence values
   bool div_extensible;
+  // The haplotype match
   int best_above;
+  // Collect states for the next iteration
   std::vector<State*> new_states;
   bool allele;
+  int i = 0;
   while (i < num_sites) {
     cout << "Doing site " << i << " with " << current_states.size() << " states on the stack.\n";
     i++;
@@ -237,19 +260,15 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
     extended = false;
     allele = (i == num_sites) ? 0 : genotype[i];
     for (State* s : current_states) {
-      cout << "Doing " << *s << endl;
       Node* t_i = s->below;
       double score = s->score;
       // If the current sequence is worse than taking another sequence (with score gm)
       // and recombining, we don't bother.
       if (score < gm + rho) {
-        cout << "Extension candidate\n";
-        cout << "Extended " << *t_i << " by " << allele << " to " << *t_next << endl;
+        // cout << "Extension candidate\n";
         t_next = extend_node(t_i, allele);
         std::tie(extensible, div_extensible, best_above) = extensible_by(*s, t_next, allele);
         if (extensible) {
-          cout << "Extensible, adding a new state.\n";
-          // State new_state = State(t_next, score, s, s->start, allele);
           states.emplace_back(std::make_unique<State>(t_next, score, s, s->start, allele, div_extensible, best_above));
           new_states.push_back(states.back().get());
           // Will probably need a no-recombination penalty, it might
@@ -264,35 +283,33 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
       // If the current sequence with mismatch is worse than taking another sequence
       // (with score gm_next) and recombining, we don't bother.
       if (score + mu < gm_next + rho) {
-        cout << "Mutation candidate\n";
+        // cout << "Mutation candidate\n";
         t_next = extend_node(t_i, !allele);
         std::tie(extensible, div_extensible, best_above) = extensible_by(*s, t_next, !allele);
         if (extensible) {
-          cout << "Extensible, adding a new state.\n";
           states.emplace_back(std::make_unique<State>(t_next, score + mu, s, s->start, !allele, div_extensible, best_above));
           new_states.push_back(states.back().get());
         }
       }
     }
+
     // No state was extended, so we're forced to recombine
     if (!extended) {
-      cout << "Nothing extended, recombining.\n";
+      // cout << "Nothing extended, recombining.\n";
       // Find a best state in the previous layer to add as parent to the recombinant state.
       State* best_prev = *(std::min_element(std::begin(current_states), std::end(current_states), 
         [](State* s1, State* s2) { return s1->score < s2->score; }));
       
-      // This should hold up
+      // Short sanity check
       if (best_prev->score != gm) {
         throw std::runtime_error(THROW_LINE("The algorithm is in an illegal state because gm != best_prev.score"));
       }
 
       // Add the new recombinant state to the stack
       // (we never enter this clause on the first iteration)
-      t_next = extend_node(bottoms[i - 1].get(), allele); //(allele) ? bottoms[i].get() : tops[i - 1]->below->w[1];
+      t_next = extend_node(bottoms[i - 1].get(), allele);
       states.emplace_back(std::make_unique<State>(t_next, gm + rho, best_prev, i, allele, true, -1));
-      cout << "New state:\n";
       new_states.push_back(states.back().get());
-      cout << *(new_states.back()) << endl;
     }
     current_states = new_states;
     gm = gm_next;
@@ -343,7 +360,6 @@ std::tuple<bool, bool, int> DPBWT::extensible_by(State s, Node* t_next, bool g) 
       // If extension-by-divergence fails, find a "best-above" candidate.
       next_extended_by_div = false;
       Node* best_prefix_candidate = t_next->above;
-      cout << "candidate above-node: " << *(t_next->above) << endl;
       if (best_prefix_candidate->sample_ID != -1 && best_prefix_candidate->genotype == g && state_node_prefix_match(s, best_prefix_candidate->sample_ID)) {
         best_above = best_prefix_candidate->sample_ID;
         extensible = true;
@@ -377,17 +393,24 @@ double DPBWT::recombination_penalty() {
   return 1.0;
 }
 
+/**
+ * @brief 
+ * 
+ * @param state 
+ * @param sample_ID 
+ * @return true 
+ * @return false 
+ */
 bool DPBWT::state_node_prefix_match(State state, int sample_ID) {
   State* s = &state;
   int start = state.start;
   while (s != nullptr && s->below->site >= start) {
     if (s->genotype != panel[sample_ID][s->below->site]->genotype) {
-      cout << sample_ID << " does not have a " << s->genotype << " at " << s->below->site << endl;
       return false;
     }
     if (s->parent != nullptr && s->below->site == s->parent->below->site) {
       cout << "State at site " << s->below->site << " has the same position as its parent.\n";
-      throw std::runtime_error(THROW_LINE("sorry ! "));
+      throw std::runtime_error(THROW_LINE("!!!"));
     }
     s = s->parent;
   }
