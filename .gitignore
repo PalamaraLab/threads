@@ -3,3 +3,4 @@ _deps
 pybind11
 .vscode
 venv
+*.egg-info
