@@ -27,7 +27,7 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     //     .def("longest_suffix", &TDPBWT::longest_suffix)
 
     py::class_<DPBWT>(m, "DPBWT")
-        .def(py::init<std::vector<int>, std::vector<float>, float>(), "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
+        .def(py::init<std::vector<double>, std::vector<double>, double>(), "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
            py::arg("mutation_rate") = 0)
         .def_readonly("num_samples", &DPBWT::num_samples)
         .def_readonly("num_sites", &DPBWT::num_sites)
