@@ -10,12 +10,14 @@
 set(
         TDPBWT_src
         Node.cpp
+        State.cpp
         DPBWT.cpp
 )
 
 set(
         TDPBWT_hdr
         Node.hpp
+        State.hpp
         DPBWT.hpp
 )
 
