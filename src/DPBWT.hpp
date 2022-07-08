@@ -1,22 +1,9 @@
-#include "Node.hpp"
+#include "State.hpp"
 
 #include <memory>
 #include <vector>
 
-class State {
-public:
-  Node* below;
-  double score;
-  State* parent;
-  int start;
-  bool genotype;
-  bool extended_by_div;
-  int best_above;
 
-  State(Node* _below, double _score, State* _parent, int _start, bool _genotype, bool _extended_by_div, int _best_above);
-
-  friend ostream& operator<<(ostream& os, State& state);
-};
 
 class DPBWT {
 
@@ -24,15 +11,14 @@ private:
   // To access the linked lists in each column
   std::vector<std::unique_ptr<Node>> tops;
   std::vector<std::unique_ptr<Node>> bottoms;
-  // The dynamic reference panel
-  // To keep stack-states alive during fastLS inference
-  std::vector<std::unique_ptr<State>> states;
+  
 
 public:
   int num_sites;
   int num_samples;
   std::vector<int> physical_positions;
   std::vector<float> genetic_positions;
+  // The dynamic reference panel
   std::vector<std::vector<std::unique_ptr<Node>>> panel;
   float mutation_rate;
 
@@ -42,9 +28,9 @@ public:
   // Insertion and extention functions
   void insert(std::vector<bool> genotype);
   Node* extend_node(Node* node, bool genotype);
-  std::tuple<bool, bool, int> extensible_by(State s, Node* t_next, bool g);
+  std::tuple<bool, int> extensible_by(State& s, const Node* t_next, const bool g);
   bool state_node_prefix_match(State state, int sample_ID);
-
+  bool genotype_interval_match(const int id1, const int id2, const int start, const int end);
   // Algorithms
   std::vector<int> longest_prefix(std::vector<bool> genotype);
   std::vector<int> fastLS(std::vector<bool> genotype);
