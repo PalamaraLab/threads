@@ -14,7 +14,7 @@ namespace py = pybind11;
 PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     py::class_<Node>(m, "Node")
         .def_readonly("sample_ID", &Node::sample_ID)
-        .def_readonly("site", &Node::site)
+        // .def_readonly("site", &Node::site)
         .def_readonly("genotype", &Node::genotype);
 
     // py::class_<TDPBWT>(m, "TDPBWT")
@@ -27,14 +27,20 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     //     .def("longest_suffix", &TDPBWT::longest_suffix)
 
     py::class_<DPBWT>(m, "DPBWT")
-        .def(py::init<std::vector<double>, std::vector<double>, double>(), "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate") = 0)
+        .def(py::init<std::vector<double>, std::vector<double>, double, double>(), "Initialize",
+        py::arg("physical_positions"), py::arg("genetic_positions"),
+           py::arg("mutation_rate") = 0, py::arg("Ne") = 2e4)
         .def_readonly("num_samples", &DPBWT::num_samples)
         .def_readonly("num_sites", &DPBWT::num_sites)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
+        .def_readonly("bp_sizes", &DPBWT::bp_sizes)
+        .def_readonly("cm_sizes", &DPBWT::cm_sizes)
+        .def_readonly("mutation_rate", &DPBWT::mutation_rate)
+        .def("mutation_penalties", &DPBWT::mutation_penalties)
+        .def("recombination_penalties", &DPBWT::recombination_penalties)
         .def("insert", &DPBWT::insert)
         .def("print_sorting", &DPBWT::print_sorting)
-        .def("print_divergence", &DPBWT::print_divergence)
+        // .def("print_divergence", &DPBWT::print_divergence)
         .def("longest_prefix", &DPBWT::longest_prefix)
         .def("fastLS", &DPBWT::fastLS);
 }

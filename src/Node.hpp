@@ -6,9 +6,9 @@ class Node {
 public:
   // Node data
   int sample_ID;
-  int site;
+  // int site;
   bool genotype;
-  int divergence;
+  // int divergence;
 
   // Node pointers
   Node* above;
@@ -18,7 +18,8 @@ public:
   std::vector<Node*> w = std::vector<Node*>(2);
 
   // Constructors
-  Node(int sample_ID, int site, bool genotype);
+  // Node(int sample_ID, int site, bool genotype);
+  Node(int sample_ID, bool genotype);
 
   // Node movers-arounders
   void insert_above(Node* node);
