@@ -15,9 +15,9 @@ State::State(Node* _below, double _score, TracebackState* _traceback, int _best_
   below(_below), score(_score), traceback(_traceback), best_above(_best_above) {
 }
 
-int State::site() {
-  return this->below->site;
-}
+// int State::site() {
+//   return this->below->site;
+// }
 
 bool State::genotype() {
   return this->below->above->genotype;
@@ -26,7 +26,7 @@ bool State::genotype() {
 ostream& operator<<(ostream& os, State& state) {
   os << "State between nodes " << state.below->sample_ID;
   os << " and " << state.below->above->sample_ID; 
-  os << " at site " << state.site() << " with score " << state.score;
+  os << " with score " << state.score;
   os << ", traceback to " << state.traceback->site;
   os << ", genotype " << state.genotype() << ", above-seq " << state.best_above;
   return os;
