@@ -17,7 +17,11 @@ bwt.insert([1, 0, 0, 1, 0, 1, 1, 0, 1])
 bwt.print_sorting()
 bw1 = bwt.fastLS([1, 1, 1, 0, 0, 1, 0, 0, 1])
 print(bw1)
-assert bw1 == [2] * 9
+assert bw1 == [(0, 2)]
+
+print(bwt.thread([1, 1, 1, 0, 0, 1, 0, 0, 1]))
+import sys
+sys.exit(0)
 
 # Test 2
 print("TEST 2")
@@ -27,15 +31,15 @@ bwt.insert([0] * 8)
 bwt.insert([1] * 8)
 bw2a = bwt.fastLS([1, 1, 1, 1, 0, 0, 0, 0])
 print(bw2a)
-assert bw2a == [1, 1, 1, 1, 0, 0, 0, 0]
+assert bw2a == [(0, 1), (4, 0)]  # [1, 1, 1, 1, 0, 0, 0, 0]
 
 bw2b = bwt.fastLS([1, 1, 0, 0, 0, 0, 1, 1])
 print(bw2b)
-assert bw2b == [1, 1, 0, 0, 0, 0, 1, 1]
+assert bw2b == [(0, 1), (2, 0), (6, 1)] # [1, 1, 0, 0, 0, 0, 1, 1]
 
 bw2c = bwt.fastLS([1, 0, 1, 0, 1, 0, 1, 1])
 print(bw2c)
-assert bw2c == [1, 1, 1, 1, 1, 1, 1, 1]
+assert bw2c == [(0, 1)]#[1, 1, 1, 1, 1, 1, 1, 1]
 
 # Test 3
 print("\nTEST 3, in which extension by divergence fails")
@@ -46,5 +50,6 @@ bwt.insert([0, 0, 0, 0, 1, 0, 0, 0])
 bwt.insert([1, 1, 1, 1, 0, 0, 0, 0])
 bwt.insert([1, 1, 1, 1, 0, 0, 0, 0])
 bw3a = bwt.fastLS([1, 1, 1, 1, 1, 0, 0, 0])
-assert bw3a == [3, 3, 3, 3, 3, 3, 3, 3]
+assert bw3a == [(0, 3)]#[3, 3, 3, 3, 3, 3, 3, 3]
 print(bw3a)
+

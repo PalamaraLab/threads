@@ -22,13 +22,11 @@ public:
   double score;
   // Pointer to last recombinant state
   TracebackState* traceback;
-  // If != -1, the only match in the panel on the interval [start.site, this.site]
-  int best_above;
   // Shorthand for this.below->site
   int site();
   bool genotype();
 
-  State(Node* _below, double _score, TracebackState* _traceback, int _best_above);
+  State(Node* _below, double _score, TracebackState* _traceback);
 
   friend ostream& operator<<(ostream& os, State& state);
 };

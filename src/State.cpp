@@ -11,13 +11,9 @@ TracebackState::TracebackState(int _site, int _best_prev_ID, TracebackState* _pr
   site(_site), best_prev_ID(_best_prev_ID), prev(_prev) {
 }
 
-State::State(Node* _below, double _score, TracebackState* _traceback, int _best_above) :
-  below(_below), score(_score), traceback(_traceback), best_above(_best_above) {
+State::State(Node* _below, double _score, TracebackState* _traceback) :
+  below(_below), score(_score), traceback(_traceback) {
 }
-
-// int State::site() {
-//   return this->below->site;
-// }
 
 bool State::genotype() {
   return this->below->above->genotype;
@@ -28,7 +24,7 @@ ostream& operator<<(ostream& os, State& state) {
   os << " and " << state.below->above->sample_ID; 
   os << " with score " << state.score;
   os << ", traceback to " << state.traceback->site;
-  os << ", genotype " << state.genotype() << ", above-seq " << state.best_above;
+  os << ", genotype " << state.genotype();
   return os;
 }
 
