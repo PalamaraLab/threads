@@ -38,9 +38,11 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
         .def("mutation_penalties", &DPBWT::mutation_penalties)
         .def("recombination_penalties", &DPBWT::recombination_penalties)
-        .def("insert", &DPBWT::insert)
+        .def("insert", py::overload_cast<std::vector<bool>>(&DPBWT::insert), py::arg("genotypes"))
+        .def("insert", py::overload_cast<std::vector<bool>, int>(&DPBWT::insert), py::arg("genotypes"), py::arg("ID"))
+        .def("delete_ID", &DPBWT::delete_ID, py::arg("ID"))
         .def("print_sorting", &DPBWT::print_sorting)
-        // .def("print_divergence", &DPBWT::print_divergence)
         .def("longest_prefix", &DPBWT::longest_prefix)
+        .def("thread", &DPBWT::thread)
         .def("fastLS", &DPBWT::fastLS);
 }

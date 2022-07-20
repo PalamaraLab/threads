@@ -110,24 +110,35 @@ Node* DPBWT::extend_node(Node* t, bool g, int i) {
   return t_next;
 }
 
+void DPBWT::insert(std::vector<bool> genotype) {
+  insert(genotype, num_samples);
+}
 /**
  * @brief Insert a new sequence into the dynamic panel
  * 
  * @param genotype 
  */
-void DPBWT::insert(std::vector<bool> genotype) {
-  int current_ID = num_samples;
+void DPBWT::insert(std::vector<bool> genotype, int ID) {
+  if (ID_map.find(ID) != ID_map.end()) {
+    cerr << "ID " << ID << " is already in the panel.\n";
+    exit(1);
+  }
   if (genotype.size() != num_sites) {
     cerr << "Number of input markers does not match map.\n";
+    exit(1);
   }
   if ((num_samples + 1) % 100 == 0) {
-    cout << "Inserting haplotype " << current_ID + 1 << endl;
+    cout << "Inserting haplotype number " << num_samples + 1 << endl;
+    exit(1);
   }
+  int insert_index = num_samples;
+  ID_map[ID] = insert_index;
+
   panel.emplace_back(std::vector<std::unique_ptr<Node>>());
 
   Node* t0 = bottoms[0].get();
-  panel[current_ID].emplace_back(std::make_unique<Node>(current_ID, genotype[0]));
-  Node* z0 = panel[current_ID][0].get();
+  panel[ID_map[ID]].emplace_back(std::make_unique<Node>(ID, genotype[0]));
+  Node* z0 = panel[ID_map[ID]][0].get();
 
   // Inserts z0 above t0
   t0->insert_above(z0);
@@ -142,8 +153,8 @@ void DPBWT::insert(std::vector<bool> genotype) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
     // Add current thingy to panel
-    panel[current_ID].emplace_back(std::make_unique<Node>(current_ID, next_genotype));
-    z_next = panel[current_ID].back().get();
+    panel[ID_map[ID]].emplace_back(std::make_unique<Node>(ID, next_genotype));
+    z_next = panel[ID_map[ID]].back().get();
     tmp = z_k->above;
     while (tmp->sample_ID != -1 && tmp->genotype != g_k) {
       tmp->w[g_k] = z_next;
@@ -156,7 +167,7 @@ void DPBWT::insert(std::vector<bool> genotype) {
     z_k->w[!g_k] = t_k->w[!g_k];
     // This is my own addition b-c else everything is stuck at the bottom :-(
     t_next = extend_node(t_k, g_k, k);
-    z_next->sample_ID = current_ID;
+    z_next->sample_ID = ID;
     t_next->insert_above(z_next);
     z_k = z_next;
   }
@@ -190,6 +201,51 @@ void DPBWT::insert(std::vector<bool> genotype) {
 }
 
 /**
+ * @brief Deletes sequence ID from the dynamic panel. This moves the last sequence in the panel
+ * to the position ID held. See alg 5 from d-PBWT paper.
+ * 
+ * @param ID 
+ */
+void DPBWT::delete_ID(int ID) {
+  Node* s = panel[ID_map[ID]][0].get();
+  // The last sequence in the panel
+  int last_ID = panel[num_samples - 1][0]->sample_ID;
+
+  for (int k = 0; k < num_sites; k++) {
+    // Get allele
+    bool s_allele = panel[ID_map[ID]][k]->genotype;
+
+    // Update w-values
+    Node* tmp = s->above;
+    while (tmp->genotype != s->genotype) {
+      tmp->w[s_allele] = s->below->w[s_allele];
+      tmp = tmp->above;
+    }
+
+    // Unlink node
+    Node* tmp_above = s->above;
+    Node* tmp_below = s->below;
+    tmp_above->below = tmp_below;
+    tmp_below->above = tmp_above;
+    
+    // Find next node in sequence
+    s = extend_node(s, s_allele, k);
+  }
+
+  // If needed, move last sequence to replace the one we just deleted.
+  if (ID_map[ID] != num_samples - 1) {
+    for (int k = 0; k < num_sites; k++) {
+      // Hope this is correct
+      panel[ID_map[ID]][k] = std::move(panel[num_samples - 1][k]);
+    }
+    ID_map[last_ID] = ID_map[ID];
+    ID_map.erase(ID);
+  }
+  panel.pop_back();
+  num_samples--;
+}
+
+/**
  * @brief For debugging: print the sample-IDs of the arrayified panel.
  * 
  */
@@ -204,20 +260,6 @@ void DPBWT::print_sorting() {
   }
 }
 
-/**
- * @brief For debugging: print the divergence values of the arrayified panel.
- * 
- */
-// void DPBWT::print_divergence() {
-//   for (int j = 0; j < num_sites + 1; ++j) {
-//     Node* node = tops[j].get();
-//     while (node != nullptr) {
-//       cout << node->divergence << " ";
-//       node = node->below;
-//     }
-//     cout << endl;
-//   }
-// }
 
 /**
  * @brief Get longest prefix matching input haplotype *without* inserting into the dynamic panel
@@ -261,9 +303,9 @@ std::vector<int> DPBWT::longest_prefix(std::vector<bool> genotype) {
  *        See also Algorithm 4 of Lunter (2018), Bioinformatics.
  * 
  * @param genotype 
- * @return std::vector<int> 
+ * @return std::vector<std::tuple<int, int>> a pair containing path segments (start_pos, id) 
  */
-std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
+std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
   std::vector<double> mu_c; 
@@ -276,7 +318,7 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
   std::vector<std::unique_ptr<TracebackState>> traceback_states;
   traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
   std::vector<State> current_states;
-  current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get(), -1);
+  current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get());
   // current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get(), -1);
 
   // Just like with insertion, we start at the bottom of the first column.
@@ -289,8 +331,6 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
   // Whether a sequence has been successfully extended at a given site 
   bool extensible;
   Node* t_next;
-  // The haplotype match
-  int best_above;
   // Collect states for the next iteration
   bool allele;
   for (int i = 0; i < num_sites; i++) {
@@ -308,9 +348,8 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
       // and recombining, we don't bother.
       if (score + rho_c[i] + mu_c[i] < gm + rho[i] + mu_c[i]) {
         t_next = extend_node(t_i, allele, i);
-        std::tie(extensible, best_above) = extensible_by(s, t_next, allele, i);
-        if (extensible) {
-          new_states.emplace_back(t_next, score + rho_c[i] + mu_c[i], s.traceback, best_above);
+        if (extensible_by(s, t_next, allele, i)) {
+          new_states.emplace_back(t_next, score + rho_c[i] + mu_c[i], s.traceback);
           // cout << "Extended to " << new_states.back() << endl;
           gm_next = std::min(gm_next, score + rho_c[i] + mu_c[i]);
           if (score == gm) {
@@ -324,16 +363,13 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
       // (with score gm_next) and recombining, we don't bother.
       if (score + mu[i] + rho_c[i] < gm_next - rho_c[i] + rho[i]) {
         t_next = extend_node(t_i, !allele, i);
-        std::tie(extensible, best_above) = extensible_by(s, t_next, !allele, i);
-        if (extensible) {
-          new_states.emplace_back(t_next, score + mu[i] + rho_c[i], s.traceback, best_above);
-          // cout << "Mutated to " << new_states.back() << endl;
+        if (extensible_by(s, t_next, !allele, i)) {
+          new_states.emplace_back(t_next, score + mu[i] + rho_c[i], s.traceback);
         }
       }
     }
 
     // No state was extended, so we're forced to recombine. TODO: always recombine when possible
-    // if (!extended) {
     if (i > 0) {
       // Short sanity check
       if (i == 0) {
@@ -351,13 +387,12 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
       }
 
       // Add the new recombinant state to the stack (we never enter this clause on the first iteration)
-      // t_next = extend_node(bottoms[i - 1].get(), allele);
       t_next = extend_node(bottoms[i].get(), allele, i);
       // Make sure the new genotype actually exists at the next site
       if (t_next->above->genotype == allele && t_next->above->sample_ID != -1) {
         traceback_states.emplace_back(std::make_unique<TracebackState>(
           i, best_prev.below->above->sample_ID, best_prev.traceback));
-        new_states.emplace_back(t_next, gm + mu_c[i] + rho[i], traceback_states.back().get(), -1);
+        new_states.emplace_back(t_next, gm + mu_c[i] + rho[i], traceback_states.back().get());
       }
     }
 
@@ -382,39 +417,26 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
   State min_state = *(std::min_element(current_states.begin(), current_states.end(),
         [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
   cout << "Found best path with score " << min_state.score << " ending at " << min_state << endl;
-  std::vector<int> best_path;
-
-  int target = num_sites;
+  
+  std::vector<std::tuple<int, int>> best_path;
   TracebackState* traceback = min_state.traceback;
   int match_id = min_state.below->above->sample_ID;
-  int segment_end = num_sites;
-  int segment_start = traceback->site;
-  // int segment_length = min_state.site() - traceback->site;
-  for (int i = 0; i < segment_end - segment_start; i++) {
-    best_path.push_back(match_id);
-  }
-  TracebackState* last_traceback = traceback;
-  traceback = traceback->prev;
   while (traceback != nullptr) {
-    segment_end = last_traceback->site;
-    segment_start = traceback->site;
-    // segment_length = ; //last_traceback->site - traceback->site;
-    match_id = last_traceback->best_prev_ID;
-    for (int i = 0; i < segment_end - segment_start; i++) {
-      best_path.push_back(match_id);
-    }
-    last_traceback = traceback;
+    int segment_start = traceback->site;
+    best_path.emplace_back(segment_start, match_id);
+    match_id = traceback->best_prev_ID;
     traceback = traceback->prev;
   }
+
   std::reverse(best_path.begin(), best_path.end());
 
-  int mismatches = 0;
-  for (int k = 0; k < best_path.size(); k++) {
-    if (panel[best_path[k]][k]->genotype != genotype[k]) {
-      mismatches++;
-    }
-  }
-  cout << "Best path has " << mismatches << " mismatches.\n";
+  // int mismatches = 0;
+  // for (int k = 0; k < best_path.size(); k++) {
+  //   if (panel[best_path[k]][k]->genotype != genotype[k]) {
+  //     mismatches++;
+  //   }
+  // }
+  // cout << "Best path has " << mismatches << " mismatches.\n";
   return best_path;
 }
 
@@ -429,48 +451,19 @@ std::vector<int> DPBWT::fastLS(std::vector<bool> genotype) {
  * @return true
  * @return false
  */
-std::tuple<bool, int> DPBWT::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
-  bool extensible = false;
-  int new_best_above = s.best_above;
-  int best_above_candidate = t_next->above->sample_ID;
+bool DPBWT::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
+  int next_above_candidate = t_next->above->sample_ID;
 
-  if (best_above_candidate == -1 || g != panel[best_above_candidate][i]->genotype) {
+  if (next_above_candidate == -1 || g != panel[ID_map[next_above_candidate]][i]->genotype) {
     // This case take care of non-segregating sites with the opposite allele in the panel 
-    extensible = false;
-  } else if (s.best_above != -1 && g == panel[s.best_above][i]->genotype) {
-    // In this case we already know the single best match in the region
-    if (best_above_candidate != s.best_above) {
-      cerr << "Found inconsistent bests-aboves " << best_above_candidate << " and " << s.best_above;
-      cerr << " while looking at " << s << endl;
-      exit(1);
-    }
-    extensible = true;
-  // } else if (t_next->above->divergence <= s.traceback->site) {
-  } else if (s.below->above->sample_ID == best_above_candidate) {
+    return false;
+  } else if (s.below->above->sample_ID == next_above_candidate) {
     // In this case we're just extending the same sequence again
-    extensible = true;
-  // } else if (s.below->above->divergence <= s.traceback->site) {
-    // In this case we've already matched with a whole set of haplotypes in the region
-    // if (s.best_above != -1) {
-    //   cerr << "Can't do divergence with a best_above known, that's an illegal state\n";
-    //   cerr << "This arose looking at " << s << endl;
-    //   exit(1);
-    // }
-    // extensible = true;
-  } else if (genotype_interval_match(s.below->above->sample_ID, best_above_candidate, s.traceback->site, i)) {
-    // cout << "Found unique match between " << s.below->above->sample_ID << " and " << best_above_candidate;
-    // cout << " on [" << s.traceback->site << ", " << s.site() << ") ";
-    // cout << "while looking at state " << s << endl;
-    // if (best_prefix_candidate->sample_ID != -1 && best_prefix_candidate->genotype == g && 
-        // genotype_interval_match(s.below->above->sample_ID, best_prefix_candidate->sample_ID, s.traceback->site, s.site())) {
-    // if ()
-    // In this case we don't have a whole set and we don't know whether there
-    // is a single best match
-    // new_best_above = best_above_candidate;
-    extensible = true;
-    // }
+    return true;
+  } else if (genotype_interval_match(s.below->above->sample_ID, next_above_candidate, s.traceback->site, i)) {
+    return true;
   }
-  return std::tuple(extensible, new_best_above);
+  return false;
 }
 
 /**
@@ -517,6 +510,94 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
 }
 
 /**
+ * @brief Date the segment based on length and n_mismatches using maximum likelihood. (No demography)
+ * 
+ * @param id1 
+ * @param id2 
+ * @param start inclusive
+ * @param end exclusive
+ * @return double 
+ */
+double DPBWT::age_segment_ML(const int id1, const int id2, const int start, const int end) {
+  if (start > end) {
+    cerr << "Can't date a segment with length <= 0\n";
+    exit(1);
+  }
+  double m = 0;
+  double bp_size = 0;
+  double cm_size = 0;
+  for (int i = start; i < end; i++) {
+    if (panel[ID_map[id1]][i]->genotype != panel[ID_map[id2]][i]->genotype) {
+      m++;
+    }
+    bp_size += bp_sizes[i];
+    cm_size += cm_sizes[i];
+  }
+  double mu = 2. * mutation_rate * bp_size;
+  double rho = 2. * 0.01 * cm_size; 
+  // The local max of p(l, m | t) w.r.t. t
+  return (m + 1) / (mu + rho);
+  // double gamma = 1 / Ne;
+  // double mu = mutation_rate;
+
+  // return 0.5 * (gamma + cm_size)^2 * (gamma + mu * bp_size)^(n_mismatch+1) / (gamma + mu * bp_size + cm_size) ^(m+3);
+}
+
+/**
+ * @brief Date the segment based on length and n_mismatches using a demography prior and Bayes
+ * 
+ * @param id1 
+ * @param id2 
+ * @param start 
+ * @param end 
+ * @return double 
+ */
+double DPBWT::age_segment_bayes(const int id1, const int id2, const int start, const int end) {
+  if (start > end) {
+    cerr << "Can't date a segment with length <= 0\n";
+    exit(1);
+  }
+  double m = 0;
+  double bp_size = 0;
+  double cm_size = 0;
+  for (int i = start; i < end; i++) {
+    if (panel[ID_map[id1]][i]->genotype != panel[ID_map[id2]][i]->genotype) {
+      m++;
+    }
+    bp_size += bp_sizes[i];
+    cm_size += cm_sizes[i];
+  }
+  double gamma = 1. / ne;
+  double mu = 2. * mutation_rate * bp_size;
+  double rho = 2. * 0.01 * cm_size; 
+  return (m + 2) / (gamma + rho + mu); 
+  // return (m + 2) * (m + 1) * std::pow(gamma + mu, m + 1) * std::pow(gamma + rho, 2) / (gamma * std::pow(gamma + rho + mu, m + 3));
+  // return 2. * std::pow((mu + gamma) / (mu + rho), n_mismatch + 2);
+}
+
+std::vector<std::tuple<int, int, double, double>> DPBWT::thread(std::vector<bool> genotype) {
+  std::vector<std::tuple<int, int, double, double>> threading_instructions;
+  int new_sample_ID = num_samples;
+
+  cout << "Finding best path...\n";
+  std::vector<std::tuple<int, int>> best_path = fastLS(genotype);
+
+  cout << "Inserting...\n";
+  insert(genotype);
+
+  cout << "Dating segments...\n";
+  for (int i = 0; i < best_path.size(); i++) {
+    int segment_start = std::get<0>(best_path[i]);
+    int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
+    int target_ID = std::get<1>(best_path[i]);
+    double age_ML = age_segment_ML(new_sample_ID, target_ID, segment_start, segment_end);
+    double age_bayes = age_segment_bayes(new_sample_ID, target_ID, segment_start, segment_end);
+    threading_instructions.emplace_back(segment_start, target_ID, age_ML, age_bayes);
+  }
+  return threading_instructions;
+}
+
+/**
  * @brief 
  * 
  * @param id1 
@@ -534,7 +615,7 @@ bool DPBWT::genotype_interval_match(const int id1, const int id2, const int star
     return false;
   }
   for (int i = start; i < end; i++) {
-    if (panel[id1][i]->genotype != panel[id2][i]->genotype) {
+    if (panel[ID_map[id1]][i]->genotype != panel[ID_map[id2]][i]->genotype) {
       return false;
     } 
   }
