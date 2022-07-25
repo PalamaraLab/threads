@@ -14,8 +14,11 @@ namespace py = pybind11;
 PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     py::class_<Node>(m, "Node")
         .def_readonly("sample_ID", &Node::sample_ID)
-        // .def_readonly("site", &Node::site)
         .def_readonly("genotype", &Node::genotype);
+    py::class_<Demography>(m, "Demography")
+        .def_readonly("times", &Demography::times)
+        .def_readonly("sizes", &Demography::sizes)
+        .def("std_to_gen", &Demography::std_to_gen);
 
     // py::class_<TDPBWT>(m, "TDPBWT")
     //     .def(py::init<std::vector<int>, std::vector<float>, float>(), "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
@@ -29,13 +32,18 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     py::class_<DPBWT>(m, "DPBWT")
         .def(py::init<std::vector<double>, std::vector<double>, double, double>(), "Initialize",
         py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate") = 0, py::arg("Ne") = 2e4)
+           py::arg("mutation_rate"), py::arg("Ne") = 2e4)
+        .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>, std::vector<double>>(), "Initialize",
+        py::arg("physical_positions"), py::arg("genetic_positions"),
+           py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"))
         .def_readonly("num_samples", &DPBWT::num_samples)
         .def_readonly("num_sites", &DPBWT::num_sites)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
         .def_readonly("bp_sizes", &DPBWT::bp_sizes)
         .def_readonly("cm_sizes", &DPBWT::cm_sizes)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
+        .def_readonly("ID_map", &DPBWT::ID_map)
+        .def_readonly("demography", &DPBWT::demography)
         .def("mutation_penalties", &DPBWT::mutation_penalties)
         .def("recombination_penalties", &DPBWT::recombination_penalties)
         .def("insert", py::overload_cast<std::vector<bool>>(&DPBWT::insert), py::arg("genotypes"))
