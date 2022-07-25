@@ -1,10 +1,9 @@
 #include "DPBWT.hpp"
 #include <math.h>
-#include <iostream>
-#include <stdexcept>
 #include <vector>
-#include <cassert>
 #include <memory>
+#include <cassert>
+#include <iostream>
 #include <stdexcept>
 #include <algorithm>
 #include <unordered_map>
@@ -16,8 +15,8 @@ using std::endl;
 int END_ALLELE = 0;
 
 
-DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double _ne) :
-  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), ne(_ne)
+DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times) :
+  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times))
 {
   if (physical_positions.size() != genetic_positions.size()) {
     cerr << "Map lengths don't match.\n";
@@ -45,6 +44,9 @@ DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genet
     }
   }
 
+  // Demography:
+  cout << demography << endl;
+
   // Initialize both ends of the linked-list columns
   for (int i = 0; i < num_sites + 1; i++) {
     tops.emplace_back(std::make_unique<Node>(-1, 0));
@@ -56,8 +58,12 @@ DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genet
     bottom_i->above = top_i;
 
     if (i > 0) {
-      tops[i - 1]->w = {top_i, top_i};
-      bottoms[i - 1]->w = {bottom_i, bottom_i};
+      // tops[i - 1]->w[0] = {top_i, top_i};
+      tops[i - 1]->w[0] = top_i;
+      tops[i - 1]->w[1] = top_i;
+      // bottoms[i - 1]->w = {bottom_i, bottom_i};
+      bottoms[i - 1]->w[0] = bottom_i;
+      bottoms[i - 1]->w[1] = bottom_i;
     }
   }
 
@@ -119,6 +125,7 @@ void DPBWT::insert(std::vector<bool> genotype) {
  * @param genotype 
  */
 void DPBWT::insert(std::vector<bool> genotype, int ID) {
+
   if (ID_map.find(ID) != ID_map.end()) {
     cerr << "ID " << ID << " is already in the panel.\n";
     exit(1);
@@ -129,15 +136,14 @@ void DPBWT::insert(std::vector<bool> genotype, int ID) {
   }
   if ((num_samples + 1) % 100 == 0) {
     cout << "Inserting haplotype number " << num_samples + 1 << endl;
-    exit(1);
   }
   int insert_index = num_samples;
   ID_map[ID] = insert_index;
 
-  panel.emplace_back(std::vector<std::unique_ptr<Node>>());
+  panel.emplace_back(std::vector<std::unique_ptr<Node>>(num_sites + 1));
 
   Node* t0 = bottoms[0].get();
-  panel[ID_map[ID]].emplace_back(std::make_unique<Node>(ID, genotype[0]));
+  panel[ID_map[ID]][0] = std::move(std::make_unique<Node>(ID, genotype[0]));
   Node* z0 = panel[ID_map[ID]][0].get();
 
   // Inserts z0 above t0
@@ -153,8 +159,9 @@ void DPBWT::insert(std::vector<bool> genotype, int ID) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
     // Add current thingy to panel
-    panel[ID_map[ID]].emplace_back(std::make_unique<Node>(ID, next_genotype));
-    z_next = panel[ID_map[ID]].back().get();
+    // panel[ID_map[ID]].emplace_back(std::make_unique<Node>(ID, next_genotype));
+    panel[ID_map[ID]][k + 1] = std::move(std::make_unique<Node>(ID, next_genotype));
+    z_next = panel[ID_map[ID]][k + 1].get(); //.back().get();
     tmp = z_k->above;
     while (tmp->sample_ID != -1 && tmp->genotype != g_k) {
       tmp->w[g_k] = z_next;
@@ -165,13 +172,14 @@ void DPBWT::insert(std::vector<bool> genotype, int ID) {
     z_k->w[g_k] = z_next;
     t_k = z_k->below;
     z_k->w[!g_k] = t_k->w[!g_k];
-    // This is my own addition b-c else everything is stuck at the bottom :-(
+
     t_next = extend_node(t_k, g_k, k);
     z_next->sample_ID = ID;
     t_next->insert_above(z_next);
     z_k = z_next;
   }
 
+  num_samples++;
   // Compute divergence values.
   // int z_dtmp = num_sites;
   // int b_dtmp = num_sites;
@@ -197,7 +205,6 @@ void DPBWT::insert(std::vector<bool> genotype, int ID) {
   //   }
   // }
 
-  num_samples++;
 }
 
 /**
@@ -227,7 +234,7 @@ void DPBWT::delete_ID(int ID) {
     Node* tmp_below = s->below;
     tmp_above->below = tmp_below;
     tmp_below->above = tmp_above;
-    
+
     // Find next node in sequence
     s = extend_node(s, s_allele, k);
   }
@@ -319,81 +326,79 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
   traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
   std::vector<State> current_states;
   current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get());
-  // current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get(), -1);
 
   // Just like with insertion, we start at the bottom of the first column.
   // gm is the best score for the current level of the stack
   double gm = 0;
   // gm_next holds temporary values for updates of gm
   double gm_next;
+  int max_states = 0;
 
-  // double rho = recombination_penalty();
-  // Whether a sequence has been successfully extended at a given site 
-  bool extensible;
-  Node* t_next;
-  // Collect states for the next iteration
   bool allele;
   for (int i = 0; i < num_sites; i++) {
     bool allele = genotype[i];
+    int n_states = current_states.size();
+    max_states = std::max(n_states, max_states);
+    if (n_states == 0) {
+      cerr << "No states left on stack, something is messed up in the algorithm.\n";
+      exit(1);
+    }
     // cout << "\nDoing site " << i << " with genotype " << allele << " and " << current_states.size() << " states on the stack.\n";
-    gm_next = gm + mu[i] + rho_c[i];
-    // Whether a sequence can be extended
-    bool extended = false;
+
+    Node* t_recomb = extend_node(bottoms[i].get(), allele, i);
+    bool recombinable = t_recomb->above->genotype == allele && t_recomb->above->sample_ID != -1;
+
+    // We can get wonky losses on the very fist sequences. This quickly evens out.
+    double recomb_score = std::max(gm + mu_c[i] + rho[i], gm + mu_c[i] + rho_c[i]);
+    double mut_score = std::max(gm + mu[i] + rho_c[i], gm + mu_c[i] + rho_c[i]);
+    gm_next = mut_score;
+
     std::vector<State> new_states;
     for (State s : current_states) {
       // cout << s << endl;
       Node* t_i = s.below;
       double score = s.score;
+
       // If the current sequence is worse than taking the best previous sequence (with score gm)
       // and recombining, we don't bother.
-      if (score + rho_c[i] + mu_c[i] < gm + rho[i] + mu_c[i]) {
-        t_next = extend_node(t_i, allele, i);
+      if (score + rho_c[i] + mu_c[i] < recomb_score) {
+        Node* t_next = extend_node(t_i, allele, i);
         if (extensible_by(s, t_next, allele, i)) {
           new_states.emplace_back(t_next, score + rho_c[i] + mu_c[i], s.traceback);
-          // cout << "Extended to " << new_states.back() << endl;
           gm_next = std::min(gm_next, score + rho_c[i] + mu_c[i]);
-          if (score == gm) {
-            // If the *best* state was extended, no need to recombine
-            extended = true;
-          }
         }
       }
 
       // If the current sequence with mismatch is worse than taking another sequence
       // (with score gm_next) and recombining, we don't bother.
-      if (score + mu[i] + rho_c[i] < gm_next - rho_c[i] + rho[i]) {
-        t_next = extend_node(t_i, !allele, i);
+      if (!recombinable || score + mu[i] + rho_c[i] < gm_next - rho_c[i] + rho[i]) {
+        Node* t_next = extend_node(t_i, !allele, i);
         if (extensible_by(s, t_next, !allele, i)) {
           new_states.emplace_back(t_next, score + mu[i] + rho_c[i], s.traceback);
+          gm_next = std::min(gm_next, score + mu[i] + rho_c[i]);
+          // cout << "Mutated to " << new_states.back() << endl;
         }
       }
     }
 
-    // No state was extended, so we're forced to recombine. TODO: always recombine when possible
-    if (i > 0) {
-      // Short sanity check
-      if (i == 0) {
-        cerr << "The algorithm is in an illegal state because nothing was extended on the first site.\n";
-        exit(1);
-      }
-
+    // We recombine whenever we can
+    if (recombinable && i > 0) {
       // Find a best state in the previous layer to add as parent to the recombinant state.
       State best_prev = *(std::min_element(current_states.begin(), current_states.end(),
         [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
-      if (best_prev.score < gm - 0.00001 || best_prev.score > gm + 0.00001) {
+
+      if (best_prev.score < gm - 0.001 || best_prev.score > gm + 0.001) {
         cerr << "The algorithm is in an illegal state because gm != best_prev.score, found ";
         cerr << "best_prev.score=" << best_prev.score << " and gm=" << gm << endl;
         exit(1);
       }
 
       // Add the new recombinant state to the stack (we never enter this clause on the first iteration)
-      t_next = extend_node(bottoms[i].get(), allele, i);
-      // Make sure the new genotype actually exists at the next site
-      if (t_next->above->genotype == allele && t_next->above->sample_ID != -1) {
-        traceback_states.emplace_back(std::make_unique<TracebackState>(
-          i, best_prev.below->above->sample_ID, best_prev.traceback));
-        new_states.emplace_back(t_next, gm + mu_c[i] + rho[i], traceback_states.back().get());
-      }
+      traceback_states.emplace_back(std::make_unique<TracebackState>(
+        i, best_prev.below->above->sample_ID, best_prev.traceback));
+      new_states.emplace_back(t_recomb, gm + mu_c[i] + rho[i], traceback_states.back().get());
+      gm_next = std::min(gm_next, gm + mu_c[i] + rho[i]);
+      // cout << "Recombined to " << new_states.back() << endl;
     }
 
     // Need to consider how best to use this threshold, 100 might be too low
@@ -416,7 +421,11 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
   // cout << current_states.size() << " states in the end.\n";
   State min_state = *(std::min_element(current_states.begin(), current_states.end(),
         [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
-  cout << "Found best path with score " << min_state.score << " ending at " << min_state << endl;
+  
+  if ((num_samples + 1) % 100 == 0) {
+    cout << "Found best path with score " << min_state.score << " for sequence " << num_samples + 1;
+    cout << ", using a maximum of " << max_states << " states.\n";
+  }
   
   std::vector<std::tuple<int, int>> best_path;
   TracebackState* traceback = min_state.traceback;
@@ -475,9 +484,12 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties()
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
   int i = 0;
+
   // The expected branch length
-  double hap_ne = 2. * ne; //this may be wrong
-  double t = 2. * hap_ne / double(num_samples); 
+  // double hap_ne = 2. * ne; //this may be wrong
+  // double t = 2. * hap_ne / double(num_samples); 
+  double t = num_samples == 1 ? demography.std_to_gen(1. / double(num_samples)) : demography.std_to_gen(2. / double(num_samples)) ;
+
   for (int i = 0; i < num_sites; i++) {
     // l is in bp units
     double k = 2. * mutation_rate * bp_sizes[i] * t;
@@ -497,9 +509,12 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
   // chromosomal crossovers in a single generation is 0.01
   std::vector<double> rho(num_sites);
   std::vector<double> rho_c(num_sites);
+  
   // The expected branch length
-  double hap_ne = 2. * ne; //this may be wrong
-  double t = 2. * hap_ne / double(num_samples); 
+  // double hap_ne = 2. * ne; //this may be wrong
+  // double t = 2. * hap_ne / double(num_samples); 
+  double t = num_samples == 1 ? demography.std_to_gen(1. / double(num_samples)) : demography.std_to_gen(2. / double(num_samples)) ;
+
   for (int i = 0; i < num_sites; i++) {
     // l is in cM units
     double k = 2. * 0.01 * cm_sizes[i] * t;
@@ -508,6 +523,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
   }
   return std::tuple(rho, rho_c);
 }
+
 
 /**
  * @brief Date the segment based on length and n_mismatches using maximum likelihood. (No demography)
@@ -567,7 +583,8 @@ double DPBWT::age_segment_bayes(const int id1, const int id2, const int start, c
     bp_size += bp_sizes[i];
     cm_size += cm_sizes[i];
   }
-  double gamma = 1. / ne;
+  // TODO: verify this theoretically
+  double gamma = demography.std_to_gen(1.); // was: 1 / ne;
   double mu = 2. * mutation_rate * bp_size;
   double rho = 2. * 0.01 * cm_size; 
   return (m + 2) / (gamma + rho + mu); 
@@ -575,24 +592,26 @@ double DPBWT::age_segment_bayes(const int id1, const int id2, const int start, c
   // return 2. * std::pow((mu + gamma) / (mu + rho), n_mismatch + 2);
 }
 
-std::vector<std::tuple<int, int, double, double>> DPBWT::thread(std::vector<bool> genotype) {
-  std::vector<std::tuple<int, int, double, double>> threading_instructions;
+std::vector<std::tuple<int, int, double>> DPBWT::thread(std::vector<bool> genotype) {
+  std::vector<std::tuple<int, int, double>> threading_instructions;
   int new_sample_ID = num_samples;
 
-  cout << "Finding best path...\n";
+  // cout << "Finding best path...\n";
   std::vector<std::tuple<int, int>> best_path = fastLS(genotype);
 
-  cout << "Inserting...\n";
+  // It's important we insert before we date, because we need the new genotype in the panel
+  // to look for het-sites
+  // cout << "Inserting...\n";
   insert(genotype);
 
-  cout << "Dating segments...\n";
+  // cout << "Dating segments...\n";
   for (int i = 0; i < best_path.size(); i++) {
     int segment_start = std::get<0>(best_path[i]);
     int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
     int target_ID = std::get<1>(best_path[i]);
     double age_ML = age_segment_ML(new_sample_ID, target_ID, segment_start, segment_end);
-    double age_bayes = age_segment_bayes(new_sample_ID, target_ID, segment_start, segment_end);
-    threading_instructions.emplace_back(segment_start, target_ID, age_ML, age_bayes);
+    // double age_bayes = age_segment_bayes(new_sample_ID, target_ID, segment_start, segment_end);
+    threading_instructions.emplace_back(segment_start, target_ID, age_ML);
   }
   return threading_instructions;
 }

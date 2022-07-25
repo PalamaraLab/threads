@@ -9,6 +9,7 @@
 
 set(
         TDPBWT_src
+        Demography.cpp
         Node.cpp
         State.cpp
         DPBWT.cpp
@@ -16,6 +17,7 @@ set(
 
 set(
         TDPBWT_hdr
+        Demography.hpp
         Node.hpp
         State.hpp
         DPBWT.hpp
