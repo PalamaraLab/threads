@@ -67,11 +67,11 @@ DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genet
     }
   }
 
-  bp_sizes = site_sizes(physical_positions);
-  cm_sizes = site_sizes(genetic_positions);
+  std::tie(bp_boundaries, bp_sizes) = site_sizes(physical_positions);
+  std::tie(cm_boundaries, cm_sizes) = site_sizes(genetic_positions);
 }
 
-std::vector<double> DPBWT::site_sizes(std::vector<double> positions) {
+std::tuple<std::vector<double>, std::vector<double>> DPBWT::site_sizes(std::vector<double> positions) {
   // Find mid-points between sites
   std::vector<double> pos_means(num_sites - 1);
   for (int i = 0; i < num_sites - 1; i++) {
@@ -92,7 +92,13 @@ std::vector<double> DPBWT::site_sizes(std::vector<double> positions) {
       exit(1);
     }
   }
-  return site_sizes;
+  std::vector<double> boundaries(num_sites + 1);
+  boundaries[0] = positions[0];
+  boundaries[num_sites] = positions[num_sites - 1];
+  for (int i = 1; i < num_sites; i++) {
+    boundaries[i] = pos_means[i - 1];
+  }
+  return std::tuple(boundaries, site_sizes);
 }
 
 /**
@@ -117,14 +123,14 @@ Node* DPBWT::extend_node(Node* t, bool g, int i) {
 }
 
 void DPBWT::insert(std::vector<bool> genotype) {
-  insert(genotype, num_samples);
+  insert(num_samples, genotype);
 }
 /**
  * @brief Insert a new sequence into the dynamic panel
  * 
  * @param genotype 
  */
-void DPBWT::insert(std::vector<bool> genotype, int ID) {
+void DPBWT::insert(int ID, std::vector<bool> genotype) {
 
   if (ID_map.find(ID) != ID_map.end()) {
     cerr << "ID " << ID << " is already in the panel.\n";
@@ -224,7 +230,7 @@ void DPBWT::delete_ID(int ID) {
 
     // Update w-values
     Node* tmp = s->above;
-    while (tmp->genotype != s->genotype) {
+    while (tmp != nullptr && tmp->genotype != s->genotype) {
       tmp->w[s_allele] = s->below->w[s_allele];
       tmp = tmp->above;
     }
@@ -238,10 +244,15 @@ void DPBWT::delete_ID(int ID) {
     // Find next node in sequence
     s = extend_node(s, s_allele, k);
   }
+  // Unlink node
+  Node* tmp_above = s->above;
+  Node* tmp_below = s->below;
+  tmp_above->below = tmp_below;
+  tmp_below->above = tmp_above;
 
   // If needed, move last sequence to replace the one we just deleted.
   if (ID_map[ID] != num_samples - 1) {
-    for (int k = 0; k < num_sites; k++) {
+    for (int k = 0; k <= num_sites; k++) {
       // Hope this is correct
       panel[ID_map[ID]][k] = std::move(panel[num_samples - 1][k]);
     }
@@ -267,44 +278,6 @@ void DPBWT::print_sorting() {
   }
 }
 
-
-/**
- * @brief Get longest prefix matching input haplotype *without* inserting into the dynamic panel
- * 
- * @param genotype 
- * @return std::vector<int> 
- */
-std::vector<int> DPBWT::longest_prefix(std::vector<bool> genotype) {
-  cerr << "This is no longer implemented.\n";
-  exit(1);
-  // if (physical_positions.size() != genotype.size()) {
-  //   cerr << "Map lengths don't match.";
-  //   exit(1);
-  // }
-  std::vector<int> prefix;
-  // int k = 0;
-  // Node* t = (genotype[0]) ? bottoms[1].get() : tops[0]->below->w[1];
-  // while (k < num_sites && t->above->sample_ID != -1 && t->above->divergence == 0) {
-  //   k++;
-  //   t = extend_node(t, genotype[k], k);
-  // }
-  // // We only need to consider the longest set of sequences with div=0,
-  // // or the single first above-sequence after we first find div>0.
-  // int last_match = t->above->sample_ID;
-  // // todo: better name than k2
-  // int k2 = 0;
-  // while (panel[last_match][k2]->genotype == genotype[k2]) {
-  //   k2++;
-  // }
-
-  // k = std::max(k, k2);
-
-  // for (int i = 0; i < k; i++) {
-  //   prefix.push_back(genotype[i]);
-  // }
-  return prefix;
-}
-
 /**
  * @brief Run Li-Stephens on input haplotype *without* inserting into the dynamic panel.
  *        See also Algorithm 4 of Lunter (2018), Bioinformatics.
@@ -320,7 +293,6 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
   std::vector<double> rho;
   std::vector<double> rho_c; 
   std::tie(rho, rho_c) = recombination_penalties();
-
 
   std::vector<std::unique_ptr<TracebackState>> traceback_states;
   traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
@@ -343,10 +315,13 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
       cerr << "No states left on stack, something is messed up in the algorithm.\n";
       exit(1);
     }
-    // cout << "\nDoing site " << i << " with genotype " << allele << " and " << current_states.size() << " states on the stack.\n";
-
+    
     Node* t_recomb = extend_node(bottoms[i].get(), allele, i);
-    bool recombinable = t_recomb->above->genotype == allele && t_recomb->above->sample_ID != -1;
+    int rec_ID = t_recomb->above->sample_ID;
+    bool recombinable = rec_ID != -1 && panel[ID_map[rec_ID]][i]->genotype == allele;
+
+    // cout << "\nDoing site " << i << " with genotype " << allele << " and " << current_states.size() << " states on the stack. ";
+    // cout << "Recombinable: " << recombinable << endl;
 
     // We can get wonky losses on the very fist sequences. This quickly evens out.
     double recomb_score = std::max(gm + mu_c[i] + rho[i], gm + mu_c[i] + rho_c[i]);
@@ -382,7 +357,8 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
     }
 
     // We recombine whenever we can
-    if (recombinable && i > 0) {
+    // if (recombinable && i > 0) {
+    if (recombinable) {
       // Find a best state in the previous layer to add as parent to the recombinant state.
       State best_prev = *(std::min_element(current_states.begin(), current_states.end(),
         [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
@@ -592,28 +568,37 @@ double DPBWT::age_segment_bayes(const int id1, const int id2, const int start, c
   // return 2. * std::pow((mu + gamma) / (mu + rho), n_mismatch + 2);
 }
 
-std::vector<std::tuple<int, int, double>> DPBWT::thread(std::vector<bool> genotype) {
-  std::vector<std::tuple<int, int, double>> threading_instructions;
-  int new_sample_ID = num_samples;
+std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::thread(std::vector<bool> genotype) {
+  return thread(num_samples, genotype);
+}
+
+std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::thread(int new_sample_ID, std::vector<bool> genotype) {
+  // std::vector<std::tuple<double, int, double>> threading_instructions;
+  // int new_sample_ID = num_samples;
 
   // cout << "Finding best path...\n";
   std::vector<std::tuple<int, int>> best_path = fastLS(genotype);
-
   // It's important we insert before we date, because we need the new genotype in the panel
   // to look for het-sites
   // cout << "Inserting...\n";
-  insert(genotype);
+  insert(new_sample_ID, genotype);
+
+  std::vector<double> bp_starts;
+  std::vector<int> target_IDs;
+  std::vector<double> segment_ages;
 
   // cout << "Dating segments...\n";
   for (int i = 0; i < best_path.size(); i++) {
     int segment_start = std::get<0>(best_path[i]);
     int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
+    bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
     int target_ID = std::get<1>(best_path[i]);
-    double age_ML = age_segment_ML(new_sample_ID, target_ID, segment_start, segment_end);
+    target_IDs.push_back(target_ID);
+    segment_ages.push_back(age_segment_ML(new_sample_ID, target_ID, segment_start, segment_end));
     // double age_bayes = age_segment_bayes(new_sample_ID, target_ID, segment_start, segment_end);
-    threading_instructions.emplace_back(segment_start, target_ID, age_ML);
+    // threading_instructions.emplace_back(bp_start, target_ID, age_ML);
   }
-  return threading_instructions;
+  return std::tuple(bp_starts, target_IDs, segment_ages);
 }
 
 /**

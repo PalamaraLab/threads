@@ -32,7 +32,6 @@ G = mts.genotype_matrix().transpose()
 pos = np.array([s.position for s in mts.sites()])
 assert len(pos) == G.shape[1]
 cm = RHO * 100 * pos
-
 bwt = DPBWT(pos, cm, MU, list(df.NE), list(df.GEN))
 coal_distr = [] 
 coal_x = np.arange(0.05, 2.51, 0.01)

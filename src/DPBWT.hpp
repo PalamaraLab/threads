@@ -28,6 +28,8 @@ public:
   std::vector<double> genetic_positions;
   std::vector<double> bp_sizes;
   std::vector<double> cm_sizes;
+  std::vector<double> bp_boundaries;
+  std::vector<double> cm_boundaries;
   Demography demography;
 
   // The dynamic reference panel
@@ -37,16 +39,16 @@ public:
   DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double ne) :
     DPBWT(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne}, std::vector<double>{0.0}) {};
   DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times);
-  std::vector<double> site_sizes(std::vector<double> positions);
+  std::tuple<std::vector<double>, std::vector<double>> site_sizes(std::vector<double> positions);
 
   // Insertion/deletion
   void insert(std::vector<bool> genotype);
-  void insert(std::vector<bool> genotype, int ID);
+  void insert(int ID, std::vector<bool> genotype);
   void delete_ID(int ID);
 
   // Algorithms
-  std::vector<std::tuple<int, int, double>> thread(std::vector<bool> genotype);
-  std::vector<int> longest_prefix(std::vector<bool> genotype);
+  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(std::vector<bool> genotype);
+  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(int new_sample_ID, std::vector<bool> genotype);
   std::vector<std::tuple<int, int>> fastLS(std::vector<bool> genotype);
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();

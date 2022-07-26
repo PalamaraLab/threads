@@ -20,8 +20,7 @@ print(bw1)
 assert bw1 == [(0, 2)]
 
 print(bwt.thread([1, 1, 1, 0, 0, 1, 0, 0, 1]))
-import sys
-sys.exit(0)
+
 
 # Test 2
 print("TEST 2")
@@ -52,4 +51,3 @@ bwt.insert([1, 1, 1, 1, 0, 0, 0, 0])
 bw3a = bwt.fastLS([1, 1, 1, 1, 1, 0, 0, 0])
 assert bw3a == [(0, 3)]#[3, 3, 3, 3, 3, 3, 3, 3]
 print(bw3a)
-
