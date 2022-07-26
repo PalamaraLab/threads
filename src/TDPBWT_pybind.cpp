@@ -47,10 +47,10 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def("mutation_penalties", &DPBWT::mutation_penalties)
         .def("recombination_penalties", &DPBWT::recombination_penalties)
         .def("insert", py::overload_cast<std::vector<bool>>(&DPBWT::insert), py::arg("genotypes"))
-        .def("insert", py::overload_cast<std::vector<bool>, int>(&DPBWT::insert), py::arg("genotypes"), py::arg("ID"))
+        .def("insert", py::overload_cast<int, std::vector<bool>>(&DPBWT::insert), py::arg("ID"), py::arg("genotypes"))
         .def("delete_ID", &DPBWT::delete_ID, py::arg("ID"))
         .def("print_sorting", &DPBWT::print_sorting)
-        .def("longest_prefix", &DPBWT::longest_prefix)
-        .def("thread", &DPBWT::thread)
+        .def("thread", py::overload_cast<std::vector<bool>>(&DPBWT::thread), py::arg("genotypes"))
+        .def("thread", py::overload_cast<int, std::vector<bool>>(&DPBWT::thread), py::arg("new_sample_ID"), py::arg("genotypes"))
         .def("fastLS", &DPBWT::fastLS);
 }
