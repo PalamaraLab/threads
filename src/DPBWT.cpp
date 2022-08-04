@@ -290,6 +290,7 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
   std::vector<double> mu;
   std::vector<double> mu_c; 
   std::tie(mu, mu_c) = mutation_penalties();
+  // NB these still rely on padding around sites (like mutations), rather than distance between sites
   std::vector<double> rho;
   std::vector<double> rho_c; 
   std::tie(rho, rho_c) = recombination_penalties();
@@ -315,67 +316,62 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
       cerr << "No states left on stack, something is messed up in the algorithm.\n";
       exit(1);
     }
-    
-    Node* t_recomb = extend_node(bottoms[i].get(), allele, i);
-    int rec_ID = t_recomb->above->sample_ID;
-    bool recombinable = rec_ID != -1 && panel[ID_map[rec_ID]][i]->genotype == allele;
 
     // cout << "\nDoing site " << i << " with genotype " << allele << " and " << current_states.size() << " states on the stack. ";
-    // cout << "Recombinable: " << recombinable << endl;
 
     // We can get wonky losses on the very fist sequences. This quickly evens out.
     double recomb_score = std::max(gm + mu_c[i] + rho[i], gm + mu_c[i] + rho_c[i]);
     double mut_score = std::max(gm + mu[i] + rho_c[i], gm + mu_c[i] + rho_c[i]);
+    double rho_delta = std::abs(rho[i] - rho_c[i]);
     gm_next = mut_score;
 
     std::vector<State> new_states;
     for (State s : current_states) {
       // cout << s << endl;
-      Node* t_i = s.below;
-      double score = s.score;
 
       // If the current sequence is worse than taking the best previous sequence (with score gm)
       // and recombining, we don't bother.
-      if (score + rho_c[i] + mu_c[i] < recomb_score) {
-        Node* t_next = extend_node(t_i, allele, i);
+      if (s.score + rho_c[i] + mu_c[i] < gm_next + rho_delta) {
+        Node* t_next = extend_node(s.below, allele, i);
         if (extensible_by(s, t_next, allele, i)) {
-          new_states.emplace_back(t_next, score + rho_c[i] + mu_c[i], s.traceback);
-          gm_next = std::min(gm_next, score + rho_c[i] + mu_c[i]);
+          new_states.emplace_back(t_next, s.score + rho_c[i] + mu_c[i], s.traceback);
+          gm_next = std::min(gm_next, s.score + rho_c[i] + mu_c[i]);
         }
       }
 
       // If the current sequence with mismatch is worse than taking another sequence
       // (with score gm_next) and recombining, we don't bother.
-      if (!recombinable || score + mu[i] + rho_c[i] < gm_next - rho_c[i] + rho[i]) {
-        Node* t_next = extend_node(t_i, !allele, i);
+      if (s.score + rho_c[i] + mu[i] < gm_next + rho_delta) {
+        Node* t_next = extend_node(s.below, !allele, i);
         if (extensible_by(s, t_next, !allele, i)) {
-          new_states.emplace_back(t_next, score + mu[i] + rho_c[i], s.traceback);
-          gm_next = std::min(gm_next, score + mu[i] + rho_c[i]);
+          new_states.emplace_back(t_next, s.score + mu[i] + rho_c[i], s.traceback);
+          gm_next = std::min(gm_next, s.score + mu[i] + rho_c[i]);
           // cout << "Mutated to " << new_states.back() << endl;
         }
       }
     }
 
-    // We recombine whenever we can
-    // if (recombinable && i > 0) {
-    if (recombinable) {
-      // Find a best state in the previous layer to add as parent to the recombinant state.
-      State best_prev = *(std::min_element(current_states.begin(), current_states.end(),
-        [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
-
-      if (best_prev.score < gm - 0.001 || best_prev.score > gm + 0.001) {
-        cerr << "The algorithm is in an illegal state because gm != best_prev.score, found ";
-        cerr << "best_prev.score=" << best_prev.score << " and gm=" << gm << endl;
-        exit(1);
-      }
-
-      // Add the new recombinant state to the stack (we never enter this clause on the first iteration)
-      traceback_states.emplace_back(std::make_unique<TracebackState>(
-        i, best_prev.below->above->sample_ID, best_prev.traceback));
-      new_states.emplace_back(t_recomb, gm + mu_c[i] + rho[i], traceback_states.back().get());
-      gm_next = std::min(gm_next, gm + mu_c[i] + rho[i]);
-      // cout << "Recombined to " << new_states.back() << endl;
+    if (new_states.size() == 0) {
+      cerr << "The algorithm is in an illegal state because no new_states were created.";
+      exit(1);
     }
+
+    // Find a best state in the current layer and recombine.
+    State best_extension = *(std::min_element(new_states.begin(), new_states.end(),
+      [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
+
+    if (best_extension.score < gm_next - 0.001 || best_extension.score > gm_next + 0.001) {
+      cerr << "The algorithm is in an illegal state because gm != best_extension.score, found ";
+      cerr << "best_extension.score=" << best_extension.score << " and gm=" << gm << endl;
+      exit(1);
+    }
+
+    // Add the new recombinant state to the stack (we never enter this clause on the first iteration)
+    traceback_states.emplace_back(std::make_unique<TracebackState>(
+      i + 1, best_extension.below->above->sample_ID, best_extension.traceback));
+    new_states.emplace_back(bottoms[i + 1].get(), gm_next - rho_c[i] + rho[i], traceback_states.back().get());
+    gm_next = std::min(gm_next, gm + mu_c[i] + rho[i]);
+
 
     // Need to consider how best to use this threshold, 100 might be too low
     // if (new_states.size() > 100) {
