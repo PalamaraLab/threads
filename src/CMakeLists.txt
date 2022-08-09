@@ -1,11 +1,8 @@
-# This file is part of https://github.com/PalamaraLab/arg_needle_lib which is released under the GPL-3.0 license.
+# This file is part of https://github.com/PalamaraLab/TDPBWT which is released under the GPL-3.0 license.
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
-# find_package(Boost COMPONENTS iostreams REQUIRED)
-# Node.cpp
-# TDPBWT.cpp
-# Node.hpp
-# TDPBWT.hpp
+# Find boost
+find_package(Boost) # COMPONENTS iostreams REQUIRED)
 
 set(
         TDPBWT_src

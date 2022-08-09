@@ -13,16 +13,19 @@ private:
   std::vector<std::unique_ptr<Node>> tops;
   std::vector<std::unique_ptr<Node>> bottoms;
 
-
   Node* extend_node(Node* node, bool genotype, const int i);
   bool extensible_by(State& s, const Node* t_next, const bool g, const int i);
   bool genotype_interval_match(const int id1, const int id2, const int start, const int end);
+
+  std::vector<std::string> dating_methods = {"Bayes", "Demography", "Erlang", "FastSMC", "ML"};
 
 public:
 
   int num_sites;
   int num_samples;
   double mutation_rate;
+  // This determines the dating algorithm
+  std::string mode;
   std::unordered_map<int, int> ID_map;
   std::vector<double> physical_positions;
   std::vector<double> genetic_positions;
@@ -36,9 +39,9 @@ public:
   std::vector<std::vector<std::unique_ptr<Node>>> panel;
 
   // Constructors and utils
-  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double ne) :
-    DPBWT(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne}, std::vector<double>{0.0}) {};
-  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times);
+  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double ne, std::string _mode) :
+    DPBWT(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne}, std::vector<double>{0.0}, _mode) {};
+  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times, std::string _mode);
   std::tuple<std::vector<double>, std::vector<double>> site_sizes(std::vector<double> positions);
 
   // Insertion/deletion
@@ -54,9 +57,12 @@ public:
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
 
   // Aging
-  double age_segment_ML(const int id1, const int id2, const int start, const int end);
+  // double date_segment_ML(const int id1, const int id2, const int start, const int end);
+  double date_segment(const int id1, const int id2, const int start, const int end);
   // (need to fix this)
-  double age_segment_bayes(const int id1, const int id2, const int start, const int end);
+  // double date_segment_bayes(const int id1, const int id2, const int start, const int end);
+  // // using big maths
+  // double date_segment_demography(const int id1, const int id2, const int start, const int end);
 
   // Debugging
   void print_sorting();

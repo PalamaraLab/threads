@@ -3,14 +3,15 @@
 using std::ostream;
 
 class Demography {
-private:
-  std::vector<double> std_times;
-
 public:
   // These are in generations
   std::vector<double> times;
   // These are *haploid*
   std::vector<double> sizes;
+  // Normalised coalescence times
+  std::vector<double> std_times;
+  // Expected pairwise coalescent time
+  double expected_time;
 
   Demography(std::vector<double> _times, std::vector<double> _sizes);
 

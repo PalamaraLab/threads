@@ -1,4 +1,5 @@
 #include "Demography.hpp"
+#include <math.h>
 #include <vector>
 #include <iostream>
 #include <algorithm> // for std::sort
@@ -15,13 +16,15 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times) :
     cerr << "Need times and sizes of equal length in demography\n";
     exit(1);
   }
+  std::vector<double> deltas;
   for (int i = 0; i < times.size(); i++) {
     if (times[i] < 0 || sizes.size() <= 0) {
       cerr << "Need non-negative times and strictly positive sizes.\n";
       exit(1);
     }
     if (i > 0 && times[i] <= times[i - 1]) {
-      cerr << "Times must be strictly increasing.\n";
+      cerr << "Demography times must be strictly increasing, found ";
+      cerr << times[i] << " after " << times[i - 1] << endl;
       exit(1);
     }
   }
@@ -31,10 +34,25 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times) :
     exit(1);
   }
 
+  // Compute times in standard coalescent space
+  int K = times.size();
   std_times.push_back(0.0);
-  for (int i = 1; i < times.size(); i++) {
+  for (int i = 1; i < K; i++) {
     double d = (times[i] - times[i - 1]) / sizes[i - 1];
     std_times.push_back(std_times[i - 1] + d);
+  }
+
+  // Compute the expected pairwise coalescent time
+  expected_time = 0;
+  for (int i = 0; i < K; i++) {
+    double T1 = static_cast<double>(times[i]);
+    double gamma_k = 1. / sizes[i];
+    if (i < K - 1) {
+      double T2 = static_cast<double>(times[i + 1]);
+      expected_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) * std::exp(-gamma_k * T2)) / gamma_k;
+    } else {
+      expected_time += (gamma_k * T1 + 1) * std::exp(-gamma_k * T1) / gamma_k;
+    }
   }
 }
 
