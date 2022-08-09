@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <unordered_map>
+#include <boost/math/special_functions/gamma.hpp>
 
 using std::cout;
 using std::cerr;
@@ -15,11 +16,14 @@ using std::endl;
 int END_ALLELE = 0;
 
 
-DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times) :
+DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times, std::string _mode) :
   physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times))
 {
   if (physical_positions.size() != genetic_positions.size()) {
     cerr << "Map lengths don't match.\n";
+    exit(1);
+  } else if (physical_positions.size() <= 2) {
+    cerr << "Need at least 3 sites, found " << physical_positions.size() << endl;
     exit(1);
   } else {
     cout << "Found " << physical_positions.size() << " sites.\n";
@@ -43,6 +47,12 @@ DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genet
       exit(1);
     }
   }
+
+  if (std::find(dating_methods.begin(), dating_methods.end(), _mode) == dating_methods.end()) {
+    cerr << "Unrecognised mode " << _mode << endl;
+    exit(1);
+  }
+  mode = _mode;
 
   // Demography:
   cout << demography << endl;
@@ -483,8 +493,6 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
   std::vector<double> rho_c(num_sites);
   
   // The expected branch length
-  // double hap_ne = 2. * ne; //this may be wrong
-  // double t = 2. * hap_ne / double(num_samples); 
   double t = num_samples == 1 ? demography.std_to_gen(1. / double(num_samples)) : demography.std_to_gen(2. / double(num_samples)) ;
 
   for (int i = 0; i < num_sites; i++) {
@@ -506,7 +514,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
  * @param end exclusive
  * @return double 
  */
-double DPBWT::age_segment_ML(const int id1, const int id2, const int start, const int end) {
+double DPBWT::date_segment(const int id1, const int id2, const int start, const int end) {
   if (start > end) {
     cerr << "Can't date a segment with length <= 0\n";
     exit(1);
@@ -522,46 +530,48 @@ double DPBWT::age_segment_ML(const int id1, const int id2, const int start, cons
     cm_size += cm_sizes[i];
   }
   double mu = 2. * mutation_rate * bp_size;
-  double rho = 2. * 0.01 * cm_size; 
-  // The local max of p(l, m | t) w.r.t. t
-  return (m + 1) / (mu + rho);
-  // double gamma = 1 / Ne;
-  // double mu = mutation_rate;
+  double rho = 2. * 0.01 * cm_size;
+  if (mode == "FastSMC") {
+    return 1 / rho;
+  } else if (mode == "ML") {
+    // The local max of p(l, m | t) w.r.t. t
+    return (m + 1) / (mu + rho);
+  } else if (mode == "Bayes") {
+    // We add a const. demographic prior
+    double gamma = 1. / demography.expected_time;
+    return (m + 2) / (gamma + rho + mu);
+  } else if (mode == "Erlang") {
+    // Because segments can be longer than what we observe
+    double gamma = 1. / demography.expected_time;
+    return (m + 2) / (gamma + 2 * rho + mu);
+  } else if (mode == "Demography") {
+    // This is the same as "Erlang" but with piecewise-constant demography
+    double numerator = 0;
+    double denominator = 0;
+    int K = demography.times.size();
+    for (int k = 0; k < K; k++) {
+      double T1 = demography.times[k];
+      double gamma_k = 1. / demography.sizes[k];
+      double lambda_k = gamma_k + 2 * rho + mu;
+      double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
+      double data_fac = std::pow(mu / lambda_k, m);
 
-  // return 0.5 * (gamma + cm_size)^2 * (gamma + mu * bp_size)^(n_mismatch+1) / (gamma + mu * bp_size + cm_size) ^(m+3);
-}
-
-/**
- * @brief Date the segment based on length and n_mismatches using a demography prior and Bayes
- * 
- * @param id1 
- * @param id2 
- * @param start 
- * @param end 
- * @return double 
- */
-double DPBWT::age_segment_bayes(const int id1, const int id2, const int start, const int end) {
-  if (start > end) {
-    cerr << "Can't date a segment with length <= 0\n";
+      if (k < K - 1) {
+        double T2 = demography.times[k + 1];
+        numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) 
+          * (boost::math::gamma_q(m + 3, lambda_k * T1) - boost::math::gamma_q(m + 3, lambda_k * T2));
+        denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) 
+          * (boost::math::gamma_q(m + 2, lambda_k * T1) - boost::math::gamma_q(m + 2, lambda_k * T2));
+      } else {
+        numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) * boost::math::gamma_q(m + 3, lambda_k * T1);
+        denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) * boost::math::gamma_q(m + 2, lambda_k * T1);
+      }
+    }
+    return numerator / denominator;
+  } else {
+    cerr << "Mode " << mode << " not supported.\n";
     exit(1);
   }
-  double m = 0;
-  double bp_size = 0;
-  double cm_size = 0;
-  for (int i = start; i < end; i++) {
-    if (panel[ID_map[id1]][i]->genotype != panel[ID_map[id2]][i]->genotype) {
-      m++;
-    }
-    bp_size += bp_sizes[i];
-    cm_size += cm_sizes[i];
-  }
-  // TODO: verify this theoretically
-  double gamma = demography.std_to_gen(1.); // was: 1 / ne;
-  double mu = 2. * mutation_rate * bp_size;
-  double rho = 2. * 0.01 * cm_size; 
-  return (m + 2) / (gamma + rho + mu); 
-  // return (m + 2) * (m + 1) * std::pow(gamma + mu, m + 1) * std::pow(gamma + rho, 2) / (gamma * std::pow(gamma + rho + mu, m + 3));
-  // return 2. * std::pow((mu + gamma) / (mu + rho), n_mismatch + 2);
 }
 
 std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::thread(std::vector<bool> genotype) {
@@ -569,29 +579,26 @@ std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::th
 }
 
 std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::thread(int new_sample_ID, std::vector<bool> genotype) {
-  // std::vector<std::tuple<double, int, double>> threading_instructions;
-  // int new_sample_ID = num_samples;
-
-  // cout << "Finding best path...\n";
+  // Compute LS path
   std::vector<std::tuple<int, int>> best_path = fastLS(genotype);
-  // It's important we insert before we date, because we need the new genotype in the panel
-  // to look for het-sites
-  // cout << "Inserting...\n";
+
+  // Insert new genotype. NB, it's important we insert before we date, 
+  // because we need the new genotype in the panel to look for het-sites
   insert(new_sample_ID, genotype);
 
   std::vector<double> bp_starts;
   std::vector<int> target_IDs;
   std::vector<double> segment_ages;
 
-  // cout << "Dating segments...\n";
+  // Date segments
   for (int i = 0; i < best_path.size(); i++) {
     int segment_start = std::get<0>(best_path[i]);
     int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
     bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
     int target_ID = std::get<1>(best_path[i]);
     target_IDs.push_back(target_ID);
-    segment_ages.push_back(age_segment_ML(new_sample_ID, target_ID, segment_start, segment_end));
-    // double age_bayes = age_segment_bayes(new_sample_ID, target_ID, segment_start, segment_end);
+    segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
+    // double age_bayes = date_segment_bayes(new_sample_ID, target_ID, segment_start, segment_end);
     // threading_instructions.emplace_back(bp_start, target_ID, age_ML);
   }
   return std::tuple(bp_starts, target_IDs, segment_ages);
