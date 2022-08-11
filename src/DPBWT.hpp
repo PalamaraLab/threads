@@ -17,15 +17,13 @@ private:
   bool extensible_by(State& s, const Node* t_next, const bool g, const int i);
   bool genotype_interval_match(const int id1, const int id2, const int start, const int end);
 
-  std::vector<std::string> dating_methods = {"Bayes", "Demography", "Erlang", "FastSMC", "ML"};
-
 public:
 
   int num_sites;
   int num_samples;
   double mutation_rate;
-  // This determines the dating algorithm
-  std::string mode;
+  // This determines the segment dating formula
+  bool sparse_sites;
   std::unordered_map<int, int> ID_map;
   std::vector<double> physical_positions;
   std::vector<double> genetic_positions;
@@ -39,9 +37,9 @@ public:
   std::vector<std::vector<std::unique_ptr<Node>>> panel;
 
   // Constructors and utils
-  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double ne, std::string _mode) :
-    DPBWT(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne}, std::vector<double>{0.0}, _mode) {};
-  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times, std::string _mode);
+  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double ne, bool _sparse_sites) :
+    DPBWT(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne}, std::vector<double>{0.0}, _sparse_sites) {};
+  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times, bool _sparse_sites);
   std::tuple<std::vector<double>, std::vector<double>> site_sizes(std::vector<double> positions);
 
   // Insertion/deletion

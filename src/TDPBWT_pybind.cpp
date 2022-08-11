@@ -30,12 +30,12 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     //     .def("longest_suffix", &TDPBWT::longest_suffix)
 
     py::class_<DPBWT>(m, "DPBWT")
-        .def(py::init<std::vector<double>, std::vector<double>, double, double, std::string>(), "Initialize",
+        .def(py::init<std::vector<double>, std::vector<double>, double, double, bool>(), "Initialize",
         py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate"), py::arg("Ne") = 2e4, py::arg("mode")="ML")
-        .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>, std::vector<double>, std::string>(), "Initialize",
+           py::arg("mutation_rate"), py::arg("Ne") = 2e4, py::arg("sparse_sites")=false)
+        .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>, std::vector<double>, bool>(), "Initialize",
         py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"), py::arg("mode")="ML")
+           py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"), py::arg("sparse_sites")=false)
         .def_readonly("num_samples", &DPBWT::num_samples)
         .def_readonly("num_sites", &DPBWT::num_sites)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)

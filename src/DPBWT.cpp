@@ -16,8 +16,13 @@ using std::endl;
 int END_ALLELE = 0;
 
 
-DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times, std::string _mode) :
-  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times))
+DPBWT::DPBWT(std::vector<double> _physical_positions, 
+             std::vector<double> _genetic_positions, 
+             double _mutation_rate, 
+             std::vector<double> ne, 
+             std::vector<double> ne_times, 
+             bool _sparse_sites) :
+  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times)), sparse_sites(_sparse_sites)
 {
   if (physical_positions.size() != genetic_positions.size()) {
     cerr << "Map lengths don't match.\n";
@@ -47,12 +52,6 @@ DPBWT::DPBWT(std::vector<double> _physical_positions, std::vector<double> _genet
       exit(1);
     }
   }
-
-  if (std::find(dating_methods.begin(), dating_methods.end(), _mode) == dating_methods.end()) {
-    cerr << "Unrecognised mode " << _mode << endl;
-    exit(1);
-  }
-  mode = _mode;
 
   // Demography:
   cout << demography << endl;
@@ -531,34 +530,52 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
   }
   double mu = 2. * mutation_rate * bp_size;
   double rho = 2. * 0.01 * cm_size;
-  if (mode == "FastSMC") {
-    return 1 / rho;
-  } else if (mode == "ML") {
-    // The local max of p(l, m | t) w.r.t. t
-    return (m + 1) / (mu + rho);
-  } else if (mode == "Bayes") {
-    // We add a const. demographic prior
-    double gamma = 1. / demography.expected_time;
-    return (m + 2) / (gamma + rho + mu);
-  } else if (mode == "Erlang") {
-    // Because segments can be longer than what we observe
-    double gamma = 1. / demography.expected_time;
-    return (m + 2) / (gamma + 2 * rho + mu);
-  } else if (mode == "Demography") {
-    // This is the same as "Erlang" but with piecewise-constant demography
+  if (sparse_sites) {
+    if (m > 15) {
+      cout << "Warning: very many heterozygous sites, defaulting to const-demography method./\n";
+      double gamma = 1. / demography.expected_time;
+      return 2. / (gamma + rho);
+    }
     double numerator = 0;
     double denominator = 0;
     int K = demography.times.size();
     for (int k = 0; k < K; k++) {
       double T1 = demography.times[k];
       double gamma_k = 1. / demography.sizes[k];
-      double lambda_k = gamma_k + 2 * rho + mu;
+      double lambda_k = gamma_k + rho;
+      double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
+
+      if (k < K - 1) {
+        double T2 = demography.times[k + 1];
+        numerator += coal_fac * (2. / std::pow(lambda_k, 3))
+          * (boost::math::gamma_q(3, lambda_k * T1) - boost::math::gamma_q(3, lambda_k * T2));
+        denominator += coal_fac * (1. / std::pow(lambda_k, 2)) 
+          * (boost::math::gamma_q(2, lambda_k * T1) - boost::math::gamma_q(2, lambda_k * T2));
+      } else {
+        numerator += coal_fac * (2. / std::pow(lambda_k, 3)) * boost::math::gamma_q(3, lambda_k * T1);
+        denominator += coal_fac * (1. / std::pow(lambda_k, 2)) * boost::math::gamma_q(2, lambda_k * T1);
+      }
+    }
+    return numerator / denominator;
+  } else {
+    if (m > 15) {
+      cout << "Warning: very many heterozygous sites, defaulting to const-demography method./\n";
+      double gamma = 1. / demography.expected_time;
+      return (m + 2) / (gamma + rho + mu);
+    }
+    double numerator = 0;
+    double denominator = 0;
+    int K = demography.times.size();
+    for (int k = 0; k < K; k++) {
+      double T1 = demography.times[k];
+      double gamma_k = 1. / demography.sizes[k];
+      double lambda_k = gamma_k + rho + mu;
       double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
       double data_fac = std::pow(mu / lambda_k, m);
 
       if (k < K - 1) {
         double T2 = demography.times[k + 1];
-        numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) 
+        numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3))
           * (boost::math::gamma_q(m + 3, lambda_k * T1) - boost::math::gamma_q(m + 3, lambda_k * T2));
         denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) 
           * (boost::math::gamma_q(m + 2, lambda_k * T1) - boost::math::gamma_q(m + 2, lambda_k * T2));
@@ -568,9 +585,6 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
       }
     }
     return numerator / denominator;
-  } else {
-    cerr << "Mode " << mode << " not supported.\n";
-    exit(1);
   }
 }
 
