@@ -16,7 +16,9 @@ public:
   Demography(std::vector<double> _times, std::vector<double> _sizes);
 
   // Map a time in the standard coalescent to generations under this demography
-  double std_to_gen(double t);
+  double std_to_gen(const double t);
+  // The expected branch length of a new branch in a tree with N leaves
+  double expected_branch_length(const int N);
   
   // Output
   friend ostream& operator<<(ostream& os, const Demography& demography);

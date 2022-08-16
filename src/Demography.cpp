@@ -56,7 +56,7 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times) :
   }
 }
 
-double Demography::std_to_gen(double t) 
+double Demography::std_to_gen(const double t) 
 {
   if (t < 0) {
     cerr << "Can only convert non-negative times to std.\n";
@@ -65,6 +65,34 @@ double Demography::std_to_gen(double t)
   // Find the highest i s.t. std_times[i] <= t.
   int i = std::distance(std_times.begin(), std::upper_bound(std_times.begin(), std_times.end(), t)) - 1;
   return times[i] + (t - std_times[i]) * sizes[i];
+}
+
+/**
+ * @brief Expected length of branch number N
+ * 
+ * @param N 
+ * @return double 
+ */
+double Demography::expected_branch_length(const int N)
+{
+  if (N <= 2) {
+    return expected_time;
+  }
+  int K = times.size();
+  double binom_factor = N * (N - 1) / 2;
+  // Compute the expected pairwise coalescent time
+  double e_time = 0.;
+  for (int i = 0; i < K; i++) {
+    double T1 = static_cast<double>(times[i]);
+    double gamma_k = binom_factor / sizes[i];
+    if (i < K - 1) {
+      double T2 = static_cast<double>(times[i + 1]);
+      e_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) * std::exp(-gamma_k * T2)) / gamma_k;
+    } else {
+      e_time += (gamma_k * T1 + 1) * std::exp(-gamma_k * T1) / gamma_k;
+    }
+  }
+  return N * e_time;
 }
 
 ostream& operator<<(ostream& os, const Demography& d) {

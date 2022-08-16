@@ -40,7 +40,7 @@ public:
 
 class StateTree {
 public:
-  std::unordered_map<int, StateBranch> trees;
+  std::unordered_map<int, StateBranch> branches;
 
   StateTree(std::vector<State>& states);
   void prune();

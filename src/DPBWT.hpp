@@ -19,6 +19,7 @@ private:
 
 public:
 
+  int n_prune;
   int num_sites;
   int num_samples;
   double mutation_rate;
@@ -37,9 +38,9 @@ public:
   std::vector<std::vector<std::unique_ptr<Node>>> panel;
 
   // Constructors and utils
-  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double ne, bool _sparse_sites) :
-    DPBWT(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne}, std::vector<double>{0.0}, _sparse_sites) {};
-  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times, bool _sparse_sites);
+  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, double ne, bool _sparse_sites, int _n_prune) :
+    DPBWT(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne}, std::vector<double>{0.0}, _sparse_sites, _n_prune) {};
+  DPBWT(std::vector<double> _physical_positions, std::vector<double> _genetic_positions, double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times, bool _sparse_sites, int _n_prune);
   std::tuple<std::vector<double>, std::vector<double>> site_sizes(std::vector<double> positions);
 
   // Insertion/deletion
@@ -50,9 +51,12 @@ public:
   // Algorithms
   std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(std::vector<bool> genotype);
   std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(int new_sample_ID, std::vector<bool> genotype);
+  std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
   std::vector<std::tuple<int, int>> fastLS(std::vector<bool> genotype);
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
+  std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_correct();
+  std::tuple<std::vector<double>, std::vector<double>> recombination_penalties_correct();
 
   // Aging
   // double date_segment_ML(const int id1, const int id2, const int start, const int end);

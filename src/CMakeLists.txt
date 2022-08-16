@@ -2,7 +2,7 @@
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
 # Find boost
-find_package(Boost) # COMPONENTS iostreams REQUIRED)
+find_package(Boost COMPONENTS iostreams REQUIRED)
 
 set(
         TDPBWT_src
@@ -30,7 +30,7 @@ target_include_directories(
 
 set_target_properties(TDPBWT PROPERTIES PUBLIC_HEADER "${TDPBWT_hdr}")
 
-# target_link_libraries(TDPBWT PRIVATE Boost::headers Boost::iostreams)
+target_link_libraries(TDPBWT PRIVATE Boost::headers Boost::iostreams)
 target_link_libraries(TDPBWT PRIVATE project_warnings)
 
 # target_include_directories(TDPBWT PUBLIC ${Boost_INCLUDE_DIRS})
