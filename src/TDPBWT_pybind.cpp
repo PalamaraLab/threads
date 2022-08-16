@@ -30,18 +30,20 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     //     .def("longest_suffix", &TDPBWT::longest_suffix)
 
     py::class_<DPBWT>(m, "DPBWT")
-        .def(py::init<std::vector<double>, std::vector<double>, double, double, bool>(), "Initialize",
+        .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int>(), "Initialize",
         py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate"), py::arg("Ne") = 2e4, py::arg("sparse_sites")=false)
-        .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>, std::vector<double>, bool>(), "Initialize",
+           py::arg("mutation_rate"), py::arg("Ne") = 2e4, py::arg("sparse_sites")=false, py::arg("n_prune")=-1)
+        .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>, std::vector<double>, bool, int>(), "Initialize",
         py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"), py::arg("sparse_sites")=false)
+           py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"), 
+           py::arg("sparse_sites")=false, py::arg("n_prune")=-1)
         .def_readonly("num_samples", &DPBWT::num_samples)
         .def_readonly("num_sites", &DPBWT::num_sites)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
         .def_readonly("bp_sizes", &DPBWT::bp_sizes)
         .def_readonly("cm_sizes", &DPBWT::cm_sizes)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
+        .def_readonly("n_prune", &DPBWT::mutation_rate)
         .def_readonly("ID_map", &DPBWT::ID_map)
         .def_readonly("demography", &DPBWT::demography)
         .def("mutation_penalties", &DPBWT::mutation_penalties)
@@ -53,5 +55,6 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def("print_sorting", &DPBWT::print_sorting)
         .def("thread", py::overload_cast<std::vector<bool>>(&DPBWT::thread), py::arg("genotypes"))
         .def("thread", py::overload_cast<int, std::vector<bool>>(&DPBWT::thread), py::arg("new_sample_ID"), py::arg("genotypes"))
+        .def("thread_from_file", &DPBWT::thread_from_file, py::arg("hack_gz"), py::arg("n_cycle")=0)
         .def("fastLS", &DPBWT::fastLS);
 }

@@ -36,6 +36,7 @@ void StateBranch::prune() {
   std::sort(states.begin(), states.end(), [](const State& s1, const State& s2) {
     return (s1.traceback->site == s2.traceback->site) ? s1.score < s2.score : s1.traceback->site > s2.traceback->site;
   });
+
   std::vector<State> new_states;
   double running_min_score = std::numeric_limits<double>::infinity();
   for (const State& s : states) {
@@ -50,24 +51,23 @@ void StateBranch::prune() {
 StateTree::StateTree(std::vector<State>& states) {
   for (auto s : states) {
     int sample_ID = s.below->sample_ID;
-    if (trees.find(sample_ID) == trees.end()) {
-      trees[sample_ID] = StateBranch();
+    if (branches.find(sample_ID) == branches.end()) {
+      branches[sample_ID] = StateBranch();
     }
-    trees[sample_ID].insert(s);
+    branches[sample_ID].insert(s);
   }
 }
 
 void StateTree::prune() {
-  for (auto pair : trees) {
-    pair.second.prune();
+  for (auto pair : branches) {
+    branches[pair.first].prune();
   }
 }
 
 std::vector<State> StateTree::dump() {
   std::vector<State> states;
-  for (auto pair : trees) {
-    StateBranch b = pair.second;
-    for (auto s : b.states) {
+  for (auto pair : branches) {
+    for (auto s : pair.second.states) {
       states.push_back(s);
     }
   }

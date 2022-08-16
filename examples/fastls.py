@@ -21,7 +21,6 @@ assert bw1 == [(0, 2)]
 
 print(bwt.thread([1, 1, 1, 0, 0, 1, 0, 0, 1]))
 
-
 # Test 2
 print("TEST 2")
 pos2 = np.array([1, 2, 3, 4, 5, 6, 7, 8])

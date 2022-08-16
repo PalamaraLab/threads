@@ -4,10 +4,17 @@
 #include <memory>
 #include <cassert>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <algorithm>
 #include <unordered_map>
 #include <boost/math/special_functions/gamma.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/foreach.hpp>
+#include <boost/tokenizer.hpp>
+
 
 using std::cout;
 using std::cerr;
@@ -21,8 +28,9 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
              double _mutation_rate, 
              std::vector<double> ne, 
              std::vector<double> ne_times, 
-             bool _sparse_sites) :
-  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times)), sparse_sites(_sparse_sites)
+             bool _sparse_sites,
+             int _n_prune) :
+  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times)), sparse_sites(_sparse_sites), n_prune(_n_prune)
 {
   if (physical_positions.size() != genetic_positions.size()) {
     cerr << "Map lengths don't match.\n";
@@ -297,12 +305,12 @@ void DPBWT::print_sorting() {
 std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
-  std::vector<double> mu_c; 
-  std::tie(mu, mu_c) = mutation_penalties();
+  std::vector<double> mu_c;
+  std::tie(mu, mu_c) = mutation_penalties_correct();// correct_penalties ? mutation_penalties_correct() : mutation_penalties();
   // NB these still rely on padding around sites (like mutations), rather than distance between sites
   std::vector<double> rho;
   std::vector<double> rho_c; 
-  std::tie(rho, rho_c) = recombination_penalties();
+  std::tie(rho, rho_c) = sparse_sites ? recombination_penalties() : recombination_penalties_correct();
 
   std::vector<std::unique_ptr<TracebackState>> traceback_states;
   traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
@@ -370,8 +378,8 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
       [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
 
     if (best_extension.score < gm_next - 0.001 || best_extension.score > gm_next + 0.001) {
-      cerr << "The algorithm is in an illegal state because gm != best_extension.score, found ";
-      cerr << "best_extension.score=" << best_extension.score << " and gm=" << gm << endl;
+      cerr << "The algorithm is in an illegal state because gm_next != best_extension.score, found ";
+      cerr << "best_extension.score=" << best_extension.score << " and gm_next=" << gm_next << endl;
       exit(1);
     }
 
@@ -379,18 +387,18 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(std::vector<bool> genotype) {
     traceback_states.emplace_back(std::make_unique<TracebackState>(
       i + 1, best_extension.below->above->sample_ID, best_extension.traceback));
     new_states.emplace_back(bottoms[i + 1].get(), gm_next - rho_c[i] + rho[i], traceback_states.back().get());
-    gm_next = std::min(gm_next, gm + mu_c[i] + rho[i]);
+    gm_next = std::min(gm_next, gm_next - rho_c[i] + rho[i]);
 
 
     // Need to consider how best to use this threshold, 100 might be too low
     // if (new_states.size() > 100) {
-    if (false) {
-      StateTree tree = StateTree(new_states);
+    // if (n_prune >= 0 && new_states.size() >= n_prune) {
+    if (i % 100 == 0 && n_prune >= 0 && new_states.size() >= n_prune) {
       int old_size = new_states.size();
+      StateTree tree = StateTree(new_states);
       tree.prune();
       current_states = tree.dump();
-      int new_size = current_states.size();
-      cout << "Site " << i << ": pruned " << old_size - new_size << " states out of " << old_size << endl;
+      // cout << "Site " << i << " pruning: " << current_states.size() << " states left out of " << old_size << endl;
     } else {
       current_states = new_states;
     }
@@ -464,7 +472,6 @@ bool DPBWT::extensible_by(State& s, const Node* t_next, const bool g, const int 
 std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
-  int i = 0;
 
   // The expected branch length
   // double hap_ne = 2. * ne; //this may be wrong
@@ -479,6 +486,35 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties()
   }
   return std::tuple(mu, mu_c);
 }
+
+std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties_correct() {
+  std::vector<double> mu(num_sites);
+  std::vector<double> mu_c(num_sites);
+
+  // The expected branch length
+  const double t = demography.expected_branch_length(num_samples + 1);
+
+  for (int i = 0; i < num_sites; i++) {
+    // l is in bp units
+    double k = 2. * mutation_rate * bp_sizes[i] * t;
+    mu_c[i] = k;
+    mu[i] = -std::log1p(-std::exp(-k));
+  }
+  return std::tuple(mu, mu_c);
+}
+
+// std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties_impute5() {
+//   std::vector<double> mu(num_sites);
+//   std::vector<double> mu_c(num_sites);
+  
+//   double hom_loss = -std::log(0.9999);
+//   double het_loss = -std::log(0.0001);
+//   for (int i = 0; i < num_sites; i++) {
+//     mu_c[i] = hom_loss;
+//     mu[i] = het_loss;
+//   }
+//   return std::tuple(mu, mu_c);
+// }
 
 /**
  * @brief This relies on panel size and the recombination map
@@ -496,13 +532,36 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
 
   for (int i = 0; i < num_sites; i++) {
     // l is in cM units
-    double k = 2. * 0.01 * cm_sizes[i] * t;
+    const double k = 2. * 0.01 * cm_sizes[i] * t;
     rho_c[i] = k;
+    // This is for the binary mutation model, to use {a, c, g, t} we add log(3)
     rho[i] = -std::log1p(-std::exp(-k));
   }
   return std::tuple(rho, rho_c);
 }
 
+/**
+ * @brief This relies on panel size and the recombination map
+ * 
+ * @return double 
+ */
+std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalties_correct() {
+  // Recall: 1cM means the expected average number of intervening 
+  // chromosomal crossovers in a single generation is 0.01
+  std::vector<double> rho(num_sites);
+  std::vector<double> rho_c(num_sites);
+  
+  // The expected branch length
+  const double t = demography.expected_branch_length(num_samples + 1);
+
+  for (int i = 0; i < num_sites; i++) {
+    // l is in cM units
+    const double k = 2. * 0.01 * cm_sizes[i] * t;
+    rho_c[i] = k;
+    rho[i] = -(std::log1p(-std::exp(-k)) - std::log(num_samples));
+  }
+  return std::tuple(rho, rho_c);
+}
 
 /**
  * @brief Date the segment based on length and n_mismatches using maximum likelihood. (No demography)
@@ -532,7 +591,7 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
   double rho = 2. * 0.01 * cm_size;
   if (sparse_sites) {
     if (m > 15) {
-      cout << "Warning: very many heterozygous sites, defaulting to const-demography method./\n";
+      cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
       double gamma = 1. / demography.expected_time;
       return 2. / (gamma + rho);
     }
@@ -559,7 +618,7 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
     return numerator / denominator;
   } else {
     if (m > 15) {
-      cout << "Warning: very many heterozygous sites, defaulting to const-demography method./\n";
+      cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
       double gamma = 1. / demography.expected_time;
       return (m + 2) / (gamma + rho + mu);
     }
@@ -616,6 +675,101 @@ std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::th
     // threading_instructions.emplace_back(bp_start, target_ID, age_ML);
   }
   return std::tuple(bp_starts, target_IDs, segment_ages);
+}
+
+std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>> DPBWT::thread_from_file(const std::string file_path, const int n_cycle) {
+  std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>> all_threads;
+  std::ifstream file(file_path, std::ios_base::in | std::ios_base::binary);
+  try {
+    boost::iostreams::filtering_istream in;
+    in.push(boost::iostreams::gzip_decompressor());
+    in.push(file);
+    int i = 0;
+    for(std::string line; std::getline(in, line); )
+    {
+      std::vector<bool> genotype;
+      boost::char_separator<char> sep(" ");
+      boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
+      BOOST_FOREACH(std::string t, tokens)
+      {
+        genotype.push_back(boost::lexical_cast<bool>(t));
+      }
+      if (genotype.size() != num_sites) {
+        cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
+        cerr << " sites, expected " << num_sites << endl;
+        exit(1);
+      }
+      if (i == 0) {
+        insert(genotype);
+        all_threads.push_back(std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>({}, {}, {}));
+      } else {
+        all_threads.push_back(thread(i, genotype));
+      }
+      i++;
+    }
+  }
+  catch(const boost::iostreams::gzip_error& e) {
+    std::cout << e.what() << '\n';
+  }
+  file.close();
+
+  //cycling pass
+  std::ifstream file2(file_path, std::ios_base::in | std::ios_base::binary);
+  boost::iostreams::filtering_istream in2;
+  in2.push(boost::iostreams::gzip_decompressor());
+  in2.push(file2);
+  int i = 0;
+  for(std::string line; std::getline(in2, line); )
+  {
+    if (i >= n_cycle) {
+      return all_threads;
+    }
+    std::vector<bool> genotype(num_sites);
+    boost::char_separator<char> sep(" ");
+    boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
+    int m = 0;
+    BOOST_FOREACH(std::string t, tokens)
+    {
+      genotype[m] = boost::lexical_cast<bool>(t);
+      m++;
+    }
+    for (bool b : genotype) {
+      cout << " " << static_cast<int>(b);
+    }
+    cout << endl;
+    if (genotype.size() != num_sites) {
+      cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
+      cerr << " sites, expected " << num_sites << endl;
+      exit(1);
+    }
+
+    delete_ID(i);
+    all_threads.push_back(thread(i, genotype));
+    i++;
+  }
+  return all_threads;
+  // // Compute LS path
+  // std::vector<std::tuple<int, int>> best_path = fastLS(genotype);
+  // // Insert new genotype. NB, it's important we insert before we date, 
+  // // because we need the new genotype in the panel to look for het-sites
+  // insert(new_sample_ID, genotype);
+
+  // std::vector<double> bp_starts;
+  // std::vector<int> target_IDs;
+  // std::vector<double> segment_ages;
+
+  // // Date segments
+  // for (int i = 0; i < best_path.size(); i++) {
+  //   int segment_start = std::get<0>(best_path[i]);
+  //   int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
+  //   bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
+  //   int target_ID = std::get<1>(best_path[i]);
+  //   target_IDs.push_back(target_ID);
+  //   segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
+  //   // double age_bayes = date_segment_bayes(new_sample_ID, target_ID, segment_start, segment_end);
+  //   // threading_instructions.emplace_back(bp_start, target_ID, age_ML);
+  // }
+  // return std::tuple(bp_starts, target_IDs, segment_ages);
 }
 
 /**
