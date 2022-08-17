@@ -2,6 +2,7 @@ from TDPBWT import DPBWT
 import numpy as np
 import pandas as pd
 import msprime
+import matplotlib.pyplot as plt
 
 # haploid!
 demography = "/well/palamara/users/awo066/TDPBWT/experiments/threading_accuracy/resources/CEU.demo"
@@ -38,7 +39,6 @@ coal_x = np.arange(0.05, 2.51, 0.01)
 for t in coal_x:
     coal_distr.append(bwt.demography.std_to_gen(t))
 
-import matplotlib.pyplot as plt
 plt.plot(coal_x, coal_distr)
 plt.yscale('log')
 plt.savefig('example_data/coal.png')
@@ -48,3 +48,23 @@ for g in G[:-1]:
 thread = bwt.thread(G[-1])
 print(thread)
 
+plt.cla()
+Ns = np.arange(2, 1_000)
+sims = []
+for n in Ns:
+    ts = msprime.sim_ancestry(
+    samples={"A": n},
+    ploidy=1,
+    demography=demography)
+    tree = ts.first()
+    sims.append(tree.time(tree.parent(0)))
+exp_length = [bwt.demography.expected_branch_length(i) for i in Ns]
+exp_length_2 = [bwt.demography.std_to_gen(2 / i) for i in Ns]
+exp_length_3 = [bwt.demography.std_to_gen(1 / i) for i in Ns]
+plt.plot(Ns, exp_length, label='exp')
+plt.scatter(Ns, sims, label='sim')
+plt.plot(Ns, exp_length_2, label='stdgen')
+plt.plot(Ns, exp_length_3, label='stdgen1')
+plt.yscale('log')
+plt.legend()
+plt.savefig("example_data/exp_lengths.png")
