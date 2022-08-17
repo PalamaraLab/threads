@@ -44,27 +44,25 @@ public:
   std::tuple<std::vector<double>, std::vector<double>> site_sizes(std::vector<double> positions);
 
   // Insertion/deletion
-  void insert(std::vector<bool> genotype);
-  void insert(int ID, std::vector<bool> genotype);
+  // Insert and assign generic ID
+  void insert(const std::vector<bool>& genotype);
+  // Insert and assign specific ID
+  void insert(const int ID, const std::vector<bool>& genotype);
+  // Remove sample from panel
   void delete_ID(int ID);
 
   // Algorithms
-  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(std::vector<bool> genotype);
-  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(int new_sample_ID, std::vector<bool> genotype);
+  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(const std::vector<bool>& genotype);
+  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(const int new_sample_ID, const std::vector<bool>& genotype);
   std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
-  std::vector<std::tuple<int, int>> fastLS(std::vector<bool> genotype);
+  std::vector<std::tuple<int, int>> fastLS(const std::vector<bool>& genotype);
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_correct();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties_correct();
 
-  // Aging
-  // double date_segment_ML(const int id1, const int id2, const int start, const int end);
+  // TMRCA estimation
   double date_segment(const int id1, const int id2, const int start, const int end);
-  // (need to fix this)
-  // double date_segment_bayes(const int id1, const int id2, const int start, const int end);
-  // // using big maths
-  // double date_segment_demography(const int id1, const int id2, const int start, const int end);
 
   // Debugging
   void print_sorting();

@@ -8,7 +8,7 @@ public:
   int sample_ID;
   bool genotype;
 
-  // Node pointers
+  // Linked list pointers
   Node* above;
   Node* below;
 

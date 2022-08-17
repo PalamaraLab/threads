@@ -18,7 +18,8 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     py::class_<Demography>(m, "Demography")
         .def_readonly("times", &Demography::times)
         .def_readonly("sizes", &Demography::sizes)
-        .def("std_to_gen", &Demography::std_to_gen);
+        .def("std_to_gen", &Demography::std_to_gen)
+        .def("expected_branch_length", &Demography::expected_branch_length);
 
     // py::class_<TDPBWT>(m, "TDPBWT")
     //     .def(py::init<std::vector<int>, std::vector<float>, float>(), "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
@@ -49,12 +50,12 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def("mutation_penalties", &DPBWT::mutation_penalties)
         .def("recombination_penalties", &DPBWT::recombination_penalties)
         .def("date_segment", &DPBWT::date_segment, py::arg("id1"), py::arg("id2"), py::arg("start"), py::arg("end"))
-        .def("insert", py::overload_cast<std::vector<bool>>(&DPBWT::insert), py::arg("genotypes"))
-        .def("insert", py::overload_cast<int, std::vector<bool>>(&DPBWT::insert), py::arg("ID"), py::arg("genotypes"))
+        .def("insert", py::overload_cast<const std::vector<bool>&>(&DPBWT::insert), py::arg("genotypes"))
+        .def("insert", py::overload_cast<const int, const std::vector<bool>&>(&DPBWT::insert), py::arg("ID"), py::arg("genotypes"))
         .def("delete_ID", &DPBWT::delete_ID, py::arg("ID"))
         .def("print_sorting", &DPBWT::print_sorting)
-        .def("thread", py::overload_cast<std::vector<bool>>(&DPBWT::thread), py::arg("genotypes"))
-        .def("thread", py::overload_cast<int, std::vector<bool>>(&DPBWT::thread), py::arg("new_sample_ID"), py::arg("genotypes"))
+        .def("thread", py::overload_cast<const std::vector<bool>&>(&DPBWT::thread), py::arg("genotypes"))
+        .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&DPBWT::thread), py::arg("new_sample_ID"), py::arg("genotypes"))
         .def("thread_from_file", &DPBWT::thread_from_file, py::arg("hack_gz"), py::arg("n_cycle")=0)
         .def("fastLS", &DPBWT::fastLS);
 }
