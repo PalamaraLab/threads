@@ -19,7 +19,7 @@ public:
   double std_to_gen(const double t);
   // The expected branch length of a new branch in a tree with N leaves
   double expected_branch_length(const int N);
-  
+
   // Output
   friend ostream& operator<<(ostream& os, const Demography& demography);
 };

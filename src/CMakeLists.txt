@@ -10,6 +10,7 @@ set(
         Node.cpp
         State.cpp
         DPBWT.cpp
+        HMM.cpp
 )
 
 set(
@@ -18,6 +19,7 @@ set(
         Node.hpp
         State.hpp
         DPBWT.hpp
+        HMM.hpp
 )
 
 add_library(TDPBWT STATIC ${TDPBWT_src} ${TDPBWT_hdr})

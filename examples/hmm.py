@@ -33,37 +33,13 @@ pos = np.array([s.position for s in mts.sites()])
 assert len(pos) == G.shape[1]
 cm = RHO * 100 * pos
 bwt = DPBWT(pos, cm, MU, list(df.NE), list(df.GEN))
-coal_distr = [] 
-coal_x = np.arange(0.05, 2.51, 0.01)
-for t in coal_x:
-    coal_distr.append(bwt.demography.std_to_gen(t))
 
-plt.plot(coal_x, coal_distr)
-plt.yscale('log')
-plt.savefig('example_data/coal.png')
 for g in G[:-1]:
     bwt.insert(g)
 
-thread = bwt.thread(G[-1])
-print(thread)
-
-plt.cla()
-Ns = np.arange(2, 1_000)
-sims = []
-for n in Ns:
-    ts = msprime.sim_ancestry(
-    samples={"A": n},
-    ploidy=1,
-    demography=demography)
-    tree = ts.first()
-    sims.append(tree.time(tree.parent(0)))
-exp_length = [bwt.demography.expected_branch_length(i) for i in Ns]
-exp_length_2 = [bwt.demography.std_to_gen(2 / i) for i in Ns]
-exp_length_3 = [bwt.demography.std_to_gen(1 / i) for i in Ns]
-plt.plot(Ns, exp_length, label='exp')
-plt.scatter(Ns, sims, label='sim')
-plt.plot(Ns, exp_length_2, label='stdgen')
-plt.plot(Ns, exp_length_3, label='stdgen1')
-plt.yscale('log')
-plt.legend()
-plt.savefig("example_data/exp_lengths.png")
+obs = [1] * 50 + [0] * 500
+obs2 = [1] * 10 + [0] * 500 + [1] * 50
+print(bwt.hmm.breakpoints(obs, 5))
+print(bwt.hmm.breakpoints(obs2, 25))
+import pdb
+pdb.set_trace()

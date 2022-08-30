@@ -29,8 +29,9 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
              std::vector<double> ne, 
              std::vector<double> ne_times, 
              bool _sparse_sites,
-             int _n_prune) :
-  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times)), sparse_sites(_sparse_sites), n_prune(_n_prune)
+             int _n_prune,
+             bool _use_hmm) :
+  physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times)), sparse_sites(_sparse_sites), n_prune(_n_prune), use_hmm(_use_hmm)
 {
   if (physical_positions.size() != genetic_positions.size()) {
     cerr << "Map lengths don't match.\n";
@@ -47,7 +48,8 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
   }
   num_sites = physical_positions.size();
   num_samples = 0;
-
+  // num_sites_pruned = 0;
+  
   for (int i = 0; i < num_sites - 1; i ++) {
     if (physical_positions[i + 1] <= physical_positions[i]) {
       cerr << "Physical positions must be strictly increasing, found ";
@@ -61,11 +63,9 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
     }
   }
 
-  // Demography:
-  cout << demography << endl;
-
   // Initialize both ends of the linked-list columns
   for (int i = 0; i < num_sites + 1; i++) {
+    // site_included.push_back(true);
     tops.emplace_back(std::make_unique<Node>(-1, 0));
     bottoms.emplace_back(std::make_unique<Node>(-1, 1));
     Node* top_i = tops.back().get();
@@ -86,6 +86,10 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
 
   std::tie(bp_boundaries, bp_sizes) = site_sizes(physical_positions);
   std::tie(cm_boundaries, cm_sizes) = site_sizes(genetic_positions);
+
+  if (use_hmm) {
+    hmm = HMM(demography, bp_sizes, cm_sizes, mutation_rate, 64);
+  }
 }
 
 std::tuple<std::vector<double>, std::vector<double>> DPBWT::site_sizes(std::vector<double> positions) {
@@ -182,7 +186,6 @@ void DPBWT::insert(const int ID, const std::vector<bool>& genotype) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
     // Add current thingy to panel
-    // panel[ID_map[ID]].emplace_back(std::make_unique<Node>(ID, next_genotype));
     panel[ID_map[ID]][k + 1] = std::move(std::make_unique<Node>(ID, next_genotype));
     z_next = panel[ID_map[ID]][k + 1].get(); //.back().get();
     tmp = z_k->above;
@@ -226,8 +229,6 @@ void DPBWT::insert(const int ID, const std::vector<bool>& genotype) {
   //     // Only set this for real nodes
   //     z_k->below->divergence = b_dtmp;
   //   }
-  // }
-
 }
 
 /**
@@ -288,7 +289,9 @@ void DPBWT::print_sorting() {
   for (int j = 0; j < num_sites + 1; ++j) {
     Node* node = tops[j].get();
     while (node != nullptr) {
-      cout << node->sample_ID << " ";
+      if (node->sample_ID >= 0) {
+        cout << node->sample_ID << " ";
+      }
       node = node->below;
     }
     cout << endl;
@@ -319,9 +322,7 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotyp
   current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get());
 
   // Just like with insertion, we start at the bottom of the first column.
-  // gm is the best score for the current level of the stack
-  // double gm = 0;
-  // z holds temporary values for updates of gm
+  // z holds the best current score
   double z;
   int max_states = 0;
   bool allele;
@@ -340,7 +341,7 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotyp
     // Heuristically get a bound on states we want to add
     double extension_cost = rho_c[i] + mu_c[i];
     double mutation_cost = rho_c[i] + mu[i];
-    double rho_delta = std::abs(rho[i] - rho_c[i]);
+    double rho_delta = std::max(0.0, rho[i] - rho_c[i]);
 
     // Find the cheapest extension of the best previous state, if it can be 
     if (extensible_by(best_extension, extend_node(best_extension.below, allele, i), allele, i)) {
@@ -378,7 +379,7 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotyp
     }
 
     // Find a best state in the current layer and recombine.
-    State best_extension = *(std::min_element(new_states.begin(), new_states.end(),
+    best_extension = *(std::min_element(new_states.begin(), new_states.end(),
       [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
 
     if (best_extension.score < z - 0.001 || best_extension.score > z + 0.001) {
@@ -388,12 +389,13 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotyp
     }
 
     // Add the new recombinant state to the stack (we never enter this clause on the first iteration)
+    double recombinant_score = z - rho_c[i] + rho[i];
     traceback_states.emplace_back(std::make_unique<TracebackState>(
       i + 1, best_extension.below->above->sample_ID, best_extension.traceback));
-    new_states.emplace_back(bottoms[i + 1].get(), z - rho_c[i] + rho[i], traceback_states.back().get());
-    if (z - rho_c[i] + rho[i] < z) {
+    new_states.emplace_back(bottoms[i + 1].get(), recombinant_score, traceback_states.back().get());
+    if (recombinant_score < z) {
       best_extension = new_states.back();
-      z = z - rho_c[i] + rho[i];
+      z = recombinant_score;
     }
 
     // Need to consider how best to use this threshold, 100 might be too high
@@ -407,7 +409,6 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotyp
     } else {
       current_states = new_states;
     }
-    gm = z;
     new_states.clear();
   }
 
@@ -420,7 +421,7 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotyp
     cout << "Found best path with score " << min_state.score << " for sequence " << num_samples + 1;
     cout << ", using a maximum of " << max_states << " states.\n";
   }
-  
+
   std::vector<std::tuple<int, int>> best_path;
   TracebackState* traceback = min_state.traceback;
   int match_id = min_state.below->above->sample_ID;
@@ -472,10 +473,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties()
   std::vector<double> mu_c(num_sites);
 
   // The expected branch length
-  // double hap_ne = 2. * ne; //this may be wrong
-  // double t = 2. * hap_ne / double(num_samples); 
   const double t = demography.expected_branch_length(num_samples + 1);
-  // double t = num_samples == 1 ? demography.std_to_gen(1. / double(num_samples)) : demography.std_to_gen(2. / double(num_samples)) ;
 
   for (int i = 0; i < num_sites; i++) {
     // l is in bp units
@@ -653,7 +651,10 @@ std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::th
 
 std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // Compute LS path
-  std::vector<std::tuple<int, int>> best_path = fastLS(genotype);
+  std::vector<std::tuple<int, int>> best_path;
+  if (num_samples > 0) {
+    best_path = fastLS(genotype);
+  }
 
   // Insert new genotype. NB, it's important we insert before we date, 
   // because we need the new genotype in the panel to look for het-sites
@@ -667,10 +668,41 @@ std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::th
   for (int i = 0; i < best_path.size(); i++) {
     int segment_start = std::get<0>(best_path[i]);
     int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
-    bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
     int target_ID = std::get<1>(best_path[i]);
-    target_IDs.push_back(target_ID);
-    segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
+
+    if (use_hmm && num_samples <= 100) {
+      std::vector<bool> het_hom_sites = fetch_het_hom_sites(new_sample_ID, target_ID, segment_start, segment_end);
+      int num_het_sites = 0;
+      for (auto s : het_hom_sites) {
+        if (s) {
+          num_het_sites++;
+        }
+      }
+      if (num_het_sites > 10) {
+        cout << "found " << num_het_sites << " het sites...\n";
+        std::vector<int> breakpoints = hmm.breakpoints(het_hom_sites, segment_start);
+        cout << "broke [" << segment_start << ", " << segment_end << ") up into\n";
+
+        // cout << "\t... found " << breakpoints.size() << " breakpoints\n";
+        for (int i = 0; i < breakpoints.size(); i++) {
+          int breakpoint_start = breakpoints[i];
+          int breakpoint_end = (i == breakpoints.size() - 1) ? segment_end : breakpoints[i + 1];
+          cout<< "[" << breakpoint_start << ", " << breakpoint_end << ") ";
+          target_IDs.push_back(target_ID);
+          bp_starts.push_back(ceil(bp_boundaries[breakpoint_start]));
+          segment_ages.push_back(date_segment(new_sample_ID, target_ID, breakpoint_start, breakpoint_end));
+        }
+        cout << "\n";
+      } else {
+        target_IDs.push_back(target_ID);
+        bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
+        segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
+      }
+    } else {
+      target_IDs.push_back(target_ID);
+      bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
+      segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
+    }
   }
   return std::tuple(bp_starts, target_IDs, segment_ages);
 }
@@ -747,8 +779,7 @@ std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double
 
 /**
  * @brief 
- * 
- * @param id1 
+ * @param id1
  * @param id2 
  * @param start inclusive!
  * @param end exclusive!
@@ -768,4 +799,14 @@ bool DPBWT::genotype_interval_match(const int id1, const int id2, const int star
     } 
   }
   return true;
+}
+
+std::vector<bool> DPBWT::fetch_het_hom_sites(const int id1, const int id2, const int start, const int end) {
+  std::vector<bool> het_hom_sites(end - start);
+  for (int i = start; i < end; i++) {
+    bool g1 = panel[ID_map[id1]][i]->genotype;
+    bool g2 = panel[ID_map[id2]][i]->genotype;
+    het_hom_sites[i - start] = (g1 != g2);
+  }
+  return het_hom_sites;
 }
