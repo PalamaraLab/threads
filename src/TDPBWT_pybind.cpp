@@ -29,15 +29,25 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
     //     .def_readonly("mutation_rate", &TDPBWT::mutation_rate)
     //     .def("insert", &TDPBWT::insert)
     //     .def("longest_suffix", &TDPBWT::longest_suffix)
+    py::class_<HMM>(m, "HMM")
+        .def_readonly("num_states", &HMM::num_states)
+        .def_readonly("expected_times", &HMM::expected_times)
+        .def_readonly("trellis", &HMM::trellis)
+        .def_readonly("pointers", &HMM::pointers)
+        .def_readonly("hom_score", &HMM::hom_score)
+        .def_readonly("het_score", &HMM::het_score)
+        .def_readonly("transition_score", &HMM::transition_score)
+        .def_readonly("non_transition_score", &HMM::non_transition_score)
+        .def("breakpoints", &HMM::breakpoints);
 
     py::class_<DPBWT>(m, "DPBWT")
-        .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int>(), "Initialize",
-        py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate"), py::arg("Ne") = 2e4, py::arg("sparse_sites")=false, py::arg("n_prune")=-1)
-        .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>, std::vector<double>, bool, int>(), "Initialize",
-        py::arg("physical_positions"), py::arg("genetic_positions"),
-           py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"), 
-           py::arg("sparse_sites")=false, py::arg("n_prune")=-1)
+        .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int, bool>(), "Initialize",
+             py::arg("physical_positions"), py::arg("genetic_positions"),
+             py::arg("mutation_rate"), py::arg("Ne") = 2e4, py::arg("sparse_sites")=false, py::arg("n_prune")=-1, py::arg("use_hmm")=false)
+        .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>, std::vector<double>, bool, int, bool>(), "Initialize",
+             py::arg("physical_positions"), py::arg("genetic_positions"),
+             py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"),
+             py::arg("sparse_sites")=false, py::arg("n_prune")=-1, py::arg("use_hmm")=false)
         .def_readonly("num_samples", &DPBWT::num_samples)
         .def_readonly("num_sites", &DPBWT::num_sites)
         .def_readonly("mutation_rate", &DPBWT::mutation_rate)
@@ -47,6 +57,7 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def_readonly("n_prune", &DPBWT::mutation_rate)
         .def_readonly("ID_map", &DPBWT::ID_map)
         .def_readonly("demography", &DPBWT::demography)
+        .def_readonly("hmm", &DPBWT::hmm)
         .def("mutation_penalties", &DPBWT::mutation_penalties)
         .def("recombination_penalties", &DPBWT::recombination_penalties)
         .def("date_segment", &DPBWT::date_segment, py::arg("id1"), py::arg("id2"), py::arg("start"), py::arg("end"))
