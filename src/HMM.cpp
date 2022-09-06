@@ -16,8 +16,6 @@ HMM::HMM(Demography demography, std::vector<double> bp_sizes, std::vector<double
   compute_recombination_scores(cm_sizes);
   compute_mutation_scores(bp_sizes, mutation_rate);
 
-  // std::vector<std::vector<double>> trellis (bp_sizes.size());
-  // std::vector<std::vector<unsigned short>> pointers (bp_sizes.size());
   for (int i = 0; i < bp_sizes.size(); i++) {
     std::vector<double> trellis_row(num_states, 0.0);
     std::vector<unsigned short> pointer_row(num_states, 0);
@@ -76,16 +74,19 @@ void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_
 
 // PSMC to get breakpoints
 std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
+  // Stole this from https://en.wikipedia.org/wiki/Viterbi_algorithm hehehe
+  
+  // Viterbi
+  // Initialize
   int L = observations.size();
   std::vector<unsigned short> z(L);
   int end = start + L;
   for (int i = 0; i < num_states; i ++) {
     double score = observations[0] ? het_score[start][i] : hom_score[start][i];
     trellis[start][i] = score;
-    // pointers[start][i] = 0;
   }
 
-  // Viterbi
+  // Main routine
   double score;
   unsigned short running_argmax;
   for (int j = 1; j < L; j++) {
@@ -118,22 +119,20 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
     }
   }
 
+  // Traceback
   z[L - 1] = argmax;
   for (int j = L - 1; j >= 1; j--) {
     z[j - 1] = pointers[j + start][z[j]];
   }
 
-
   // Break it up
   std::vector<int> breakpoints;
   breakpoints.push_back(0 + start);
   for (int j = 1; j < L; j++) {
-    // cout << z[j] << " ";
     if (z[j - 1] != z[j]) {
       breakpoints.push_back(j + start);
     }
   }
-  // cout << endl;
 
   return breakpoints;
 }
