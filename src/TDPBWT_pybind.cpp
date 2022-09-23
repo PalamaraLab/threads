@@ -58,6 +58,7 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def_readonly("ID_map", &DPBWT::ID_map)
         .def_readonly("demography", &DPBWT::demography)
         .def_readonly("hmm", &DPBWT::hmm)
+        .def("delete_hmm", &DPBWT::delete_hmm)
         .def("mutation_penalties", &DPBWT::mutation_penalties)
         .def("recombination_penalties", &DPBWT::recombination_penalties)
         .def("date_segment", &DPBWT::date_segment, py::arg("id1"), py::arg("id2"), py::arg("start"), py::arg("end"))
@@ -67,6 +68,8 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def("print_sorting", &DPBWT::print_sorting)
         .def("thread", py::overload_cast<const std::vector<bool>&>(&DPBWT::thread), py::arg("genotypes"))
         .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&DPBWT::thread), py::arg("new_sample_ID"), py::arg("genotypes"))
+        .def("thread_with_mutations", py::overload_cast<const std::vector<bool>&>(&DPBWT::thread_with_mutations), py::arg("genotypes"))
+        .def("thread_with_mutations", py::overload_cast<const int, const std::vector<bool>&>(&DPBWT::thread_with_mutations), py::arg("new_sample_ID"), py::arg("genotypes"))
         .def("thread_from_file", &DPBWT::thread_from_file, py::arg("hack_gz"), py::arg("n_cycle")=0)
         .def("fastLS", &DPBWT::fastLS);
 }

@@ -87,8 +87,11 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
   std::tie(bp_boundaries, bp_sizes) = site_sizes(physical_positions);
   std::tie(cm_boundaries, cm_sizes) = site_sizes(genetic_positions);
 
+  // hmm = 
   if (use_hmm) {
-    hmm = HMM(demography, bp_sizes, cm_sizes, mutation_rate, 64);
+    hmm = new HMM(demography, bp_sizes, cm_sizes, mutation_rate, 64);
+  } else {
+    hmm = nullptr;
   }
 }
 
@@ -120,6 +123,13 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::site_sizes(std::vect
     boundaries[i] = pos_means[i - 1];
   }
   return std::tuple(boundaries, site_sizes);
+}
+
+void DPBWT::delete_hmm() {
+  if (use_hmm) {
+    delete hmm;
+    use_hmm = false;
+  }
 }
 
 /**
@@ -589,7 +599,7 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
   double rho = 2. * 0.01 * cm_size;
   if (sparse_sites) {
     if (m > 15) {
-      cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
+      // cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
       double gamma = 1. / demography.expected_time;
       return 2. / (gamma + rho);
     }
@@ -616,7 +626,7 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
     return numerator / denominator;
   } else {
     if (m > 15) {
-      cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
+      // cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
       double gamma = 1. / demography.expected_time;
       return (m + 2) / (gamma + rho + mu);
     }
@@ -645,11 +655,11 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
   }
 }
 
-std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::thread(const std::vector<bool>& genotype) {
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>> DPBWT::thread(const std::vector<bool>& genotype) {
   return thread(num_samples, genotype);
 }
 
-std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>> DPBWT::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // Compute LS path
   std::vector<std::tuple<int, int>> best_path;
   if (num_samples > 0) {
@@ -660,7 +670,8 @@ std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::th
   // because we need the new genotype in the panel to look for het-sites
   insert(new_sample_ID, genotype);
 
-  std::vector<double> bp_starts;
+  // TODO: delete the HMM once num_samples > 100
+  std::vector<int> bp_starts;
   std::vector<int> target_IDs;
   std::vector<double> segment_ages;
 
@@ -679,36 +690,52 @@ std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> DPBWT::th
         }
       }
       if (num_het_sites > 10) {
-        cout << "found " << num_het_sites << " het sites...\n";
-        std::vector<int> breakpoints = hmm.breakpoints(het_hom_sites, segment_start);
-        cout << "broke [" << segment_start << ", " << segment_end << ") up into\n";
+        // cout << "found " << num_het_sites << " het sites...\n";
+        std::vector<int> breakpoints = hmm->breakpoints(het_hom_sites, segment_start);
+        // cout << "broke [" << segment_start << ", " << segment_end << ") up into\n";
 
         // cout << "\t... found " << breakpoints.size() << " breakpoints\n";
         for (int i = 0; i < breakpoints.size(); i++) {
           int breakpoint_start = breakpoints[i];
           int breakpoint_end = (i == breakpoints.size() - 1) ? segment_end : breakpoints[i + 1];
-          cout<< "[" << breakpoint_start << ", " << breakpoint_end << ") ";
+          // cout<< "[" << breakpoint_start << ", " << breakpoint_end << ") ";
           target_IDs.push_back(target_ID);
-          bp_starts.push_back(ceil(bp_boundaries[breakpoint_start]));
+          bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[breakpoint_start])));
           segment_ages.push_back(date_segment(new_sample_ID, target_ID, breakpoint_start, breakpoint_end));
         }
-        cout << "\n";
+        // cout << "\n";
       } else {
         target_IDs.push_back(target_ID);
-        bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
+        bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[segment_start]))); // ceil bc should be int-like
         segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
       }
     } else {
       target_IDs.push_back(target_ID);
-      bp_starts.push_back(ceil(bp_boundaries[segment_start])); // ceil bc should be int-like
+      bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[segment_start]))); // ceil bc should be int-like
       segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
     }
   }
   return std::tuple(bp_starts, target_IDs, segment_ages);
 }
 
-std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>> DPBWT::thread_from_file(const std::string file_path, const int n_cycle) {
-  std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>> all_threads;
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> DPBWT::thread_with_mutations(const std::vector<bool>& genotype) {
+  return thread_with_mutations(num_samples, genotype);
+}
+
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> DPBWT::thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype) {
+  std::vector<int> bp_starts;
+  std::vector<int> target_IDs;
+  std::vector<double> segment_ages;
+  std::tie(bp_starts, target_IDs, segment_ages) = thread(new_sample_ID, genotype);
+  auto it = *max_element(std::begin(target_IDs), std::end(target_IDs));
+  std::vector<int> het_sites;
+  std::vector<bool> het_types;
+  std::tie(het_sites, het_types) = het_sites_and_types(new_sample_ID, bp_starts, target_IDs);
+  return std::tuple(bp_starts, target_IDs, segment_ages, het_sites, het_types);
+}
+
+std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> DPBWT::thread_from_file(const std::string file_path, const int n_cycle) {
+  std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> all_threads;
   std::ifstream file(file_path, std::ios_base::in | std::ios_base::binary);
   try {
     // threading pass
@@ -732,7 +759,7 @@ std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double
       }
       if (i == 0) {
         insert(genotype);
-        all_threads.push_back(std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>({}, {}, {}));
+        all_threads.push_back(std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>({}, {}, {}));
       } else {
         all_threads.push_back(thread(i, genotype));
       }
@@ -801,6 +828,9 @@ bool DPBWT::genotype_interval_match(const int id1, const int id2, const int star
   return true;
 }
 
+/**
+ *
+ */
 std::vector<bool> DPBWT::fetch_het_hom_sites(const int id1, const int id2, const int start, const int end) {
   std::vector<bool> het_hom_sites(end - start);
   for (int i = start; i < end; i++) {
@@ -809,4 +839,49 @@ std::vector<bool> DPBWT::fetch_het_hom_sites(const int id1, const int id2, const
     het_hom_sites[i - start] = (g1 != g2);
   }
   return het_hom_sites;
+}
+
+/**
+ * 
+ */
+std::tuple<std::vector<int>, std::vector<bool>> DPBWT::het_sites_and_types(const int focal_ID, const std::vector<int> bp_starts, const std::vector<int> target_IDs) {
+  std::vector<int> het_sites;
+  std::vector<bool> het_types;
+
+  int num_segments = bp_starts.size();
+  int site_i = 0;
+  for (int seg_i = 0; seg_i < num_segments; seg_i++) {
+    int segment_start = bp_starts[seg_i];
+    int segment_end = seg_i == num_segments - 1 ? physical_positions.back() + 1 : bp_starts[seg_i + 1];
+    int target_ID = target_IDs[seg_i];
+    while (segment_start <= physical_positions[site_i] && physical_positions[site_i] < segment_end && site_i < num_sites) {
+      if (panel[ID_map[focal_ID]][site_i]->genotype != panel[ID_map[target_ID]][site_i]->genotype) {
+        het_sites.push_back(physical_positions[site_i]);
+        het_types.push_back(panel[ID_map[focal_ID]][site_i]->genotype);
+      }
+      site_i++;
+    }
+  }
+  if (site_i != num_sites) {
+    cerr << "Found " << site_i + 1 << " sites, expected " << num_sites << endl;
+    exit(1);
+  }
+  return std::tuple(het_sites, het_types);
+  // for (int i = 0; i < num_sites; i++) {
+  //   if (physical_positions[i] >= bp_starts[segment_ID]) {
+  //     while (physical_positions[i] >= bp_starts[segment_ID]) {
+  //       segment_ID++;
+  //     }
+  //   }
+  //   if (panel[ID_map[focal_ID]][i]->genotype != panel[ID_map[target_IDs[segment_ID]]][i]->genotype) {
+  //     het_sites.push_back(bp_starts[i]);
+  //     het_types.push_back(panel[ID_map[focal_ID]][i]->genotype);
+  //   }
+  //   if (segment_ID > num_segments) {
+  //     cerr << "wha" << endl;
+  //     exit(1);
+  //   }
+  // }
+  // return std::tuple(het_sites, het_types);
+
 }

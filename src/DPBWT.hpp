@@ -17,6 +17,7 @@ private:
   bool extensible_by(State& s, const Node* t_next, const bool g, const int i);
   bool genotype_interval_match(const int id1, const int id2, const int start, const int end);
   std::vector<bool> fetch_het_hom_sites(const int id1, const int id2, const int start, const int end);
+  std::tuple<std::vector<int>, std::vector<bool>> het_sites_and_types(const int focal_ID, std::vector<int> bp_starts, std::vector<int> target_IDs);
 
 public:
 
@@ -36,7 +37,7 @@ public:
   std::vector<double> bp_boundaries;
   std::vector<double> cm_boundaries;
   Demography demography;
-  HMM hmm;
+  HMM* hmm;
 
   // The dynamic reference panel
   std::vector<std::vector<std::unique_ptr<Node>>> panel;
@@ -55,10 +56,16 @@ public:
   // Remove sample from panel
   void delete_ID(int ID);
 
+  // HMM
+  void delete_hmm();
+
   // Algorithms
-  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(const std::vector<bool>& genotype);
-  std::tuple<std::vector<double>, std::vector<int>, std::vector<double>> thread(const int new_sample_ID, const std::vector<bool>& genotype);
-  std::vector<std::tuple<std::vector<double>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
+  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>> thread(const std::vector<bool>& genotype);
+  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>> thread(const int new_sample_ID, const std::vector<bool>& genotype);
+
+  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const std::vector<bool>& genotype);
+  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype);
+  std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
   std::vector<std::tuple<int, int>> fastLS(const std::vector<bool>& genotype);
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
