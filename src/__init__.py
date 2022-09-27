@@ -1,1 +1,1 @@
-from TDPBWT_python_bindings import *
+from threads_python_bindings import *

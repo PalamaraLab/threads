@@ -11,7 +11,7 @@ namespace py = pybind11;
 // using std::deque;
 // using std::vector;
 
-PYBIND11_MODULE(TDPBWT_python_bindings, m) {
+PYBIND11_MODULE(threads_python_bindings, m) {
     py::class_<Node>(m, "Node")
         .def_readonly("sample_ID", &Node::sample_ID)
         .def_readonly("genotype", &Node::genotype);
@@ -21,14 +21,6 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def("std_to_gen", &Demography::std_to_gen)
         .def("expected_branch_length", &Demography::expected_branch_length);
 
-    // py::class_<TDPBWT>(m, "TDPBWT")
-    //     .def(py::init<std::vector<int>, std::vector<float>, float>(), "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
-    //        py::arg("mutation_rate") = 0)
-    //     .def_readonly("num_samples", &TDPBWT::num_samples)
-    //     .def_readonly("num_sites", &TDPBWT::num_sites)
-    //     .def_readonly("mutation_rate", &TDPBWT::mutation_rate)
-    //     .def("insert", &TDPBWT::insert)
-    //     .def("longest_suffix", &TDPBWT::longest_suffix)
     py::class_<HMM>(m, "HMM")
         .def_readonly("num_states", &HMM::num_states)
         .def_readonly("expected_times", &HMM::expected_times)
@@ -70,6 +62,6 @@ PYBIND11_MODULE(TDPBWT_python_bindings, m) {
         .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&DPBWT::thread), py::arg("new_sample_ID"), py::arg("genotypes"))
         .def("thread_with_mutations", py::overload_cast<const std::vector<bool>&>(&DPBWT::thread_with_mutations), py::arg("genotypes"))
         .def("thread_with_mutations", py::overload_cast<const int, const std::vector<bool>&>(&DPBWT::thread_with_mutations), py::arg("new_sample_ID"), py::arg("genotypes"))
-        .def("thread_from_file", &DPBWT::thread_from_file, py::arg("hack_gz"), py::arg("n_cycle")=0)
+        // .def("thread_from_file", &DPBWT::thread_from_file, py::arg("hack_gz"), py::arg("n_cycle")=0)
         .def("fastLS", &DPBWT::fastLS);
 }

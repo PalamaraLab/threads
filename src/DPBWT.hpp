@@ -65,7 +65,7 @@ public:
 
   std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const std::vector<bool>& genotype);
   std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype);
-  std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
+  // std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
   std::vector<std::tuple<int, int>> fastLS(const std::vector<bool>& genotype);
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();

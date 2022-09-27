@@ -111,11 +111,11 @@ with open('RELEASE_NOTES.md', encoding='utf-8') as f:
     release_notes = f.read()
 
 setup(
-    name='TDPBWT',
+    name='threads',
     version='0.1',
     # author='PalamaraLab (https://palamaralab.github.io/)',
     # url='https://github.com/PalamaraLab/arg_needle_lib/',
-    # install_requires=['h5py', 'msprime', 'numpy', 'tskit>=0.1.5'],
+    install_requires=['click', 'pandas_plink', 'h5py', 'pandas', 'numpy', 'tszip'],
     # extras_require={
     #     'dev': [
     #         'pytest',
@@ -123,10 +123,11 @@ setup(
     #     ],
     # },
     # description='Ancestral recombination graph (ARG) data structure and operations.',
-    packages=['TDPBWT'],
+    packages=['threads'],#, 'lib.threads'],
+    scripts=['./scripts/threads'],
     long_description='\n'.join([long_description, release_notes]),
     long_description_content_type='text/markdown',
-    ext_modules=[CMakeExtension('TDPBWT')],
+    ext_modules=[CMakeExtension('threads')],
     cmdclass=dict(build_ext=CMakeBuild),
     zip_safe=False,
 )
