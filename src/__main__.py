@@ -141,7 +141,7 @@ def threads_to_arg(thread_dict, noise=0.0):
 
     # How this should work:
     for i, t in enumerate(threading_instructions[:N]):
-        arg.add_sample(i, str(i))
+        arg.add_sample(str(i))#, str(i))
         if i > 0:
             section_starts, thread_ids, thread_heights = t
             thread_heights += thread_heights * np.random.normal(0.0, noise, len(thread_heights))

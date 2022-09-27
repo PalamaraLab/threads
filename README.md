@@ -38,5 +38,19 @@ Then do the same for threads:
 git clone https://github.com/PalamaraLab/TDPBWT.git
 cd TDPBWT
 pip install .
-cd ..
 ```
+
+Make sure it works:
+```
+cd examples/example_data
+# Convert files into hacky phased plink1 data
+threads files --hap_gz snp_data.hap.gz --sample snp_data.sample --bfile snp_data
+# Run the inference
+threads infer --bfile snp_data --map_gz snp_data.map.gz --mutation_rate 1.65e-8 --demography CEU.demo --modality snp --threads snp_data.threads
+# Convert to .argn and/or .tsz
+threads convert --threads snp_data.threads --argn snp_data.argn --tsz snp_data.tsz
+
+# And for sequencing data:
+threads files --hap_gz seq_data.hap.gz --sample seq_data.sample --bfile seq_data
+threads infer --bfile seq_data --map_gz seq_data.map.gz --mutation_rate 1.65e-8 --demography CEU.demo --modality seq --threads seq_data.threads
+threads convert --threads seq_data.threads --argn seq_data.argn --tsz seq_data.tsz
