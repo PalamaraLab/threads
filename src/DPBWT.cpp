@@ -9,8 +9,8 @@
 #include <algorithm>
 #include <unordered_map>
 #include <boost/math/special_functions/gamma.hpp>
-#include <boost/iostreams/filtering_stream.hpp>
-#include <boost/iostreams/filter/gzip.hpp>
+// #include <boost/iostreams/filtering_stream.hpp>
+// #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/foreach.hpp>
 #include <boost/tokenizer.hpp>
@@ -734,75 +734,75 @@ std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<
   return std::tuple(bp_starts, target_IDs, segment_ages, het_sites, het_types);
 }
 
-std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> DPBWT::thread_from_file(const std::string file_path, const int n_cycle) {
-  std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> all_threads;
-  std::ifstream file(file_path, std::ios_base::in | std::ios_base::binary);
-  try {
-    // threading pass
-    boost::iostreams::filtering_istream in;
-    in.push(boost::iostreams::gzip_decompressor());
-    in.push(file);
-    int i = 0;
-    for(std::string line; std::getline(in, line); )
-    {
-      std::vector<bool> genotype;
-      boost::char_separator<char> sep(" ");
-      boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
-      BOOST_FOREACH(std::string t, tokens)
-      {
-        genotype.push_back(boost::lexical_cast<bool>(t));
-      }
-      if (genotype.size() != num_sites) {
-        cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
-        cerr << " sites, expected " << num_sites << endl;
-        exit(1);
-      }
-      if (i == 0) {
-        insert(genotype);
-        all_threads.push_back(std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>({}, {}, {}));
-      } else {
-        all_threads.push_back(thread(i, genotype));
-      }
-      i++;
-    }
-  }
-  catch(const boost::iostreams::gzip_error& e) {
-    std::cout << e.what() << '\n';
-  }
-  file.close();
+// std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> DPBWT::thread_from_file(const std::string file_path, const int n_cycle) {
+//   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> all_threads;
+//   std::ifstream file(file_path, std::ios_base::in | std::ios_base::binary);
+//   try {
+//     // threading pass
+//     boost::iostreams::filtering_istream in;
+//     in.push(boost::iostreams::gzip_decompressor());
+//     in.push(file);
+//     int i = 0;
+//     for(std::string line; std::getline(in, line); )
+//     {
+//       std::vector<bool> genotype;
+//       boost::char_separator<char> sep(" ");
+//       boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
+//       BOOST_FOREACH(std::string t, tokens)
+//       {
+//         genotype.push_back(boost::lexical_cast<bool>(t));
+//       }
+//       if (genotype.size() != num_sites) {
+//         cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
+//         cerr << " sites, expected " << num_sites << endl;
+//         exit(1);
+//       }
+//       if (i == 0) {
+//         insert(genotype);
+//         all_threads.push_back(std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>({}, {}, {}));
+//       } else {
+//         all_threads.push_back(thread(i, genotype));
+//       }
+//       i++;
+//     }
+//   }
+//   catch(const boost::iostreams::gzip_error& e) {
+//     std::cout << e.what() << '\n';
+//   }
+//   file.close();
 
-  //cycling pass
-  std::ifstream file2(file_path, std::ios_base::in | std::ios_base::binary);
-  boost::iostreams::filtering_istream in2;
-  in2.push(boost::iostreams::gzip_decompressor());
-  in2.push(file2);
-  int i = 0;
-  for(std::string line; std::getline(in2, line); )
-  {
-    if (i >= n_cycle) {
-      return all_threads;
-    }
-    std::vector<bool> genotype(num_sites);
-    boost::char_separator<char> sep(" ");
-    boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
-    int m = 0;
-    BOOST_FOREACH(std::string t, tokens)
-    {
-      genotype[m] = boost::lexical_cast<bool>(t);
-      m++;
-    }
-    if (genotype.size() != num_sites) {
-      cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
-      cerr << " sites, expected " << num_sites << endl;
-      exit(1);
-    }
+//   //cycling pass
+//   std::ifstream file2(file_path, std::ios_base::in | std::ios_base::binary);
+//   boost::iostreams::filtering_istream in2;
+//   in2.push(boost::iostreams::gzip_decompressor());
+//   in2.push(file2);
+//   int i = 0;
+//   for(std::string line; std::getline(in2, line); )
+//   {
+//     if (i >= n_cycle) {
+//       return all_threads;
+//     }
+//     std::vector<bool> genotype(num_sites);
+//     boost::char_separator<char> sep(" ");
+//     boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
+//     int m = 0;
+//     BOOST_FOREACH(std::string t, tokens)
+//     {
+//       genotype[m] = boost::lexical_cast<bool>(t);
+//       m++;
+//     }
+//     if (genotype.size() != num_sites) {
+//       cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
+//       cerr << " sites, expected " << num_sites << endl;
+//       exit(1);
+//     }
 
-    delete_ID(i);
-    all_threads.push_back(thread(i, genotype));
-    i++;
-  }
-  return all_threads;
-}
+//     delete_ID(i);
+//     all_threads.push_back(thread(i, genotype));
+//     i++;
+//   }
+//   return all_threads;
+// }
 
 /**
  * @brief 
