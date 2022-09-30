@@ -223,7 +223,7 @@ def files(hap_gz, sample, bfile):
     end_time = time.time()
     logging.info(f"Done, in {end_time - start_time} seconds")
 
-def infer(bfile, map_gz, mutation_rate, demography, modality, threads, max_ac=5, cycle_n=0):
+def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=False, max_ac=5, cycle_n=0):
     start_time = time.time()
     logging.info("Starting Threads-inference with the following parameters:")
     logging.info(f"  bfile:          {bfile}")
@@ -259,13 +259,14 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, max_ac=5,
     num_samples = haps.shape[0]
 
     sparse_sites = modality == "snp"
+    use_hmm = modality == "snp"
     threads = []
     samples = []
 
     logging.info("Threading! This could take a while...")
-    if modality == "snp":
+    if modality == "snp" or (modality == "seq" and not adaptive):
         batch_size = int(np.ceil(2e6 / M))
-        bwt = DPBWT(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=False)
+        bwt = DPBWT(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm)
         for k in range(int(np.ceil(num_samples / batch_size))):
             s = k * batch_size
             e = min(num_samples, (k + 1) * batch_size)
@@ -306,12 +307,13 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, max_ac=5,
         for ac in range(max_ac + 1):
             start = int(1 + 1_000 * ac)
             end = int(1 + 1_000 * (ac + 1))
-            use_hmm = False
+            # use_hmm = False
             if ac == 0:
                 start = 0
                 use_hmm = True
                 variant_filter = None
             else:
+                use_hmm = False
                 if ac == max_ac:
                     end = num_samples
                 variant_filter = (ac < acounts) & (acounts < num_samples - ac)
@@ -322,13 +324,11 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, max_ac=5,
                 cm_pos = cm_pos_0[variant_filter]
             mumumultiplier = 0.5 * len(phys_pos) / M
             bwt = DPBWT(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm)
-            try:
-                batch_size = int(np.ceil(2e6 / len(phys_pos)))
-                threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size)
-                assert len(threads) == bwt.num_samples
-            except:
-                import pdb
-                pdb.set_trace()
+
+            batch_size = int(np.ceil(2e6 / len(phys_pos)))
+            threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size)
+            assert len(threads) == bwt.num_samples
+
             if end >= num_samples:
                 break
         samples = [i for i in range(num_samples)]
@@ -371,17 +371,18 @@ def convert(threads, argn, tsz):
 @click.option("--sample", default=None, help="required for 'files'")
 @click.option("--bfile", default=None, help="required for 'files' and 'infer")
 @click.option("--map_gz", default=None, help="required for 'infer'")
+@click.option("--adaptive", default=False, is_flag=True, help="optional for 'infer'")
 @click.option("--mutation_rate", default=None, type=float, help="required for 'infer'")
 @click.option("--demography", default=None, help="required for 'infer'")
 @click.option("--modality", default=None, help="required for 'infer'")
 @click.option("--threads", default=None, help="required for 'infer' and 'convert'")
 @click.option("--argn", default=None, help="required for 'convert'")
 @click.option("--tsz", default=None, help="required for 'convert'")
-def main(mode, hap_gz, sample, bfile, map_gz, mutation_rate, demography, modality, threads, argn, tsz):
+def main(mode, hap_gz, sample, bfile, map_gz, adaptive, mutation_rate, demography, modality, threads, argn, tsz):
     if mode == "files":
         files(hap_gz, sample, bfile)
     elif mode == "infer":
-        infer(bfile, map_gz, mutation_rate, demography, modality, threads)
+        infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=adaptive)
     elif mode == "convert":
         convert(threads, argn, tsz)
     else:
