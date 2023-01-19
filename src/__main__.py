@@ -241,7 +241,7 @@ def files(hap_gz, sample, bfile):
     end_time = time.time()
     logging.info(f"Done, in {end_time - start_time} seconds")
 
-def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=False, max_ac=5, cycle_n=0):
+def infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive=False, max_ac=5, cycle_n=0):
     start_time = time.time()
     logging.info("Starting Threads-inference with the following parameters:")
     logging.info(f"  bfile:          {bfile}")
@@ -407,11 +407,11 @@ def convert(threads, argn, tsz):
 @click.option("--threads", default=None, help="Path to .threads file. Required for 'infer' and 'convert'")
 @click.option("--argn", default=None, help="Path to .argn file. Optional for 'convert'")
 @click.option("--tsz", default=None, help="Path to .tsz file. Optional for 'convert'")
-def main(mode, hap_gz, sample, bfile, map_gz, adaptive, mutation_rate, demography, modality, threads, argn, tsz):
+def main(mode, hap_gz, sample, bfile, map_gz, adaptive, burn_in_left, burn_in_right, mutation_rate, demography, modality, threads, argn, tsz):
     if mode == "files":
         files(hap_gz, sample, bfile)
     elif mode == "infer":
-        infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=adaptive)
+        infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive=adaptive)
     elif mode == "convert":
         convert(threads, argn, tsz)
     else:
