@@ -27,15 +27,18 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def("breakpoints", &HMM::breakpoints);
 
   py::class_<Threads>(m, "Threads")
-      .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int, bool>(),
+      .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int, bool, int,
+                    int>(),
            "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
            py::arg("mutation_rate"), py::arg("Ne") = 2e4, py::arg("sparse_sites") = false,
-           py::arg("n_prune") = -1, py::arg("use_hmm") = false)
+           py::arg("n_prune") = -1, py::arg("use_hmm") = false, py::arg("burn_in_left") = 0,
+           py::arg("burn_in_right") = 0)
       .def(py::init<std::vector<double>, std::vector<double>, double, std::vector<double>,
-                    std::vector<double>, bool, int, bool>(),
+                    std::vector<double>, bool, int, bool, int, int>(),
            "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
            py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"),
-           py::arg("sparse_sites") = false, py::arg("n_prune") = -1, py::arg("use_hmm") = false)
+           py::arg("sparse_sites") = false, py::arg("n_prune") = -1, py::arg("use_hmm") = false,
+           py::arg("burn_in_left") = 0, py::arg("burn_in_right") = 0)
       .def_readonly("num_samples", &Threads::num_samples)
       .def_readonly("num_sites", &Threads::num_sites)
       .def_readonly("mutation_rate", &Threads::mutation_rate)
@@ -46,6 +49,7 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def_readonly("ID_map", &Threads::ID_map)
       .def_readonly("demography", &Threads::demography)
       .def_readonly("hmm", &Threads::hmm)
+      .def("trimmed_positions", &Threads::trimmed_positions)
       .def("delete_hmm", &Threads::delete_hmm)
       .def("mutation_penalties", &Threads::mutation_penalties)
       .def("recombination_penalties", &Threads::recombination_penalties)
