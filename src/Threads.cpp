@@ -1,4 +1,4 @@
-#include "DPBWT.hpp"
+#include "Threads.hpp"
 #include <math.h>
 #include <vector>
 #include <memory>
@@ -23,14 +23,14 @@ using std::endl;
 int END_ALLELE = 0;
 
 
-DPBWT::DPBWT(std::vector<double> _physical_positions, 
-             std::vector<double> _genetic_positions, 
-             double _mutation_rate, 
-             std::vector<double> ne, 
-             std::vector<double> ne_times, 
-             bool _sparse_sites,
-             int _n_prune,
-             bool _use_hmm) :
+Threads::Threads(std::vector<double> _physical_positions, 
+                 std::vector<double> _genetic_positions, 
+                 double _mutation_rate, 
+                 std::vector<double> ne, 
+                 std::vector<double> ne_times, 
+                 bool _sparse_sites,
+                 int _n_prune,
+                 bool _use_hmm) :
   physical_positions(_physical_positions), genetic_positions(_genetic_positions), mutation_rate(_mutation_rate), demography(Demography(ne, ne_times)), sparse_sites(_sparse_sites), n_prune(_n_prune), use_hmm(_use_hmm)
 {
   if (physical_positions.size() != genetic_positions.size()) {
@@ -65,7 +65,6 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
 
   // Initialize both ends of the linked-list columns
   for (int i = 0; i < num_sites + 1; i++) {
-    // site_included.push_back(true);
     tops.emplace_back(std::make_unique<Node>(-1, 0));
     bottoms.emplace_back(std::make_unique<Node>(-1, 1));
     Node* top_i = tops.back().get();
@@ -75,10 +74,8 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
     bottom_i->above = top_i;
 
     if (i > 0) {
-      // tops[i - 1]->w[0] = {top_i, top_i};
       tops[i - 1]->w[0] = top_i;
       tops[i - 1]->w[1] = top_i;
-      // bottoms[i - 1]->w = {bottom_i, bottom_i};
       bottoms[i - 1]->w[0] = bottom_i;
       bottoms[i - 1]->w[1] = bottom_i;
     }
@@ -95,7 +92,7 @@ DPBWT::DPBWT(std::vector<double> _physical_positions,
   }
 }
 
-std::tuple<std::vector<double>, std::vector<double>> DPBWT::site_sizes(std::vector<double> positions) {
+std::tuple<std::vector<double>, std::vector<double>> Threads::site_sizes(std::vector<double> positions) {
   // Find mid-points between sites
   std::vector<double> pos_means(num_sites - 1);
   for (int i = 0; i < num_sites - 1; i++) {
@@ -125,7 +122,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::site_sizes(std::vect
   return std::tuple(boundaries, site_sizes);
 }
 
-void DPBWT::delete_hmm() {
+void Threads::delete_hmm() {
   if (use_hmm) {
     delete hmm;
     use_hmm = false;
@@ -140,20 +137,19 @@ void DPBWT::delete_hmm() {
  * @param i The site 
  * @return Node* Pointer to node below the sequence being inserted at site i+1
  */
-Node* DPBWT::extend_node(Node* t, bool g, int i) {
+Node* Threads::extend_node(Node* t, bool g, int i) {
   Node* t_next;
   if (!g && t->w[g]->sample_ID == -1) {
     // Logic is that if we're at the bottom and have a "0" genotype we jump up to last
     // 0-spot in next column
     t_next = tops[i]->below->w[1];
-    // t_next = tops[t->site]->below->w[1];
   } else {
     t_next = t->w[g];
   }
   return t_next;
 }
 
-void DPBWT::insert(const std::vector<bool>& genotype) {
+void Threads::insert(const std::vector<bool>& genotype) {
   insert(num_samples, genotype);
 }
 /**
@@ -161,7 +157,7 @@ void DPBWT::insert(const std::vector<bool>& genotype) {
  * 
  * @param genotype 
  */
-void DPBWT::insert(const int ID, const std::vector<bool>& genotype) {
+void Threads::insert(const int ID, const std::vector<bool>& genotype) {
 
   if (ID_map.find(ID) != ID_map.end()) {
     cerr << "ID " << ID << " is already in the panel.\n";
@@ -197,7 +193,7 @@ void DPBWT::insert(const int ID, const std::vector<bool>& genotype) {
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
     // Add current thingy to panel
     panel[ID_map[ID]][k + 1] = std::move(std::make_unique<Node>(ID, next_genotype));
-    z_next = panel[ID_map[ID]][k + 1].get(); //.back().get();
+    z_next = panel[ID_map[ID]][k + 1].get();
     tmp = z_k->above;
     while (tmp->sample_ID != -1 && tmp->genotype != g_k) {
       tmp->w[g_k] = z_next;
@@ -247,7 +243,7 @@ void DPBWT::insert(const int ID, const std::vector<bool>& genotype) {
  * 
  * @param ID 
  */
-void DPBWT::delete_ID(int ID) {
+void Threads::delete_ID(int ID) {
   Node* s = panel[ID_map[ID]][0].get();
   // The last sequence in the panel
   int last_ID = panel[num_samples - 1][0]->sample_ID;
@@ -295,7 +291,7 @@ void DPBWT::delete_ID(int ID) {
  * @brief For debugging: print the sample-IDs of the arrayified panel.
  * 
  */
-void DPBWT::print_sorting() {
+void Threads::print_sorting() {
   for (int j = 0; j < num_sites + 1; ++j) {
     Node* node = tops[j].get();
     while (node != nullptr) {
@@ -315,7 +311,7 @@ void DPBWT::print_sorting() {
  * @param genotype 
  * @return std::vector<std::tuple<int, int>> a pair containing path segments (start_pos, id) 
  */
-std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotype) {
+std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genotype) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
   std::vector<double> mu_c;
@@ -458,7 +454,7 @@ std::vector<std::tuple<int, int>> DPBWT::fastLS(const std::vector<bool>& genotyp
  * @return true
  * @return false
  */
-bool DPBWT::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
+bool Threads::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
   int next_above_candidate = t_next->above->sample_ID;
 
   if (next_above_candidate == -1 || g != panel[ID_map[next_above_candidate]][i]->genotype) {
@@ -478,7 +474,7 @@ bool DPBWT::extensible_by(State& s, const Node* t_next, const bool g, const int 
  * 
  * @return double 
  */
-std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties() {
+std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
 
@@ -494,7 +490,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties()
   return std::tuple(mu, mu_c);
 }
 
-std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties_correct() {
+std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_correct() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
 
@@ -510,7 +506,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties_c
   return std::tuple(mu, mu_c);
 }
 
-// std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties_impute5() {
+// std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_impute5() {
 //   std::vector<double> mu(num_sites);
 //   std::vector<double> mu_c(num_sites);
   
@@ -528,7 +524,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::mutation_penalties_c
  * 
  * @return double 
  */
-std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalties() {
+std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_penalties() {
   // Recall: 1cM means the expected average number of intervening 
   // chromosomal crossovers in a single generation is 0.01
   std::vector<double> rho(num_sites);
@@ -553,7 +549,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
  * 
  * @return double 
  */
-std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalties_correct() {
+std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_penalties_correct() {
   // Recall: 1cM means the expected average number of intervening 
   // chromosomal crossovers in a single generation is 0.01
   std::vector<double> rho(num_sites);
@@ -580,7 +576,7 @@ std::tuple<std::vector<double>, std::vector<double>> DPBWT::recombination_penalt
  * @param end exclusive
  * @return double 
  */
-double DPBWT::date_segment(const int id1, const int id2, const int start, const int end) {
+double Threads::date_segment(const int id1, const int id2, const int start, const int end) {
   if (start > end) {
     cerr << "Can't date a segment with length <= 0\n";
     exit(1);
@@ -655,11 +651,11 @@ double DPBWT::date_segment(const int id1, const int id2, const int start, const 
   }
 }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>> DPBWT::thread(const std::vector<bool>& genotype) {
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>> Threads::thread(const std::vector<bool>& genotype) {
   return thread(num_samples, genotype);
 }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>> DPBWT::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>> Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // Compute LS path
   std::vector<std::tuple<int, int>> best_path;
   if (num_samples > 0) {
@@ -715,26 +711,27 @@ std::tuple<std::vector<int>, std::vector<int>, std::vector<double>> DPBWT::threa
       segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
     }
   }
-  return std::tuple(bp_starts, target_IDs, segment_ages);
+  std::vector<int> het_sites = het_sites_from_thread(new_sample_ID, bp_starts, target_IDs);
+  return std::tuple(bp_starts, target_IDs, segment_ages, het_sites);
 }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> DPBWT::thread_with_mutations(const std::vector<bool>& genotype) {
-  return thread_with_mutations(num_samples, genotype);
-}
+// std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> Threads::thread_with_mutations(const std::vector<bool>& genotype) {
+//   return thread_with_mutations(num_samples, genotype);
+// }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> DPBWT::thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype) {
-  std::vector<int> bp_starts;
-  std::vector<int> target_IDs;
-  std::vector<double> segment_ages;
-  std::tie(bp_starts, target_IDs, segment_ages) = thread(new_sample_ID, genotype);
-  auto it = *max_element(std::begin(target_IDs), std::end(target_IDs));
-  std::vector<int> het_sites;
-  std::vector<bool> het_types;
-  std::tie(het_sites, het_types) = het_sites_and_types(new_sample_ID, bp_starts, target_IDs);
-  return std::tuple(bp_starts, target_IDs, segment_ages, het_sites, het_types);
-}
+// std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> Threads::thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype) {
+//   std::vector<int> bp_starts;
+//   std::vector<int> target_IDs;
+//   std::vector<double> segment_ages;
+//   std::tie(bp_starts, target_IDs, segment_ages) = thread(new_sample_ID, genotype);
+//   auto it = *max_element(std::begin(target_IDs), std::end(target_IDs));
+//   std::vector<int> het_sites;
+//   std::vector<bool> het_types;
+//   std::tie(het_sites, het_types) = het_sites_and_types(new_sample_ID, bp_starts, target_IDs);
+//   return std::tuple(bp_starts, target_IDs, segment_ages, het_sites, het_types);
+// }
 
-// std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> DPBWT::thread_from_file(const std::string file_path, const int n_cycle) {
+// std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> Threads::thread_from_file(const std::string file_path, const int n_cycle) {
 //   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> all_threads;
 //   std::ifstream file(file_path, std::ios_base::in | std::ios_base::binary);
 //   try {
@@ -813,7 +810,7 @@ std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<
  * @return true 
  * @return false 
  */
-bool DPBWT::genotype_interval_match(const int id1, const int id2, const int start, const int end) {
+bool Threads::genotype_interval_match(const int id1, const int id2, const int start, const int end) {
   if (id1 == id2) {
     return true;
   }
@@ -831,7 +828,7 @@ bool DPBWT::genotype_interval_match(const int id1, const int id2, const int star
 /**
  *
  */
-std::vector<bool> DPBWT::fetch_het_hom_sites(const int id1, const int id2, const int start, const int end) {
+std::vector<bool> Threads::fetch_het_hom_sites(const int id1, const int id2, const int start, const int end) {
   std::vector<bool> het_hom_sites(end - start);
   for (int i = start; i < end; i++) {
     bool g1 = panel[ID_map[id1]][i]->genotype;
@@ -841,13 +838,8 @@ std::vector<bool> DPBWT::fetch_het_hom_sites(const int id1, const int id2, const
   return het_hom_sites;
 }
 
-/**
- * 
- */
-std::tuple<std::vector<int>, std::vector<bool>> DPBWT::het_sites_and_types(const int focal_ID, const std::vector<int> bp_starts, const std::vector<int> target_IDs) {
+std::vector<int> Threads::het_sites_from_thread(const int focal_ID, const std::vector<int> bp_starts, const std::vector<int> target_IDs) {
   std::vector<int> het_sites;
-  std::vector<bool> het_types;
-
   int num_segments = bp_starts.size();
   int site_i = 0;
   for (int seg_i = 0; seg_i < num_segments; seg_i++) {
@@ -857,7 +849,6 @@ std::tuple<std::vector<int>, std::vector<bool>> DPBWT::het_sites_and_types(const
     while (segment_start <= physical_positions[site_i] && physical_positions[site_i] < segment_end && site_i < num_sites) {
       if (panel[ID_map[focal_ID]][site_i]->genotype != panel[ID_map[target_ID]][site_i]->genotype) {
         het_sites.push_back(physical_positions[site_i]);
-        het_types.push_back(panel[ID_map[focal_ID]][site_i]->genotype);
       }
       site_i++;
     }
@@ -866,7 +857,36 @@ std::tuple<std::vector<int>, std::vector<bool>> DPBWT::het_sites_and_types(const
     cerr << "Found " << site_i + 1 << " sites, expected " << num_sites << endl;
     exit(1);
   }
-  return std::tuple(het_sites, het_types);
+  return het_sites;
+}
+
+/**
+ * 
+ */
+// std::tuple<std::vector<int>, std::vector<bool>> Threads::het_sites_and_types(const int focal_ID, const std::vector<int> bp_starts, const std::vector<int> target_IDs) {
+//   std::vector<int> het_sites;
+//   std::vector<bool> het_types;
+
+//   int num_segments = bp_starts.size();
+//   int site_i = 0;
+//   for (int seg_i = 0; seg_i < num_segments; seg_i++) {
+//     int segment_start = bp_starts[seg_i];
+//     int segment_end = seg_i == num_segments - 1 ? physical_positions.back() + 1 : bp_starts[seg_i + 1];
+//     int target_ID = target_IDs[seg_i];
+//     while (segment_start <= physical_positions[site_i] && physical_positions[site_i] < segment_end && site_i < num_sites) {
+//       if (panel[ID_map[focal_ID]][site_i]->genotype != panel[ID_map[target_ID]][site_i]->genotype) {
+//         het_sites.push_back(physical_positions[site_i]);
+//         het_types.push_back(panel[ID_map[focal_ID]][site_i]->genotype);
+//       }
+//       site_i++;
+//     }
+//   }
+//   if (site_i != num_sites) {
+//     cerr << "Found " << site_i + 1 << " sites, expected " << num_sites << endl;
+//     exit(1);
+//   }
+//   return std::tuple(het_sites, het_types);
+// }
   // for (int i = 0; i < num_sites; i++) {
   //   if (physical_positions[i] >= bp_starts[segment_ID]) {
   //     while (physical_positions[i] >= bp_starts[segment_ID]) {
@@ -881,7 +901,6 @@ std::tuple<std::vector<int>, std::vector<bool>> DPBWT::het_sites_and_types(const
   //     cerr << "wha" << endl;
   //     exit(1);
   //   }
+
   // }
   // return std::tuple(het_sites, het_types);
-
-}

@@ -11,7 +11,7 @@ import arg_needle_lib
 import numpy as np
 import pandas as pd
 
-from threads import DPBWT
+from threads import Threads
 from datetime import datetime
 from pandas_plink import read_plink1_bin
 
@@ -82,7 +82,7 @@ def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size):
                 bwt.insert(g)
             elif i + batch_s == 0:
                 bwt.insert(g)
-                threads.append(([], [], []))
+                threads.append(([], [], [], [i for i, _ in enumerate(hap) if hap]))
             else:
                 threads.append(bwt.thread(g))
     return threads
@@ -91,21 +91,31 @@ def serialize(out, threads, samples, positions):
     num_threads = len(samples)
     num_sites = len(positions)
 
+
     thread_starts = []
+    mut_starts = []
     thread_start = 0
-    all_bps, all_ids, all_ages = [], [], []
+    mut_start = 0
+    all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
     for i, thread in enumerate(threads):
+        bps, ids, ages, het_sites = thread
         # try:
-        if i == 0:
-            bps, ids, ages = [], [], []
-        else:
-            bps, ids, ages = thread
+        #     if i == 0:
+        #         bps, ids, ages, het_sites = [], [], [], thread[3]
+        #     else:
+        # except ValueError:
+        #     import pdb
+        #     pdb.set_trace()
         all_bps += bps
         all_ids += ids
         all_ages += ages
+        all_het_sites += het_sites
         thread_starts.append(thread_start)
+        mut_starts.append(mut_start)
         thread_start += len(bps)
+        mut_start += len(all_het_sites)
     num_stitches = len(all_bps)
+    num_mutations = len(all_het_sites)
 
     assert len(all_bps) == len(all_ids) == len(all_ages)
     assert len(threads) == len(samples)
@@ -114,22 +124,28 @@ def serialize(out, threads, samples, positions):
     f.attrs['datetime_created'] = datetime.now().isoformat()
 
     compression_opts = 9
-    dset_samples = f.create_dataset("samples", (num_threads, 2), dtype=int, compression='gzip',
+    dset_samples = f.create_dataset("samples", (num_threads, 3), dtype=int, compression='gzip',
                                     compression_opts=compression_opts)
-    dset_pos = f.create_dataset("positions", (num_sites), dtype=np.double, compression='gzip',
+    dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
                                  compression_opts=compression_opts)
     dset_targets = f.create_dataset("thread_targets", (num_stitches, 2), dtype=int, compression='gzip',
                                     compression_opts=compression_opts)
     dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
                                  compression_opts=compression_opts)
+    dset_het_s = f.create_dataset("het_sites", (num_mutations), dtype=int, compression='gzip',
+                                 compression_opts=compression_opts)
+
     dset_samples[:, 0] = samples
     dset_samples[:, 1] = thread_starts
+    dset_samples[:, 2] = mut_starts
     dset_pos[:] = positions
 
     dset_targets[:, 0] = all_ids
     dset_targets[:, 1] = all_bps
 
     dset_ages[:] = all_ages
+
+    dset_het_s[:] = all_het_sites
 
     f.close()
 
@@ -271,7 +287,7 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
     logging.info("Threading! This could take a while...")
     if modality == "snp" or (modality == "seq" and not adaptive):
         batch_size = int(np.ceil(2e6 / M))
-        bwt = DPBWT(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm)
+        bwt = Threads(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm)
         for k in range(int(np.ceil(num_samples / batch_size))):
             s = k * batch_size
             e = min(num_samples, (k + 1) * batch_size)
@@ -287,7 +303,7 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
                     threads.append(thread)
                 else:
                     bwt.insert(hap)
-                    threads.append(([], [], []))
+                    threads.append(([], [], [], [i for i, _ in enumerate(hap) if hap]))
                 samples.append(i + s)
             mem_used_GB = psutil.virtual_memory()[3] / 1e9
             if mem_used_GB > max_mem_used_GB:
@@ -334,7 +350,7 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
                 phys_pos = phys_pos_0[variant_filter]
                 cm_pos = cm_pos_0[variant_filter]
             mumumultiplier = 0.5 * len(phys_pos) / M
-            bwt = DPBWT(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm)
+            bwt = Threads(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm)
 
             batch_size = int(np.ceil(2e6 / len(phys_pos)))
             threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size)

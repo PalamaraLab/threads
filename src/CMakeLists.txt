@@ -9,7 +9,7 @@ set(
         Demography.cpp
         Node.cpp
         State.cpp
-        DPBWT.cpp
+        Threads.cpp
         HMM.cpp
 )
 
@@ -18,7 +18,7 @@ set(
         Demography.hpp
         Node.hpp
         State.hpp
-        DPBWT.hpp
+        Threads.hpp
         HMM.hpp
 )
 
