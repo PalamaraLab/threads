@@ -1,17 +1,16 @@
 #include "Demography.hpp"
-#include <math.h>
-#include <vector>
-#include <iostream>
 #include <algorithm> // for std::sort
+#include <iostream>
+#include <math.h>
 #include <stdexcept> // to throw errors
+#include <vector>
 
-using std::endl;
-using std::cout;
 using std::cerr;
+using std::cout;
+using std::endl;
 
-Demography::Demography(std::vector<double> _sizes, std::vector<double> _times) :
-  times(_times), sizes(_sizes), std_times(std::vector<double>()) 
-{
+Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
+    : times(_times), sizes(_sizes), std_times(std::vector<double>()) {
   if (times.size() != sizes.size()) {
     cerr << "Need times and sizes of equal length in demography\n";
     exit(1);
@@ -44,35 +43,36 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times) :
 
   // Compute the expected pairwise coalescent time
   // expected_time = expected_branch_length(2);//0;
-  expected_time = std_to_gen(1);//0;
+  expected_time = std_to_gen(1); // 0;
   // for (int i = 0; i < K; i++) {
   //   double T1 = static_cast<double>(times[i]);
   //   double gamma_k = 1. / sizes[i];
   //   if (i < K - 1) {
   //     double T2 = static_cast<double>(times[i + 1]);
-  //     expected_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) * std::exp(-gamma_k * T2)) / gamma_k;
+  //     expected_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) *
+  //     std::exp(-gamma_k * T2)) / gamma_k;
   //   } else {
   //     expected_time += (gamma_k * T1 + 1) * std::exp(-gamma_k * T1) / gamma_k;
   //   }
   // }
 }
 
-double Demography::std_to_gen(const double t) 
-{
+double Demography::std_to_gen(const double t) {
   if (t < 0) {
     cerr << "Can only convert non-negative times to std.\n";
     exit(1);
   }
   // Find the highest i s.t. std_times[i] <= t.
-  int i = std::distance(std_times.begin(), std::upper_bound(std_times.begin(), std_times.end(), t)) - 1;
+  int i =
+      std::distance(std_times.begin(), std::upper_bound(std_times.begin(), std_times.end(), t)) - 1;
   return times[i] + (t - std_times[i]) * sizes[i];
 }
 
 // /**
 //  * @brief Expected length of branch number N
-//  * 
-//  * @param N 
-//  * @return double 
+//  *
+//  * @param N
+//  * @return double
 //  */
 // double Demography::expected_branch_length(const int N)
 // {
@@ -88,7 +88,8 @@ double Demography::std_to_gen(const double t)
 //     double gamma_k = binom_factor / sizes[i];
 //     if (i < K - 1) {
 //       double T2 = static_cast<double>(times[i + 1]);
-//       e_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) * std::exp(-gamma_k * T2)) / gamma_k;
+//       e_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) *
+//       std::exp(-gamma_k * T2)) / gamma_k;
 //     } else {
 //       e_time += (gamma_k * T1 + 1) * std::exp(-gamma_k * T1) / gamma_k;
 //     }
@@ -98,12 +99,11 @@ double Demography::std_to_gen(const double t)
 
 /**
  * @brief Expected length of branch number N
- * 
- * @param N 
- * @return double 
+ *
+ * @param N
+ * @return double
  */
-double Demography::expected_branch_length(const int N)
-{
+double Demography::expected_branch_length(const int N) {
   return std_to_gen(2. / N);
   // if (N >= 2) {
   //   return std_to_gen(2 / N);
@@ -126,8 +126,10 @@ double Demography::expected_branch_length(const int N)
 
   //   if (k < K - 1) {
   //     double T2 = times[k + 1];
-  //     e_time += coal_fac * ((lambda_k * T1 + 1) - (lambda_k * T2 + 1) * std::exp(-lambda_k * (T2 - T1))) / lambda_k;
-  //     // e_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) * std::exp(-gamma_k * T2)) / gamma_k;
+  //     e_time += coal_fac * ((lambda_k * T1 + 1) - (lambda_k * T2 + 1) * std::exp(-lambda_k * (T2
+  //     - T1))) / lambda_k;
+  //     // e_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) *
+  //     std::exp(-gamma_k * T2)) / gamma_k;
   //   } else {
   //     e_time += coal_fac * (lambda_k * T1 + 1) / lambda_k;
   //   }

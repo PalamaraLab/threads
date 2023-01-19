@@ -1,18 +1,18 @@
 #include "State.hpp"
 
-#include <vector>
-#include <limits>
-#include <iostream>
 #include <algorithm>
+#include <iostream>
+#include <limits>
+#include <vector>
 using std::cout;
 using std::endl;
 
-TracebackState::TracebackState(int _site, int _best_prev_ID, TracebackState* _prev) :
-  site(_site), best_prev_ID(_best_prev_ID), prev(_prev) {
+TracebackState::TracebackState(int _site, int _best_prev_ID, TracebackState* _prev)
+    : site(_site), best_prev_ID(_best_prev_ID), prev(_prev) {
 }
 
-State::State(Node* _below, double _score, TracebackState* _traceback) :
-  below(_below), score(_score), traceback(_traceback) {
+State::State(Node* _below, double _score, TracebackState* _traceback)
+    : below(_below), score(_score), traceback(_traceback) {
 }
 
 bool State::genotype() {
@@ -21,7 +21,7 @@ bool State::genotype() {
 
 ostream& operator<<(ostream& os, State& state) {
   os << "State between nodes " << state.below->sample_ID;
-  os << " and " << state.below->above->sample_ID; 
+  os << " and " << state.below->above->sample_ID;
   os << " with score " << state.score;
   os << ", traceback to " << state.traceback->site;
   os << ", genotype " << state.genotype();
@@ -34,7 +34,8 @@ void StateBranch::insert(const State& state) {
 
 void StateBranch::prune() {
   std::sort(states.begin(), states.end(), [](const State& s1, const State& s2) {
-    return (s1.traceback->site == s2.traceback->site) ? s1.score < s2.score : s1.traceback->site > s2.traceback->site;
+    return (s1.traceback->site == s2.traceback->site) ? s1.score < s2.score
+                                                      : s1.traceback->site > s2.traceback->site;
   });
 
   std::vector<State> new_states;

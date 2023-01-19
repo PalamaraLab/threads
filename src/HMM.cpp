@@ -1,16 +1,17 @@
-#include <vector>
-#include <iostream>
-#include <boost/math/distributions/exponential.hpp>
 #include "HMM.hpp"
+#include <boost/math/distributions/exponential.hpp>
+#include <iostream>
+#include <vector>
 
-using std::ostream;
-using std::cout;
 using std::cerr;
+using std::cout;
 using std::endl;
+using std::ostream;
 
 // todo: eigenify if we want to use this
-HMM::HMM(Demography demography, std::vector<double> bp_sizes, std::vector<double> cm_sizes, double mutation_rate, int K) :
-  num_states(K) {
+HMM::HMM(Demography demography, std::vector<double> bp_sizes, std::vector<double> cm_sizes,
+         double mutation_rate, int K)
+    : num_states(K) {
   expected_times = compute_expected_times(demography, K);
 
   compute_recombination_scores(cm_sizes);
@@ -59,7 +60,7 @@ void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_
     hom_score.push_back(std::vector<double>());
     het_score.push_back(std::vector<double>());
     for (int k = 0; k < num_states; k++) {
-    double t = expected_times[k];
+      double t = expected_times[k];
       const double l = 2. * mutation_rate * bp_sizes[i] * t;
       const double trans = std::log1p(-std::exp(-l));
 
@@ -75,13 +76,13 @@ void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_
 // PSMC to get breakpoints
 std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
   // Stole this from https://en.wikipedia.org/wiki/Viterbi_algorithm hehehe
-  
+
   // Viterbi
   // Initialize
   int L = observations.size();
   std::vector<unsigned short> z(L);
   int end = start + L;
-  for (int i = 0; i < num_states; i ++) {
+  for (int i = 0; i < num_states; i++) {
     double score = observations[0] ? het_score[start][i] : hom_score[start][i];
     trellis[start][i] = score;
   }
@@ -94,7 +95,8 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
       double running_max = 0;
       for (int k = 0; k < num_states; k++) {
         double mut_score = observations[j] ? het_score[j + start][i] : hom_score[j + start][i];
-        double rec_score = k == i ? non_transition_score[j + start][k] : transition_score[j + start][k];
+        double rec_score =
+            k == i ? non_transition_score[j + start][k] : transition_score[j + start][k];
 
         score = trellis[j - 1 + start][k] + rec_score + mut_score;
 

@@ -7,18 +7,16 @@ using std::endl;
 using std::ostream;
 
 Node::Node(int _sample_ID, bool _genotype)
-  : sample_ID(_sample_ID), genotype(_genotype),
-  above(nullptr),
-  below(nullptr),
-  w({nullptr, nullptr}) {
+    : sample_ID(_sample_ID), genotype(_genotype), above(nullptr), below(nullptr),
+      w({nullptr, nullptr}) {
 }
 
 void Node::insert_above(Node* node) {
-	Node* old_above = above;
+  Node* old_above = above;
   old_above->below = node;
-	above = node;
-	node->above = old_above;
-	node->below = this;
+  above = node;
+  node->above = old_above;
+  node->below = this;
 }
 
 ostream& operator<<(ostream& os, const Node& node) {
