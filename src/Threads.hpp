@@ -14,8 +14,6 @@ private:
   std::vector<std::unique_ptr<Node>> bottoms;  // Ha, ha
 
   // Burn-in quantities
-  int trim_pos_start;
-  int trim_pos_end;
   int trim_pos_start_idx;
   int trim_pos_end_idx;
 
@@ -32,6 +30,8 @@ public:
   double mutation_rate;
   int burn_in_left;
   int burn_in_right;
+  double threading_start;
+  double threading_end;
   // This determines the segment dating formula
   bool sparse_sites;
   // Whether to internally break up big segments
@@ -79,8 +79,8 @@ public:
   std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>> thread(const std::vector<bool>& genotype);
   std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>> thread(const int new_sample_ID, const std::vector<bool>& genotype);
   std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
-  remove_burn_in(std::vector<int> bp_starts, std::vector<int> target_IDs,
-                 std::vector<double> segment_ages, std::vector<int> het_sites);
+  remove_burn_in(std::vector<int>& bp_starts, std::vector<int>& target_IDs,
+                 std::vector<double>& segment_ages, std::vector<int>& het_sites);
   // std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const std::vector<bool>& genotype);
   // std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype);
   // std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);

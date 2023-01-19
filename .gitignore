@@ -4,3 +4,4 @@ pybind11
 .vscode
 venv
 *.egg-info
+*/__pycache__

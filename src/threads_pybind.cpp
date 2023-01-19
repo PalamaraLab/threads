@@ -49,6 +49,8 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def_readonly("ID_map", &Threads::ID_map)
       .def_readonly("demography", &Threads::demography)
       .def_readonly("hmm", &Threads::hmm)
+      .def_readonly("threading_start", &Threads::threading_start)
+      .def_readonly("threading_end", &Threads::threading_end)
       .def("trimmed_positions", &Threads::trimmed_positions)
       .def("delete_hmm", &Threads::delete_hmm)
       .def("mutation_penalties", &Threads::mutation_penalties)

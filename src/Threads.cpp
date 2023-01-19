@@ -38,9 +38,9 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
     cerr << "Need at least 3 sites, found " << physical_positions.size() << endl;
     exit(1);
   }
-  else {
-    cout << "Found " << physical_positions.size() << " sites.\n";
-  }
+  // else {
+  //   cout << "Found " << physical_positions.size() << " sites.\n";
+  // }
   if (mutation_rate <= 0) {
     cerr << "Need a strictly positive mutation rate.\n";
     exit(1);
@@ -63,11 +63,11 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
   }
 
   // Initialize map burn-in
-  trim_pos_start = physical_positions.front() + burn_in_left;
-  trim_pos_end = physical_positions.back() - burn_in_right;
+  threading_start = physical_positions.front() + burn_in_left;
+  threading_end = physical_positions.back() - burn_in_right;
   trim_pos_start_idx = 0;
   for (int i = 0; i < num_sites; i++) {
-    if (trim_pos_start <= physical_positions[i]) {
+    if (threading_start <= physical_positions[i]) {
       break;
     }
     else {
@@ -75,9 +75,9 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
     }
   }
   // Keep segments that end before trim_pos_end
-  trim_pos_end_idx = 0;
+  trim_pos_end_idx = num_sites;
   for (int i = num_sites - 1; i >= 0; i--) {
-    if (physical_positions[i] < trim_pos_end) {
+    if (physical_positions[i] <= threading_end) {
       break;
     }
     else {
@@ -86,6 +86,7 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
   }
   if (trim_pos_start_idx >= trim_pos_end_idx - 3) {
     cerr << "Too few positions left after applying burn-in, need at least 3. Aborting." << endl;
+    exit(1);
   }
 
   // Initialize both ends of the linked-list columns
@@ -153,9 +154,8 @@ Threads::site_sizes(std::vector<double> positions) {
  *
  */
 std::vector<double> Threads::trimmed_positions() {
-  std::vector<double> trim_pos(physical_positions.begin() + trim_pos_start_idx,
-                               physical_positions.begin() + trim_pos_end_idx);
-  trim_pos[0] = trim_pos_start;
+  std::vector<double> trim_pos = {physical_positions.cbegin() + trim_pos_start_idx,
+                                  physical_positions.cbegin() + trim_pos_end_idx};
   return trim_pos;
 }
 
@@ -789,140 +789,50 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
 }
 
 std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
-Threads::remove_burn_in(std::vector<int> bp_starts, std::vector<int> target_IDs,
-                        std::vector<double> segment_ages, std::vector<int> het_sites) {
+Threads::remove_burn_in(std::vector<int>& bp_starts, std::vector<int>& target_IDs,
+                        std::vector<double>& segment_ages, std::vector<int>& het_sites) {
   int num_segments = bp_starts.size();
 
   std::vector<int> trim_starts;
   std::vector<int> trim_IDs;
   std::vector<double> trim_ages;
+
   if (num_segments > 0) {
-    // Keep segments that start on or before trim_pos_start
+    // Keep segments that start on or before threading_start
     int seg_start_i = 0;
     for (int i = 0; i < num_segments; i++) {
-      if (trim_pos_start <= bp_starts[i]) {
+      int seg_end = i == num_segments - 1 ? threading_end : bp_starts[i + 1];
+      if (threading_start < seg_end) {
         break;
       }
       else {
         seg_start_i++;
       }
     }
-
-    // Keep segments that end before trim_pos_end
+    // Keep segments that end on or before threading_end
     int seg_end_i = num_segments;
     for (int i = num_segments - 1; i >= 0; i--) {
-      if (bp_starts[i] < trim_pos_end) {
+      if (bp_starts[i] <= threading_end) {
         break;
       }
       else {
         seg_end_i--;
       }
     }
-
-    std::vector<int> trim_starts(bp_starts.begin() + seg_start_i, bp_starts.begin() + seg_end_i);
-    trim_starts[0] = trim_pos_start;
-    std::vector<int> trim_IDs(target_IDs.begin() + seg_start_i, target_IDs.begin() + seg_end_i);
-    std::vector<double> trim_ages(
-        segment_ages.begin() + seg_start_i, segment_ages.begin() + seg_end_i);
+    trim_starts = {bp_starts.begin() + seg_start_i, bp_starts.begin() + seg_end_i};
+    trim_starts[0] = threading_start;
+    trim_IDs = {target_IDs.begin() + seg_start_i, target_IDs.begin() + seg_end_i};
+    trim_ages = {segment_ages.begin() + seg_start_i, segment_ages.begin() + seg_end_i};
   }
 
   std::vector<int> trim_hets;
-  if (het_sites.size() > 0) {
-    std::vector<int> trim_hets(
-        het_sites.begin() + trim_pos_start_idx, het_sites.begin() + trim_pos_end_idx);
+  for (const auto site : het_sites) {
+    if (threading_start <= site && site <= threading_end) {
+      trim_hets.push_back(site);
+    }
   }
   return std::tie(trim_starts, trim_IDs, trim_ages, trim_hets);
 }
-// std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>,
-// std::vector<bool>> Threads::thread_with_mutations(const std::vector<bool>& genotype) {
-//   return thread_with_mutations(num_samples, genotype);
-// }
-
-// std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>,
-// std::vector<bool>> Threads::thread_with_mutations(const int new_sample_ID, const
-// std::vector<bool>& genotype) {
-//   std::vector<int> bp_starts;
-//   std::vector<int> target_IDs;
-//   std::vector<double> segment_ages;
-//   std::tie(bp_starts, target_IDs, segment_ages) = thread(new_sample_ID, genotype);
-//   auto it = *max_element(std::begin(target_IDs), std::end(target_IDs));
-//   std::vector<int> het_sites;
-//   std::vector<bool> het_types;
-//   std::tie(het_sites, het_types) = het_sites_and_types(new_sample_ID, bp_starts, target_IDs);
-//   return std::tuple(bp_starts, target_IDs, segment_ages, het_sites, het_types);
-// }
-
-// std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>>
-// Threads::thread_from_file(const std::string file_path, const int n_cycle) {
-//   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> all_threads;
-//   std::ifstream file(file_path, std::ios_base::in | std::ios_base::binary);
-//   try {
-//     // threading pass
-//     boost::iostreams::filtering_istream in;
-//     in.push(boost::iostreams::gzip_decompressor());
-//     in.push(file);
-//     int i = 0;
-//     for(std::string line; std::getline(in, line); )
-//     {
-//       std::vector<bool> genotype;
-//       boost::char_separator<char> sep(" ");
-//       boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
-//       BOOST_FOREACH(std::string t, tokens)
-//       {
-//         genotype.push_back(boost::lexical_cast<bool>(t));
-//       }
-//       if (genotype.size() != num_sites) {
-//         cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
-//         cerr << " sites, expected " << num_sites << endl;
-//         exit(1);
-//       }
-//       if (i == 0) {
-//         insert(genotype);
-//         all_threads.push_back(std::tuple<std::vector<int>, std::vector<int>,
-//         std::vector<double>>({}, {}, {}));
-//       } else {
-//         all_threads.push_back(thread(i, genotype));
-//       }
-//       i++;
-//     }
-//   }
-//   catch(const boost::iostreams::gzip_error& e) {
-//     std::cout << e.what() << '\n';
-//   }
-//   file.close();
-
-//   //cycling pass
-//   std::ifstream file2(file_path, std::ios_base::in | std::ios_base::binary);
-//   boost::iostreams::filtering_istream in2;
-//   in2.push(boost::iostreams::gzip_decompressor());
-//   in2.push(file2);
-//   int i = 0;
-//   for(std::string line; std::getline(in2, line); )
-//   {
-//     if (i >= n_cycle) {
-//       return all_threads;
-//     }
-//     std::vector<bool> genotype(num_sites);
-//     boost::char_separator<char> sep(" ");
-//     boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
-//     int m = 0;
-//     BOOST_FOREACH(std::string t, tokens)
-//     {
-//       genotype[m] = boost::lexical_cast<bool>(t);
-//       m++;
-//     }
-//     if (genotype.size() != num_sites) {
-//       cerr << "Invalid genotype for haplotype " << i << ", found " << genotype.size();
-//       cerr << " sites, expected " << num_sites << endl;
-//       exit(1);
-//     }
-
-//     delete_ID(i);
-//     all_threads.push_back(thread(i, genotype));
-//     i++;
-//   }
-//   return all_threads;
-// }
 
 /**
  * @brief
@@ -988,51 +898,3 @@ std::vector<int> Threads::het_sites_from_thread(const int focal_ID,
   }
   return het_sites;
 }
-
-/**
- *
- */
-// std::tuple<std::vector<int>, std::vector<bool>> Threads::het_sites_and_types(const int focal_ID,
-// const std::vector<int> bp_starts, const std::vector<int> target_IDs) {
-//   std::vector<int> het_sites;
-//   std::vector<bool> het_types;
-
-//   int num_segments = bp_starts.size();
-//   int site_i = 0;
-//   for (int seg_i = 0; seg_i < num_segments; seg_i++) {
-//     int segment_start = bp_starts[seg_i];
-//     int segment_end = seg_i == num_segments - 1 ? physical_positions.back() + 1 : bp_starts[seg_i
-//     + 1]; int target_ID = target_IDs[seg_i]; while (segment_start <= physical_positions[site_i]
-//     && physical_positions[site_i] < segment_end && site_i < num_sites) {
-//       if (panel[ID_map[focal_ID]][site_i]->genotype !=
-//       panel[ID_map[target_ID]][site_i]->genotype) {
-//         het_sites.push_back(physical_positions[site_i]);
-//         het_types.push_back(panel[ID_map[focal_ID]][site_i]->genotype);
-//       }
-//       site_i++;
-//     }
-//   }
-//   if (site_i != num_sites) {
-//     cerr << "Found " << site_i + 1 << " sites, expected " << num_sites << endl;
-//     exit(1);
-//   }
-//   return std::tuple(het_sites, het_types);
-// }
-// for (int i = 0; i < num_sites; i++) {
-//   if (physical_positions[i] >= bp_starts[segment_ID]) {
-//     while (physical_positions[i] >= bp_starts[segment_ID]) {
-//       segment_ID++;
-//     }
-//   }
-//   if (panel[ID_map[focal_ID]][i]->genotype != panel[ID_map[target_IDs[segment_ID]]][i]->genotype)
-//   {
-//     het_sites.push_back(bp_starts[i]);
-//     het_types.push_back(panel[ID_map[focal_ID]][i]->genotype);
-//   }
-//   if (segment_ID > num_segments) {
-//     cerr << "wha" << endl;
-//     exit(1);
-//   }
-
-// }
-// return std::tuple(het_sites, het_types);
