@@ -279,13 +279,13 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
     ne_times, ne_sizes = parse_demography(demography)
     num_samples = haps.shape[0]
 
-    sparse_sites = modality == "snp"
-    use_hmm = modality == "snp"
+    sparse_sites = modality == "array"
+    use_hmm = modality == "array"
     threads = []
     samples = []
 
     logging.info("Threading! This could take a while...")
-    if modality == "snp" or (modality == "seq" and not adaptive):
+    if modality == "array" or (modality == "seq" and not adaptive):
         batch_size = int(np.ceil(2e6 / M))
         bwt = Threads(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm)
         for k in range(int(np.ceil(num_samples / batch_size))):
@@ -394,17 +394,19 @@ def convert(threads, argn, tsz):
 
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
-@click.option("--hap_gz", default=None, help="required for 'files'")
-@click.option("--sample", default=None, help="required for 'files'")
-@click.option("--bfile", default=None, help="required for 'files' and 'infer")
-@click.option("--map_gz", default=None, help="required for 'infer'")
-@click.option("--adaptive", default=False, is_flag=True, help="optional for 'infer'")
-@click.option("--mutation_rate", default=None, type=float, help="required for 'infer'")
-@click.option("--demography", default=None, help="required for 'infer'")
-@click.option("--modality", default=None, help="required for 'infer'")
-@click.option("--threads", default=None, help="required for 'infer' and 'convert'")
-@click.option("--argn", default=None, help="required for 'convert'")
-@click.option("--tsz", default=None, help="required for 'convert'")
+@click.option("--hap_gz", default=None, help="Path to Oxford-format haps file. Required for 'files'")
+@click.option("--sample", default=None, help="Path to Oxford-format sample file. Required for 'files'")
+@click.option("--bfile", default=None, help="Prefix of threads-generated PLINK files. Required for 'files' and 'infer")
+@click.option("--map_gz", default=None, help="Genotype map. Required for 'infer'")
+@click.option("--adaptive", default=False, is_flag=True, help="If set, ultra-rare sites are gradually trimmed. Optional for 'infer'")
+@click.option("--burn_in_left", default=0, is_flag=True, help="Length of left burn-in in base-pairs. Optional for 'infer'")
+@click.option("--burn_in_right", default=0, is_flag=True, help="Length of right burn-in in base-pairs. Optional for 'infer'")
+@click.option("--mutation_rate", default=None, type=float, help="Per-site-per-generation SNP mutation rate. Required for 'infer'")
+@click.option("--demography", default=None, help="Path to file containing demographic history. Required for 'infer'")
+@click.option("--modality", default=None, type=click.Choice(['array', 'seq'], case_sensitive=False), help="Either 'array' or 'seq'. Required for 'infer'")
+@click.option("--threads", default=None, help="Path to .threads file. Required for 'infer' and 'convert'")
+@click.option("--argn", default=None, help="Path to .argn file. Optional for 'convert'")
+@click.option("--tsz", default=None, help="Path to .tsz file. Optional for 'convert'")
 def main(mode, hap_gz, sample, bfile, map_gz, adaptive, mutation_rate, demography, modality, threads, argn, tsz):
     if mode == "files":
         files(hap_gz, sample, bfile)
