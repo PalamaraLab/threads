@@ -47,8 +47,8 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
   }
   num_sites = physical_positions.size();
   num_samples = 0;
-  // num_sites_pruned = 0;
 
+  // Check maps are strictly increasing
   for (int i = 0; i < num_sites - 1; i++) {
     if (physical_positions[i + 1] <= physical_positions[i]) {
       cerr << "Physical positions must be strictly increasing, found ";
@@ -60,6 +60,32 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
       cerr << genetic_positions[i + 1] << " after " << genetic_positions[i] << endl;
       exit(1);
     }
+  }
+
+  // Initialize map burn-in
+  trim_pos_start = physical_positions.front() + burn_in_left;
+  trim_pos_end = physical_positions.back() - burn_in_right;
+  trim_pos_start_idx = 0;
+  for (int i = 0; i < num_sites; i++) {
+    if (trim_pos_start <= physical_positions[i]) {
+      break;
+    }
+    else {
+      trim_pos_start_idx++;
+    }
+  }
+  // Keep segments that end before trim_pos_end
+  trim_pos_end_idx = 0;
+  for (int i = num_sites - 1; i >= 0; i--) {
+    if (physical_positions[i] < trim_pos_end) {
+      break;
+    }
+    else {
+      trim_pos_end_idx--;
+    }
+  }
+  if (trim_pos_start_idx >= trim_pos_end_idx - 3) {
+    cerr << "Too few positions left after applying burn-in, need at least 3. Aborting." << endl;
   }
 
   // Initialize both ends of the linked-list columns
@@ -121,6 +147,16 @@ Threads::site_sizes(std::vector<double> positions) {
     boundaries[i] = pos_means[i - 1];
   }
   return std::tuple(boundaries, site_sizes);
+}
+
+/**
+ *
+ */
+std::vector<double> Threads::trimmed_positions() {
+  std::vector<double> trim_pos(physical_positions.begin() + trim_pos_start_idx,
+                               physical_positions.begin() + trim_pos_end_idx);
+  trim_pos[0] = trim_pos_start;
+  return trim_pos;
 }
 
 void Threads::delete_hmm() {
@@ -755,6 +791,47 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
 std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
 Threads::remove_burn_in(std::vector<int> bp_starts, std::vector<int> target_IDs,
                         std::vector<double> segment_ages, std::vector<int> het_sites) {
+  int num_segments = bp_starts.size();
+
+  std::vector<int> trim_starts;
+  std::vector<int> trim_IDs;
+  std::vector<double> trim_ages;
+  if (num_segments > 0) {
+    // Keep segments that start on or before trim_pos_start
+    int seg_start_i = 0;
+    for (int i = 0; i < num_segments; i++) {
+      if (trim_pos_start <= bp_starts[i]) {
+        break;
+      }
+      else {
+        seg_start_i++;
+      }
+    }
+
+    // Keep segments that end before trim_pos_end
+    int seg_end_i = num_segments;
+    for (int i = num_segments - 1; i >= 0; i--) {
+      if (bp_starts[i] < trim_pos_end) {
+        break;
+      }
+      else {
+        seg_end_i--;
+      }
+    }
+
+    std::vector<int> trim_starts(bp_starts.begin() + seg_start_i, bp_starts.begin() + seg_end_i);
+    trim_starts[0] = trim_pos_start;
+    std::vector<int> trim_IDs(target_IDs.begin() + seg_start_i, target_IDs.begin() + seg_end_i);
+    std::vector<double> trim_ages(
+        segment_ages.begin() + seg_start_i, segment_ages.begin() + seg_end_i);
+  }
+
+  std::vector<int> trim_hets;
+  if (het_sites.size() > 0) {
+    std::vector<int> trim_hets(
+        het_sites.begin() + trim_pos_start_idx, het_sites.begin() + trim_pos_end_idx);
+  }
+  return std::tie(trim_starts, trim_IDs, trim_ages, trim_hets);
 }
 // std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>,
 // std::vector<bool>> Threads::thread_with_mutations(const std::vector<bool>& genotype) {
