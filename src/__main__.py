@@ -3,6 +3,7 @@ import time
 import h5py
 import tszip
 import click
+import psutil
 import logging
 import subprocess
 import arg_needle_lib
@@ -201,7 +202,7 @@ def files(hap_gz, sample, bfile):
     if bfile is None:
         raise ValueError("Need to specify a bfile")
     logging.info("Starting Threads-file preparation with the following parameters:")
-    logging.info(f"  hap_gz: {bfile}")
+    logging.info(f"  hap_gz: {hap_gz}")
     logging.info(f"  sample: {sample}")
     logging.info(f"  bfile:  {bfile}")
 
@@ -215,6 +216,7 @@ def files(hap_gz, sample, bfile):
     # This adds an empty column next to all the haps to trick plink1 into reading haploids
     awk_cmd = '{printf "1 "; for (i=2; i<6; i++) printf $i " "; for (i=6; i<NF; i++) printf $i " 0 "; print $NF " 0"}'
     subprocess.run(f"zcat {hap_gz} | awk '{awk_cmd}' | gzip > {new_hap_gz}", shell=True, check=True)
+    logging.info(f"Making {bfile}.[bim, bed, fam, acount]")
     subprocess.run(["plink2", "--make-bed", "--haps", new_hap_gz, "--sample", new_sample, "--freq", "counts", "--out", bfile], check=True)
     logging.info(f"Removing tmp file {new_sample}")
     subprocess.run(f"rm {new_sample}", shell=True, check=True)
@@ -246,6 +248,9 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
     if mutation_rate is None:
         raise RuntimeError("Missing required argument --mutation_rate")
     threads_out = threads
+
+    # Keep track of pc
+    max_mem_used_GB = 0
 
     cm_pos, phys_pos = read_map_gz(map_gz)
     logging.info(f"Found a genotype map with {len(phys_pos)} markers")
@@ -284,6 +289,9 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
                     bwt.insert(hap)
                     threads.append(([], [], []))
                 samples.append(i + s)
+            mem_used_GB = psutil.virtual_memory()[3] / 1e9
+            if mem_used_GB > max_mem_used_GB:
+                max_mem_used_GB = mem_used_GB
         if cycle_n > 0:
             logging.info("Cycling! This shouldn't take too long...")
             haps_chunk = haps[:min(num_samples, cycle_n)].values.astype(bool)
@@ -293,6 +301,9 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
                 bwt.delete_ID(i)
                 thread = bwt.thread(i, g)
                 threads.append(thread)
+                mem_used_GB = psutil.virtual_memory()[3] / 1e9
+                if mem_used_GB > max_mem_used_GB:
+                    max_mem_used_GB = mem_used_GB
     else:
         counts_path = f"{bfile}.acount"
         counts_df = pd.read_table(counts_path)
@@ -336,7 +347,7 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, adaptive=
     logging.info(f"Saving results to {threads_out}")
     serialize(threads_out, threads, samples, phys_pos_0)
     end_time = time.time()
-    logging.info(f"Done, in (s): {end_time - start_time}")
+    logging.info(f"Done in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM")
 
 def convert(threads, argn, tsz):
     start_time = time.time()
