@@ -87,7 +87,7 @@ def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size):
                 threads.append(bwt.thread(g))
     return threads
 
-def serialize(out, threads, samples, positions):
+def serialize(out, threads, samples, positions, arg_range):
     num_threads = len(samples)
     num_sites = len(positions)
 
@@ -133,7 +133,9 @@ def serialize(out, threads, samples, positions):
     dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
                                  compression_opts=compression_opts)
     dset_het_s = f.create_dataset("het_sites", (num_mutations), dtype=int, compression='gzip',
-                                 compression_opts=compression_opts)
+                                  compression_opts=compression_opts)
+    dset_range = f.create_dataset("arg_range", (2), dtype=np.double, compression='gzip',
+                                  compression_opts=compression_opts)
 
     dset_samples[:, 0] = samples
     dset_samples[:, 1] = thread_starts
@@ -146,6 +148,8 @@ def serialize(out, threads, samples, positions):
     dset_ages[:] = all_ages
 
     dset_het_s[:] = all_het_sites
+
+    dset_range[:] = arg_range
 
     f.close()
 
@@ -206,7 +210,12 @@ def decompress_threads(threads):
         "positions": positions
     }
 
-def files(hap_gz, sample, bfile):
+@click.command()
+@click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
+@click.option("--hap_gz", required=True, help="Path to Oxford-format haps file. Required for 'files'")
+@click.option("--sample", required=True, help="Path to Oxford-format sample file. Required for 'files'")
+@click.option("--bfile", required=True, help="Prefix of threads-generated PLINK files. Required for 'files' and 'infer")
+def files(mode, hap_gz, sample, bfile):
     """
     Prepares funky phased bedfiles for Threads inference as well as the allele count file
     """
@@ -217,7 +226,7 @@ def files(hap_gz, sample, bfile):
         raise ValueError("Need to specify a sample")
     if bfile is None:
         raise ValueError("Need to specify a bfile")
-    logging.info("Starting Threads-file preparation with the following parameters:")
+    logging.info(f"Starting Threads-{mode} with the following parameters:")
     logging.info(f"  hap_gz: {hap_gz}")
     logging.info(f"  sample: {sample}")
     logging.info(f"  bfile:  {bfile}")
@@ -241,28 +250,41 @@ def files(hap_gz, sample, bfile):
     end_time = time.time()
     logging.info(f"Done, in {end_time - start_time} seconds")
 
-def infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive=False, max_ac=5, cycle_n=0):
+@click.command()
+@click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
+@click.option("--bfile", required=True, help="Prefix of threads-generated PLINK files.")
+@click.option("--map_gz", required=True, help="Path to genotype map")
+@click.option("--adaptive", default=False, is_flag=True, help="If set, ultra-rare sites are gradually trimmed.")
+@click.option("--mutation_rate", required=True, type=float, help="Per-site-per-generation SNP mutation rate.")
+@click.option("--demography", required=True, help="Path to file containing demographic history.")
+@click.option("--modality", required=True, type=click.Choice(['array', 'seq'], case_sensitive=False), help="Inference mode, must be either 'array' or 'seq'.")
+@click.option("--threads", required=True, help="Path to output .threads file.")
+@click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
+@click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
+def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_left=0, burn_in_right=0, adaptive=False, max_ac=5, cycle_n=0):
     start_time = time.time()
-    logging.info("Starting Threads-inference with the following parameters:")
+    # if bfile is None:
+    #     raise RuntimeError("Missing required argument --bfile")
+    # if map_gz is None:
+    #     raise RuntimeError("Missing required argument --map_gz")
+    # if threads is None:
+    #     raise RuntimeError("Missing required argument --threads")
+    # if bfile is None:
+    #     raise RuntimeError("Missing required argument --bfile")
+    # if demography is None:
+    #     raise RuntimeError("Missing required argument --demography")
+    # if mutation_rate is None:
+    #     raise RuntimeError("Missing required argument --mutation_rate")
+
+    logging.info(f"Starting Threads-{mode} with the following parameters:")
     logging.info(f"  bfile:          {bfile}")
     logging.info(f"  map_gz:         {map_gz}")
     logging.info(f"  threads:        {threads}")
     logging.info(f"  demography:     {demography}")
     logging.info(f"  mutation_rate:  {mutation_rate}")
     logging.info(f"  cycle_n:        {cycle_n}")
-    logging.info(f"  modality:       {modality}")
-    if bfile is None:
-        raise RuntimeError("Missing required argument --bfile")
-    if map_gz is None:
-        raise RuntimeError("Missing required argument --map_gz")
-    if threads is None:
-        raise RuntimeError("Missing required argument --threads")
-    if bfile is None:
-        raise RuntimeError("Missing required argument --bfile")
-    if demography is None:
-        raise RuntimeError("Missing required argument --demography")
-    if mutation_rate is None:
-        raise RuntimeError("Missing required argument --mutation_rate")
+    logging.info(f"  burn_in_left:   {burn_in_left}")
+    logging.info(f"  burn_in_right:  {burn_in_right}")
     threads_out = threads
 
     # Keep track of pc
@@ -274,20 +296,22 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_l
     logging.info(f"Found genotype of shape {haps.shape}")
 
     phys_pos_0 = phys_pos
+    arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right)
     cm_pos_0 = cm_pos
     M = len(phys_pos_0)
     ne_times, ne_sizes = parse_demography(demography)
     num_samples = haps.shape[0]
 
     sparse_sites = modality == "array"
-    use_hmm = modality == "array"
+    use_hmm = modality != "array"
     threads = []
     samples = []
 
     logging.info("Threading! This could take a while...")
     if modality == "array" or (modality == "seq" and not adaptive):
         batch_size = int(np.ceil(2e6 / M))
-        bwt = Threads(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm)
+        bwt = Threads(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
+        assert (bwt.threading_start, bwt.threading_end) == arg_range
         for k in range(int(np.ceil(num_samples / batch_size))):
             s = k * batch_size
             e = min(num_samples, (k + 1) * batch_size)
@@ -303,7 +327,7 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_l
                     threads.append(thread)
                 else:
                     bwt.insert(hap)
-                    threads.append(([], [], [], [i for i, _ in enumerate(hap) if hap]))
+                    threads.append(([], [], [], [i for i, h in enumerate(hap) if h]))
                 samples.append(i + s)
             mem_used_GB = psutil.virtual_memory()[3] / 1e9
             if mem_used_GB > max_mem_used_GB:
@@ -334,13 +358,12 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_l
         for ac in range(max_ac + 1):
             start = int(1 + 1_000 * ac)
             end = int(1 + 1_000 * (ac + 1))
-            # use_hmm = False
+            use_hmm = False
             if ac == 0:
                 start = 0
                 use_hmm = True
                 variant_filter = None
             else:
-                use_hmm = False
                 if ac == max_ac:
                     end = num_samples
                 variant_filter = (ac < acounts) & (acounts < num_samples - ac)
@@ -350,7 +373,8 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_l
                 phys_pos = phys_pos_0[variant_filter]
                 cm_pos = cm_pos_0[variant_filter]
             mumumultiplier = 0.5 * len(phys_pos) / M
-            bwt = Threads(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm)
+            bwt = Threads(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
+            assert (bwt.threading_start, bwt.threading_end) == arg_range
 
             batch_size = int(np.ceil(2e6 / len(phys_pos)))
             threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size)
@@ -361,18 +385,23 @@ def infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_l
         samples = [i for i in range(num_samples)]
 
     logging.info(f"Saving results to {threads_out}")
-    serialize(threads_out, threads, samples, phys_pos_0)
+    serialize(threads_out, threads, samples, phys_pos_0, arg_range)
     end_time = time.time()
     logging.info(f"Done in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM")
 
-def convert(threads, argn, tsz):
+
+@click.command()
+@click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
+@click.option("--threads", required=True, help="Path to an input .threads file.")
+@click.option("--argn", default=None, help="Path to an output .argn file.")
+@click.option("--tsz", default=None, help="Path to an output .tsz file.")
+def convert(mode, threads, argn, tsz):
     start_time = time.time()
-    logging.info("Starting Threads-inference with the following parameters:")
+    logging.info(f"Starting Threads-{mode} with the following parameters:")
     logging.info(f"  threads: {threads}")
     logging.info(f"  argn:    {argn}")
     logging.info(f"  tsz:     {tsz}")
-    if threads is None:
-        logging.info(f"Missing required argument --threads")
+
     if argn is None and tsz is None:
         logging.info(f"Nothing to do, quitting.")
         sys.exit(0)
@@ -392,30 +421,36 @@ def convert(threads, argn, tsz):
         tszip.compress(arg_needle_lib.arg_to_tskit(arg), tsz)
     logging.info(f"Done, in {time.time() - start_time} seconds")
 
-@click.command()
-@click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
-@click.option("--hap_gz", default=None, help="Path to Oxford-format haps file. Required for 'files'")
-@click.option("--sample", default=None, help="Path to Oxford-format sample file. Required for 'files'")
-@click.option("--bfile", default=None, help="Prefix of threads-generated PLINK files. Required for 'files' and 'infer")
-@click.option("--map_gz", default=None, help="Genotype map. Required for 'infer'")
-@click.option("--adaptive", default=False, is_flag=True, help="If set, ultra-rare sites are gradually trimmed. Optional for 'infer'")
-@click.option("--burn_in_left", default=0, is_flag=True, help="Length of left burn-in in base-pairs. Optional for 'infer'")
-@click.option("--burn_in_right", default=0, is_flag=True, help="Length of right burn-in in base-pairs. Optional for 'infer'")
-@click.option("--mutation_rate", default=None, type=float, help="Per-site-per-generation SNP mutation rate. Required for 'infer'")
-@click.option("--demography", default=None, help="Path to file containing demographic history. Required for 'infer'")
-@click.option("--modality", default=None, type=click.Choice(['array', 'seq'], case_sensitive=False), help="Either 'array' or 'seq'. Required for 'infer'")
-@click.option("--threads", default=None, help="Path to .threads file. Required for 'infer' and 'convert'")
-@click.option("--argn", default=None, help="Path to .argn file. Optional for 'convert'")
-@click.option("--tsz", default=None, help="Path to .tsz file. Optional for 'convert'")
-def main(mode, hap_gz, sample, bfile, map_gz, adaptive, burn_in_left, burn_in_right, mutation_rate, demography, modality, threads, argn, tsz):
-    if mode == "files":
-        files(hap_gz, sample, bfile)
-    elif mode == "infer":
-        infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive=adaptive)
-    elif mode == "convert":
-        convert(threads, argn, tsz)
-    else:
-        raise ValueError(f"Unknown mode {mode}")
+# def main(mode, hap_gz, sample, bfile, map_gz, adaptive, burn_in_left, burn_in_right, mutation_rate, demography, modality, threads, argn, tsz):
+#     if mode == "files":
+#         files(hap_gz, sample, bfile)
+#     elif mode == "infer":
+#         infer(bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive=adaptive)
+#     elif mode == "convert":
+#         convert(threads, argn, tsz)
+#     elif mode == "impute":
+#         impute(bfile_panel, bfile_target, map_gz, mutation_rate, demography, modality, output, burn_in_left, burn_in_right, adaptive=adaptive)
+#     else:
+#         raise ValueError(f"Unknown mode {mode}")
 
 if __name__ == "__main__":
-    main()
+    print(sys.argv)
+    if len(sys.argv) < 2:
+        print("Threads must be called with one of the threads functions: files, infer, convert, impute.")
+        sys.exit()
+    else:
+        mode = sys.argv[1]
+        if mode == "files":
+            files()
+        elif mode == "infer":
+            infer()
+        elif mode == "convert":
+            convert()
+        # elif mode == "impute":
+        #     impute()
+        elif mode == "-h" or mode == "--help":
+            print("See documentation for each of the Threads functions: files, infer, convert, impute.")
+        else:
+            print(f"Unknown mode {mode}")
+            sys.exit()
+    # main()
