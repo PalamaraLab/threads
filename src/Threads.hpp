@@ -70,7 +70,7 @@ public:
   // Insert and assign specific ID
   void insert(const int ID, const std::vector<bool>& genotype);
   // Remove sample from panel
-  void delete_ID(int ID);
+  void remove(int ID);
 
   // HMM
   void delete_hmm();
