@@ -61,7 +61,7 @@ PYBIND11_MODULE(threads_python_bindings, m) {
            py::arg("genotypes"))
       .def("insert", py::overload_cast<const int, const std::vector<bool>&>(&Threads::insert),
            py::arg("ID"), py::arg("genotypes"))
-      .def("delete_ID", &Threads::delete_ID, py::arg("ID"))
+      .def("remove", &Threads::remove, py::arg("ID"))
       .def("print_sorting", &Threads::print_sorting)
       .def("thread", py::overload_cast<const std::vector<bool>&>(&Threads::thread),
            py::arg("genotypes"))

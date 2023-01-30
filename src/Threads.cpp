@@ -64,7 +64,7 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
 
   // Initialize map burn-in
   threading_start = physical_positions.front() + burn_in_left;
-  threading_end = physical_positions.back() - burn_in_right;
+  threading_end = physical_positions.back() - burn_in_right + 1;
   trim_pos_start_idx = 0;
   for (int i = 0; i < num_sites; i++) {
     if (threading_start <= physical_positions[i]) {
@@ -281,7 +281,7 @@ void Threads::insert(const int ID, const std::vector<bool>& genotype) {
  *
  * @param ID
  */
-void Threads::delete_ID(int ID) {
+void Threads::remove(int ID) {
   Node* s = panel[ID_map[ID]][0].get();
   // The last sequence in the panel
   int last_ID = panel[num_samples - 1][0]->sample_ID;
@@ -319,8 +319,8 @@ void Threads::delete_ID(int ID) {
       panel[ID_map[ID]][k] = std::move(panel[num_samples - 1][k]);
     }
     ID_map[last_ID] = ID_map[ID];
-    ID_map.erase(ID);
   }
+  ID_map.erase(ID);
   panel.pop_back();
   num_samples--;
 }
