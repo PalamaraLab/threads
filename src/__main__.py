@@ -384,6 +384,7 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
                 cm_pos = cm_pos_0[variant_filter]
             mumumultiplier = 0.5 * len(phys_pos) / M
             bwt = Threads(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
+            print()
             assert (bwt.threading_start, bwt.threading_end) == arg_range
 
             batch_size = int(np.ceil(2e6 / len(phys_pos)))
@@ -442,7 +443,7 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
     logging.info(f"Found panel of shape {haps_panel.shape}")
     logging.info(f"Found target of shape {haps_target.shape}")
 
-    arg_range = (phys_pos[0] + burn_in_left, phys_pos[-1] - burn_in_right)
+    arg_range = (phys_pos[0] + burn_in_left, phys_pos[-1] - burn_in_right + 1)
     M = len(phys_pos)
     ne_times, ne_sizes = parse_demography(demography)
     num_samples_panel = haps_panel.shape[0]
