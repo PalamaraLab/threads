@@ -2,9 +2,9 @@
 #include "HMM.hpp"
 
 #include <memory>
-#include <vector>
+#include <random>
 #include <unordered_map>
-
+#include <vector>
 
 class Threads {
 
@@ -13,15 +13,20 @@ private:
   std::vector<std::unique_ptr<Node>> tops;
   std::vector<std::unique_ptr<Node>> bottoms;  // Ha, ha
 
+  bool impute;
+
   // Burn-in quantities
   int trim_pos_start_idx;
   int trim_pos_end_idx;
+
+  std::mt19937 rng;
 
   Node* extend_node(Node* node, bool genotype, const int i);
   bool extensible_by(State& s, const Node* t_next, const bool g, const int i);
   bool genotype_interval_match(const int id1, const int id2, const int start, const int end);
   std::vector<bool> fetch_het_hom_sites(const int id1, const int id2, const int start, const int end);
-  std::vector<int> het_sites_from_thread(const int focal_ID, std::vector<int> bp_starts, std::vector<int> target_IDs);
+  std::vector<int> het_sites_from_thread(const int focal_ID, std::vector<int> bp_starts,
+                                         std::vector<std::vector<int>> target_IDs);
 
 public:
   int n_prune;
@@ -63,6 +68,7 @@ public:
 
   // More attributes
   std::vector<double> trimmed_positions();
+  void set_impute(bool impute_state);
 
   // Insertion/deletion
   // Insert and assign generic ID
@@ -76,16 +82,20 @@ public:
   void delete_hmm();
 
   // Algorithms
-  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>> thread(const std::vector<bool>& genotype);
-  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>> thread(const int new_sample_ID, const std::vector<bool>& genotype);
-  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
-  remove_burn_in(std::vector<int>& bp_starts, std::vector<int>& target_IDs,
+  std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
+  thread(const std::vector<bool>& genotype, const int L = 1);
+  std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
+  thread(const int new_sample_ID, const std::vector<bool>& genotype, const int L = 1);
+  std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
+  remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int>>& target_IDs,
                  std::vector<double>& segment_ages, std::vector<int>& het_sites);
   // std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const std::vector<bool>& genotype);
   // std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype);
   // std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
-  std::vector<std::tuple<int, int>> fastLS(const std::vector<bool>& genotype);
+  std::vector<std::tuple<int, std::vector<int>>> fastLS(const std::vector<bool>& genotype,
+                                                        const int L = 1);
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
+  std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_impute5();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_correct();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties_correct();

@@ -5,7 +5,7 @@ using std::ostream;
 class Node {
 public:
   // Node data
-  int sample_ID;
+  int sample_ID, divergence;
   bool genotype;
 
   // Linked list pointers
@@ -16,7 +16,7 @@ public:
   Node* w[2];
 
   // Constructors
-  Node(int sample_ID, bool genotype);
+  Node(int sample_ID, int divergence, bool genotype);
 
   // Node movers-arounders
   void insert_above(Node* node);

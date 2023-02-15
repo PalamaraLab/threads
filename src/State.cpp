@@ -7,8 +7,8 @@
 using std::cout;
 using std::endl;
 
-TracebackState::TracebackState(int _site, int _best_prev_ID, TracebackState* _prev)
-    : site(_site), best_prev_ID(_best_prev_ID), prev(_prev) {
+TracebackState::TracebackState(int _site, Node* _best_prev_node, TracebackState* _prev)
+    : site(_site), best_prev_node(_best_prev_node), prev(_prev) {
 }
 
 State::State(Node* _below, double _score, TracebackState* _traceback)
