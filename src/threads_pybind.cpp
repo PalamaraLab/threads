@@ -52,6 +52,7 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def_readonly("threading_start", &Threads::threading_start)
       .def_readonly("threading_end", &Threads::threading_end)
       .def("trimmed_positions", &Threads::trimmed_positions)
+      .def("set_impute", &Threads::set_impute, py::arg("impute_state"))
       .def("delete_hmm", &Threads::delete_hmm)
       .def("mutation_penalties", &Threads::mutation_penalties)
       .def("recombination_penalties", &Threads::recombination_penalties)
@@ -63,10 +64,11 @@ PYBIND11_MODULE(threads_python_bindings, m) {
            py::arg("ID"), py::arg("genotypes"))
       .def("remove", &Threads::remove, py::arg("ID"))
       .def("print_sorting", &Threads::print_sorting)
-      .def("thread", py::overload_cast<const std::vector<bool>&>(&Threads::thread),
-           py::arg("genotypes"))
-      .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&Threads::thread),
-           py::arg("new_sample_ID"), py::arg("genotypes"))
+      .def("thread", py::overload_cast<const std::vector<bool>&, const int>(&Threads::thread),
+           py::arg("genotypes"), py::arg("L") = 1)
+      .def("thread",
+           py::overload_cast<const int, const std::vector<bool>&, const int>(&Threads::thread),
+           py::arg("new_sample_ID"), py::arg("genotypes"), py::arg("L") = 1)
       // .def("thread_with_mutations", py::overload_cast<const
       // std::vector<bool>&>(&Threads::thread_with_mutations), py::arg("genotypes"))
       // .def("thread_with_mutations", py::overload_cast<const int, const

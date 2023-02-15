@@ -6,6 +6,7 @@
 #include <iostream>
 #include <math.h>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -64,7 +65,8 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
 
   // Initialize map burn-in
   threading_start = physical_positions.front() + burn_in_left;
-  threading_end = physical_positions.back() - burn_in_right + 1;
+  // threading_end = physical_positions.back() - burn_in_right + 1;
+  threading_end = physical_positions.back() - burn_in_right;
   trim_pos_start_idx = 0;
   for (int i = 0; i < num_sites; i++) {
     if (threading_start <= physical_positions[i]) {
@@ -91,8 +93,8 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
 
   // Initialize both ends of the linked-list columns
   for (int i = 0; i < num_sites + 1; i++) {
-    tops.emplace_back(std::make_unique<Node>(-1, 0));
-    bottoms.emplace_back(std::make_unique<Node>(-1, 1));
+    tops.emplace_back(std::make_unique<Node>(-1, i, 0));
+    bottoms.emplace_back(std::make_unique<Node>(-1, i, 1));
     Node* top_i = tops.back().get();
     Node* bottom_i = bottoms.back().get();
 
@@ -110,13 +112,23 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
   std::tie(bp_boundaries, bp_sizes) = site_sizes(physical_positions);
   std::tie(cm_boundaries, cm_sizes) = site_sizes(genetic_positions);
 
-  // hmm =
   if (use_hmm) {
     hmm = new HMM(demography, bp_sizes, cm_sizes, mutation_rate, 64);
   }
   else {
     hmm = nullptr;
   }
+
+  // Initialize RNG
+  std::random_device rd;
+  rng = std::mt19937(rd());
+
+  // Set imputation state
+  impute = false;
+}
+
+void Threads::set_impute(bool impute_state) {
+  impute = impute_state;
 }
 
 std::tuple<std::vector<double>, std::vector<double>>
@@ -214,8 +226,8 @@ void Threads::insert(const int ID, const std::vector<bool>& genotype) {
   panel.emplace_back(std::vector<std::unique_ptr<Node>>(num_sites + 1));
 
   Node* t0 = bottoms[0].get();
-  panel[ID_map[ID]][0] = std::move(std::make_unique<Node>(ID, genotype[0]));
-  Node* z0 = panel[ID_map[ID]][0].get();
+  panel[ID_map.at(ID)][0] = std::move(std::make_unique<Node>(ID, 0, genotype[0]));
+  Node* z0 = panel[ID_map.at(ID)][0].get();
 
   // Inserts z0 above t0
   t0->insert_above(z0);
@@ -230,8 +242,8 @@ void Threads::insert(const int ID, const std::vector<bool>& genotype) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
     // Add current thingy to panel
-    panel[ID_map[ID]][k + 1] = std::move(std::make_unique<Node>(ID, next_genotype));
-    z_next = panel[ID_map[ID]][k + 1].get();
+    panel[ID_map.at(ID)][k + 1] = std::move(std::make_unique<Node>(ID, k + 1, next_genotype));
+    z_next = panel[ID_map.at(ID)][k + 1].get();
     tmp = z_k->above;
     while (tmp->sample_ID != -1 && tmp->genotype != g_k) {
       tmp->w[g_k] = z_next;
@@ -250,29 +262,33 @@ void Threads::insert(const int ID, const std::vector<bool>& genotype) {
   }
 
   num_samples++;
+
   // Compute divergence values.
-  // int z_dtmp = num_sites;
-  // int b_dtmp = num_sites;
-  // for (int k = num_sites; k >= 0; k--) {
-  //   z_dtmp = std::min(z_dtmp, k);
-  //   b_dtmp = std::min(b_dtmp, k);
-  //   z_k = panel[current_ID][k].get();
-  //   int above_ID = z_k->above->sample_ID;
-  //   int below_ID = z_k->below->sample_ID;
-  //   if (above_ID != -1) {
-  //     while (z_dtmp > 0 && genotype[z_dtmp - 1] == panel[above_ID][z_dtmp - 1]->genotype) {
-  //       z_dtmp--;
-  //     }
-  //   }
-  //   // Update divergence value for z_k
-  //   z_k->divergence = z_dtmp;
-  //   if (k > 0 && below_ID != -1) {
-  //     while (b_dtmp > 0 && genotype[b_dtmp - 1] == panel[below_ID][b_dtmp - 1]->genotype) {
-  //       b_dtmp--;
-  //     }
-  //     // Only set this for real nodes
-  //     z_k->below->divergence = b_dtmp;
-  //   }
+  int z_dtmp = num_sites;
+  int b_dtmp = num_sites;
+  for (int k = num_sites; k >= 0; k--) {
+    z_dtmp = std::min(z_dtmp, k);
+    b_dtmp = std::min(b_dtmp, k);
+    z_k = panel[ID_map.at(ID)][k].get();
+    int above_ID = z_k->above->sample_ID;
+    int below_ID = z_k->below->sample_ID;
+    if (above_ID != -1) {
+      while (z_dtmp > 0 &&
+             genotype[z_dtmp - 1] == panel[ID_map.at(above_ID)][z_dtmp - 1]->genotype) {
+        z_dtmp--;
+      }
+    }
+    // Update divergence value for z_k
+    z_k->divergence = z_dtmp;
+    if (k > 0 && below_ID != -1) {
+      while (b_dtmp > 0 &&
+             genotype[b_dtmp - 1] == panel[ID_map.at(below_ID)][b_dtmp - 1]->genotype) {
+        b_dtmp--;
+      }
+      // Only set this for real nodes
+      z_k->below->divergence = b_dtmp;
+    }
+  }
 }
 
 /**
@@ -282,13 +298,13 @@ void Threads::insert(const int ID, const std::vector<bool>& genotype) {
  * @param ID
  */
 void Threads::remove(int ID) {
-  Node* s = panel[ID_map[ID]][0].get();
+  Node* s = panel[ID_map.at(ID)][0].get();
   // The last sequence in the panel
   int last_ID = panel[num_samples - 1][0]->sample_ID;
 
   for (int k = 0; k < num_sites; k++) {
     // Get allele
-    bool s_allele = panel[ID_map[ID]][k]->genotype;
+    bool s_allele = panel[ID_map.at(ID)][k]->genotype;
 
     // Update w-values
     Node* tmp = s->above;
@@ -313,12 +329,12 @@ void Threads::remove(int ID) {
   tmp_below->above = tmp_above;
 
   // If needed, move last sequence to replace the one we just deleted.
-  if (ID_map[ID] != num_samples - 1) {
+  if (ID_map.at(ID) != num_samples - 1) {
     for (int k = 0; k <= num_sites; k++) {
       // Hope this is correct
-      panel[ID_map[ID]][k] = std::move(panel[num_samples - 1][k]);
+      panel[ID_map.at(ID)][k] = std::move(panel[num_samples - 1][k]);
     }
-    ID_map[last_ID] = ID_map[ID];
+    ID_map.at(last_ID) = ID_map.at(ID);
   }
   ID_map.erase(ID);
   panel.pop_back();
@@ -349,23 +365,27 @@ void Threads::print_sorting() {
  * @param genotype
  * @return std::vector<std::tuple<int, int>> a pair containing path segments (start_pos, id)
  */
-std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genotype) {
+// std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genotype, const int L)
+// {
+std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector<bool>& genotype,
+                                                               const int L) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
   std::vector<double> mu_c;
-  std::tie(mu, mu_c) =
-      mutation_penalties_correct(); // correct_penalties ? mutation_penalties_correct() :
-                                    // mutation_penalties();
+  std::tie(mu, mu_c) = impute ? mutation_penalties_impute5()
+                              : mutation_penalties_correct(); // mutation_penalties_impute5();
+
   // NB these still rely on padding around sites (like mutations), rather than distance between
-  // sites
+  // them
   std::vector<double> rho;
   std::vector<double> rho_c;
   // std::tie(rho, rho_c) = recombination_penalties_correct();
-  std::tie(rho, rho_c) =
+  std::tie(rho, rho_c) = // recombination_penalties_correct();
       sparse_sites ? recombination_penalties() : recombination_penalties_correct();
 
   std::vector<std::unique_ptr<TracebackState>> traceback_states;
-  traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
+  // traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
+  traceback_states.emplace_back(std::make_unique<TracebackState>(0, nullptr, nullptr));
   std::vector<State> current_states;
   current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get());
 
@@ -443,7 +463,8 @@ std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genot
     // iteration)
     double recombinant_score = z - rho_c[i] + rho[i];
     traceback_states.emplace_back(std::make_unique<TracebackState>(
-        i + 1, best_extension.below->above->sample_ID, best_extension.traceback));
+        i + 1, best_extension.below->above, best_extension.traceback));
+    // i + 1, best_extension.below->above->sample_ID, best_extension.traceback));
     new_states.emplace_back(bottoms[i + 1].get(), recombinant_score, traceback_states.back().get());
     if (recombinant_score < z) {
       best_extension = new_states.back();
@@ -451,7 +472,8 @@ std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genot
     }
 
     // Need to consider how best to use this threshold, 100 might be too high
-    // Not currently using this, just adds overhead
+    // Not currently using, just adds overhead
+    // ...but may be useful in real data
     if (n_prune >= 0 && i % 100 == 0 && new_states.size() >= n_prune) {
       int old_size = new_states.size();
       StateTree tree = StateTree(new_states);
@@ -477,16 +499,40 @@ std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genot
     cout << ", using a maximum of " << max_states << " states.\n";
   }
 
-  std::vector<std::tuple<int, int>> best_path;
+  std::vector<std::tuple<int, std::vector<int>>> best_path;
   TracebackState* traceback = min_state.traceback;
-  int match_id = min_state.below->above->sample_ID;
+  Node* match = min_state.below->above;
+  // int match_id = min_state.below->above->sample_ID;
   while (traceback != nullptr) {
+    int n_matches = 1;
     int segment_start = traceback->site;
-    best_path.emplace_back(segment_start, match_id);
-    match_id = traceback->best_prev_ID;
+    int match_id = match->sample_ID;
+    std::vector<int> div_states = {match_id};
+    Node* div_node = match;
+    while (div_node->above != nullptr && div_node->divergence <= segment_start) {
+      n_matches += 1;
+      // cout << div_node->above->sample_ID << endl;
+      div_node = div_node->above;
+      div_states.push_back(div_node->sample_ID);
+    }
+    std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
+    std::vector<int> sampled_states; //(L);
+    sampled_states.reserve(L);
+    if (div_states.size() < L) {
+      for (int i = 0; i < L; i++) {
+        sampled_states.push_back(div_states[distrib(rng)]);
+      }
+    }
+    else {
+      std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), L, rng);
+    }
+
+    best_path.emplace_back(segment_start, sampled_states);
+    // best_path.emplace_back(segment_start, match_id);
+    // match_id = traceback->best_prev_ID;
+    match = traceback->best_prev_node;
     traceback = traceback->prev;
   }
-
   std::reverse(best_path.begin(), best_path.end());
 
   return best_path;
@@ -505,7 +551,7 @@ std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genot
 bool Threads::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
   int next_above_candidate = t_next->above->sample_ID;
 
-  if (next_above_candidate == -1 || g != panel[ID_map[next_above_candidate]][i]->genotype) {
+  if (next_above_candidate == -1 || g != panel[ID_map.at(next_above_candidate)][i]->genotype) {
     // This case take care of non-segregating sites with the opposite allele in the panel
     return false;
   }
@@ -557,18 +603,18 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties
   return std::tuple(mu, mu_c);
 }
 
-// std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_impute5() {
-//   std::vector<double> mu(num_sites);
-//   std::vector<double> mu_c(num_sites);
+std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_impute5() {
+  std::vector<double> mu(num_sites);
+  std::vector<double> mu_c(num_sites);
 
-//   double hom_loss = -std::log(0.9999);
-//   double het_loss = -std::log(0.0001);
-//   for (int i = 0; i < num_sites; i++) {
-//     mu_c[i] = hom_loss;
-//     mu[i] = het_loss;
-//   }
-//   return std::tuple(mu, mu_c);
-// }
+  double hom_loss = -std::log(0.9999);
+  double het_loss = -std::log(0.0001);
+  for (int i = 0; i < num_sites; i++) {
+    mu_c[i] = hom_loss;
+    mu[i] = het_loss;
+  }
+  return std::tuple(mu, mu_c);
+}
 
 /**
  * @brief This relies on panel size and the recombination map
@@ -634,11 +680,21 @@ double Threads::date_segment(const int id1, const int id2, const int start, cons
     cerr << "Can't date a segment with length <= 0\n";
     exit(1);
   }
+  // this check should become unnecessary
+  if (ID_map.find(id1) == ID_map.end()) {
+    cerr << "date_segment bad id1 " << id1 << endl;
+    exit(1);
+  }
+
+  if (ID_map.find(id2) == ID_map.end()) {
+    cerr << "date_segment bad id2 " << id2 << endl;
+    exit(1);
+  }
   double m = 0;
   double bp_size = 0;
   double cm_size = 0;
   for (int i = start; i < end; i++) {
-    if (panel[ID_map[id1]][i]->genotype != panel[ID_map[id2]][i]->genotype) {
+    if (panel[ID_map.at(id1)][i]->genotype != panel[ID_map.at(id2)][i]->genotype) {
       m++;
     }
     bp_size += bp_sizes[i];
@@ -715,17 +771,19 @@ double Threads::date_segment(const int id1, const int id2, const int start, cons
   }
 }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
-Threads::thread(const std::vector<bool>& genotype) {
-  return thread(num_samples, genotype);
+std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
+Threads::thread(const std::vector<bool>& genotype, const int L) {
+  return thread(num_samples, genotype, L);
 }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
-Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
+std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
+Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype, const int L) {
   // Compute LS path
-  std::vector<std::tuple<int, int>> best_path;
+  // std::vector<std::tuple<int, int>> best_path;
+
+  std::vector<std::tuple<int, std::vector<int>>> best_path;
   if (num_samples > 0) {
-    best_path = fastLS(genotype);
+    best_path = fastLS(genotype, L);
   }
 
   // Insert new genotype. NB, it's important we insert before we date,
@@ -734,18 +792,19 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
 
   // TODO: delete the HMM once num_samples > 100
   std::vector<int> bp_starts;
-  std::vector<int> target_IDs;
+  std::vector<std::vector<int>> target_IDs;
   std::vector<double> segment_ages;
 
   // Date segments
   for (int i = 0; i < best_path.size(); i++) {
     int segment_start = std::get<0>(best_path[i]);
     int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
-    int target_ID = std::get<1>(best_path[i]);
+    std::vector<int> target_ID_L = std::get<1>(best_path[i]);
 
     if (use_hmm && num_samples <= 100) {
       std::vector<bool> het_hom_sites =
-          fetch_het_hom_sites(new_sample_ID, target_ID, segment_start, segment_end);
+          fetch_het_hom_sites(new_sample_ID, target_ID_L[0], segment_start, segment_end);
+
       int num_het_sites = 0;
       for (auto s : het_hom_sites) {
         if (s) {
@@ -762,25 +821,27 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
           int breakpoint_start = breakpoints[i];
           int breakpoint_end = (i == breakpoints.size() - 1) ? segment_end : breakpoints[i + 1];
           // cout<< "[" << breakpoint_start << ", " << breakpoint_end << ") ";
-          target_IDs.push_back(target_ID);
+          target_IDs.push_back(target_ID_L);
           bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[breakpoint_start])));
           segment_ages.push_back(
-              date_segment(new_sample_ID, target_ID, breakpoint_start, breakpoint_end));
+              date_segment(new_sample_ID, target_ID_L[0], breakpoint_start, breakpoint_end));
         }
         // cout << "\n";
       }
       else {
-        target_IDs.push_back(target_ID);
+        target_IDs.push_back(target_ID_L);
         bp_starts.push_back(
             static_cast<int>(ceil(bp_boundaries[segment_start]))); // ceil bc should be int-like
-        segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
+        segment_ages.push_back(
+            date_segment(new_sample_ID, target_ID_L[0], segment_start, segment_end));
       }
     }
     else {
-      target_IDs.push_back(target_ID);
+      target_IDs.push_back(target_ID_L);
       bp_starts.push_back(
           static_cast<int>(ceil(bp_boundaries[segment_start]))); // ceil bc should be int-like
-      segment_ages.push_back(date_segment(new_sample_ID, target_ID, segment_start, segment_end));
+      segment_ages.push_back(
+          date_segment(new_sample_ID, target_ID_L[0], segment_start, segment_end));
     }
   }
   std::vector<int> het_sites = het_sites_from_thread(new_sample_ID, bp_starts, target_IDs);
@@ -788,13 +849,13 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // return std::tuple(bp_starts, target_IDs, segment_ages, het_sites);
 }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
-Threads::remove_burn_in(std::vector<int>& bp_starts, std::vector<int>& target_IDs,
+std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
+Threads::remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int>>& target_IDs,
                         std::vector<double>& segment_ages, std::vector<int>& het_sites) {
   int num_segments = bp_starts.size();
 
   std::vector<int> trim_starts;
-  std::vector<int> trim_IDs;
+  std::vector<std::vector<int>> trim_IDs;
   std::vector<double> trim_ages;
 
   if (num_segments > 0) {
@@ -852,7 +913,7 @@ bool Threads::genotype_interval_match(const int id1, const int id2, const int st
     return false;
   }
   for (int i = start; i < end; i++) {
-    if (panel[ID_map[id1]][i]->genotype != panel[ID_map[id2]][i]->genotype) {
+    if (panel[ID_map.at(id1)][i]->genotype != panel[ID_map.at(id2)][i]->genotype) {
       return false;
     }
   }
@@ -864,18 +925,28 @@ bool Threads::genotype_interval_match(const int id1, const int id2, const int st
  */
 std::vector<bool> Threads::fetch_het_hom_sites(const int id1, const int id2, const int start,
                                                const int end) {
+  if (ID_map.find(id1) == ID_map.end()) {
+    cerr << "fetch_het_hom_sites bad id1 " << id1 << endl;
+    exit(1);
+  }
+
+  if (ID_map.find(id2) == ID_map.end()) {
+    cerr << "fetch_het_hom_sites bad id2 " << id2 << endl;
+    exit(1);
+  }
   std::vector<bool> het_hom_sites(end - start);
   for (int i = start; i < end; i++) {
-    bool g1 = panel[ID_map[id1]][i]->genotype;
-    bool g2 = panel[ID_map[id2]][i]->genotype;
+    bool g1 = panel[ID_map.at(id1)][i]->genotype;
+    bool g2 = panel[ID_map.at(id2)][i]->genotype;
     het_hom_sites[i - start] = (g1 != g2);
   }
   return het_hom_sites;
 }
 
+// This function... does... what exactly?
 std::vector<int> Threads::het_sites_from_thread(const int focal_ID,
                                                 const std::vector<int> bp_starts,
-                                                const std::vector<int> target_IDs) {
+                                                const std::vector<std::vector<int>> target_IDs) {
   std::vector<int> het_sites;
   int num_segments = bp_starts.size();
   int site_i = 0;
@@ -883,10 +954,11 @@ std::vector<int> Threads::het_sites_from_thread(const int focal_ID,
     int segment_start = bp_starts[seg_i];
     int segment_end =
         seg_i == num_segments - 1 ? physical_positions.back() + 1 : bp_starts[seg_i + 1];
-    int target_ID = target_IDs[seg_i];
+    int target_ID = target_IDs[seg_i][0];
     while (segment_start <= physical_positions[site_i] &&
            physical_positions[site_i] < segment_end && site_i < num_sites) {
-      if (panel[ID_map[focal_ID]][site_i]->genotype != panel[ID_map[target_ID]][site_i]->genotype) {
+      if (panel[ID_map.at(focal_ID)][site_i]->genotype !=
+          panel[ID_map.at(target_ID)][site_i]->genotype) {
         het_sites.push_back(physical_positions[site_i]);
       }
       site_i++;

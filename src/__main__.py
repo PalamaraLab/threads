@@ -102,7 +102,7 @@ def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size):
                 threads.append(bwt.thread(g))
     return threads
 
-def serialize(out, threads, samples, positions, arg_range):
+def serialize(out, threads, samples, positions, arg_range, L=1):
     num_threads = len(samples)
     num_sites = len(positions)
 
@@ -143,7 +143,7 @@ def serialize(out, threads, samples, positions, arg_range):
                                     compression_opts=compression_opts)
     dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
                                  compression_opts=compression_opts)
-    dset_targets = f.create_dataset("thread_targets", (num_stitches, 2), dtype=int, compression='gzip',
+    dset_targets = f.create_dataset("thread_targets", (num_stitches, 1 + L), dtype=int, compression='gzip',
                                     compression_opts=compression_opts)
     dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
                                  compression_opts=compression_opts)
@@ -157,8 +157,10 @@ def serialize(out, threads, samples, positions, arg_range):
     dset_samples[:, 2] = mut_starts
     dset_pos[:] = positions
 
-    dset_targets[:, 0] = all_ids
-    dset_targets[:, 1] = all_bps
+    for i in range(L):
+        dset_targets[:, i] = [ids[i] for ids in all_ids]
+
+    dset_targets[:, L] = all_bps
 
     dset_ages[:] = all_ages
 
@@ -173,8 +175,9 @@ def threads_to_arg(thread_dict, noise=0.0):
     pos = thread_dict['positions']
     N = np.max(thread_dict['samples'].astype(int)) + 1
     arg_start, arg_end = thread_dict['arg_range']
-    # "+ 1" so we can include mutations on the last site
-    arg = arg_needle_lib.ARG(0, arg_end - arg_start + 1, reserved_samples=N)
+    # "+ 1" so we can include mutations on the last site... wait are we now adding two many +1's?
+    # "+ 2" because.... >:-(
+    arg = arg_needle_lib.ARG(0, arg_end - arg_start + 2, reserved_samples=N)
     arg.set_offset(int(arg_start))
 
     # How this should work:
@@ -209,7 +212,8 @@ def decompress_threads(threads):
 
     samples, thread_starts = f["samples"][:, 0], f["samples"][:, 1] #dset_samples[:, 0], dset_ = f['flags'][...]
     positions = f['positions'][...]
-    flat_ids, flat_bps = f['thread_targets'][:, 0], f['thread_targets'][:, 1]
+    flat_ids, flat_bps = f['thread_targets'][:, :-1], f['thread_targets'][:, -1]
+    # flat_ids, flat_bps = f['thread_targets'][:, 0], f['thread_targets'][:, 1]
     flat_ages = f['thread_ages'][...]
     arg_range = f['arg_range'][...]
 
@@ -305,7 +309,8 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
     logging.info(f"Found genotype of shape {haps.shape}")
 
     phys_pos_0 = phys_pos
-    arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right + 1)
+    # arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right + 1)
+    arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right)
     cm_pos_0 = cm_pos
     M = len(phys_pos_0)
     ne_times, ne_sizes = parse_demography(demography)
@@ -384,7 +389,6 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
                 cm_pos = cm_pos_0[variant_filter]
             mumumultiplier = 0.5 * len(phys_pos) / M
             bwt = Threads(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
-            print()
             assert (bwt.threading_start, bwt.threading_end) == arg_range
 
             batch_size = int(np.ceil(2e6 / len(phys_pos)))
@@ -412,9 +416,11 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
 @click.option("--threads", required=True, help="Path to output .threads file.")
 @click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
 @click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
-def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, threads, burn_in_left, burn_in_right):
+@click.option("--l", default=128, help="Maximum number of matching states sampled per segment. Default is 128 (too high? too high)")
+def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, threads, burn_in_left, burn_in_right, l):
     """Thread sequences in bfile_target to sequences in bfile_panel. Assumes data are from genotyping arrays"""
     start_time = time.time()
+    L = l
     logging.info(f"Starting Threads-{mode} with the following parameters:")
     logging.info(f"  bfile_panel:    {bfile_panel}")
     logging.info(f"  bfile_target:   {bfile_target}")
@@ -424,6 +430,7 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
     logging.info(f"  mutation_rate:  {mutation_rate}")
     logging.info(f"  burn_in_left:   {burn_in_left}")
     logging.info(f"  burn_in_right:  {burn_in_right}")
+    logging.info(f"  L:              {L}")
     threads_out = threads
 
     # Keep track of ram
@@ -443,7 +450,8 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
     logging.info(f"Found panel of shape {haps_panel.shape}")
     logging.info(f"Found target of shape {haps_target.shape}")
 
-    arg_range = (phys_pos[0] + burn_in_left, phys_pos[-1] - burn_in_right + 1)
+    arg_range = (phys_pos[0] + burn_in_left, phys_pos[-1] - burn_in_right)
+    # arg_range = (phys_pos[0] + burn_in_left, phys_pos[-1] - burn_in_right + 1)
     M = len(phys_pos)
     ne_times, ne_sizes = parse_demography(demography)
     num_samples_panel = haps_panel.shape[0]
@@ -465,6 +473,7 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
                   burn_in_left=burn_in_left,
                   burn_in_right=burn_in_right)
     assert (bwt.threading_start, bwt.threading_end) == arg_range
+    bwt.set_impute(True)
 
     logging.info("Building panel...")
     for k in range(int(np.ceil(num_samples_panel / batch_size))):
@@ -490,7 +499,7 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
         for i, hap in enumerate(haps_chunk):
             assert bwt.num_samples == num_samples_panel
             hap = haps_chunk[i]
-            threads.append(bwt.thread(hap))
+            threads.append(bwt.thread(hap, L))
             samples.append(i + s)
             bwt.remove(num_samples_panel)
         mem_used_GB = psutil.virtual_memory()[3] / 1e9
@@ -498,7 +507,7 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
             max_mem_used_GB = mem_used_GB
 
     logging.info(f"Saving results to {threads_out}")
-    serialize(threads_out, threads, samples, phys_pos, arg_range)
+    serialize(threads_out, threads, samples, phys_pos, arg_range, L)
     end_time = time.time()
     logging.info(f"Done, in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM")
     goodbye()

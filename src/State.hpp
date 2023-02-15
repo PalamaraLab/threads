@@ -7,10 +7,11 @@ class TracebackState {
 public:
   int site;
   // ID to trace back through to last traceback state
-  int best_prev_ID;
+  // int best_prev_ID;
+  Node* best_prev_node;
   TracebackState* prev;
 
-  TracebackState(int _site, int _best_prev_ID, TracebackState* _prev);
+  TracebackState(int _site, Node* _best_prev_node, TracebackState* _prev);
 };
 
 class State {
