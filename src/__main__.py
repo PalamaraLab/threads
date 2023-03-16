@@ -74,7 +74,7 @@ def parse_demography(demography):
     d = pd.read_table(demography, delim_whitespace=True, header=None)
     return list(d[0]), list(d[1])
 
-def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size):
+def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phys_pos):
     threads = []
     range_size = min(end, haps.shape[0])
     # Iterate over genotypes in chunks
@@ -97,7 +97,7 @@ def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size):
                 bwt.insert(g)
             elif i + batch_s == 0:
                 bwt.insert(g)
-                threads.append(([], [], [], [i for i, _ in enumerate(hap) if hap]))
+                threads.append(([], [], [], [phys_pos[i] for i, h in enumerate(g) if h]))
             else:
                 threads.append(bwt.thread(g))
     return threads
@@ -128,7 +128,7 @@ def serialize(out, threads, samples, positions, arg_range, L=1):
         thread_starts.append(thread_start)
         mut_starts.append(mut_start)
         thread_start += len(bps)
-        mut_start += len(all_het_sites)
+        mut_start += len(het_sites)
     num_stitches = len(all_bps)
     num_mutations = len(all_het_sites)
 
@@ -143,7 +143,8 @@ def serialize(out, threads, samples, positions, arg_range, L=1):
                                     compression_opts=compression_opts)
     dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
                                  compression_opts=compression_opts)
-    dset_targets = f.create_dataset("thread_targets", (num_stitches, 1 + L), dtype=int, compression='gzip',
+    # First L columns are random samples for imputation
+    dset_targets = f.create_dataset("thread_targets", (num_stitches, L + 2), dtype=int, compression='gzip',
                                     compression_opts=compression_opts)
     dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
                                  compression_opts=compression_opts)
@@ -157,10 +158,10 @@ def serialize(out, threads, samples, positions, arg_range, L=1):
     dset_samples[:, 2] = mut_starts
     dset_pos[:] = positions
 
-    for i in range(L):
+    for i in range(L + 1):
         dset_targets[:, i] = [ids[i] for ids in all_ids]
 
-    dset_targets[:, L] = all_bps
+    dset_targets[:, L + 1] = all_bps
 
     dset_ages[:] = all_ages
 
@@ -185,6 +186,8 @@ def threads_to_arg(thread_dict, noise=0.0):
         arg.add_sample(str(i))#, str(i))
         if i > 0:
             section_starts, thread_ids, thread_heights = t
+            if len(thread_ids.shape) == 2:
+                thread_ids = thread_ids[:, 0]
             thread_heights += thread_heights * np.random.normal(0.0, noise, len(thread_heights))
             # this is weird, should fix
             arg_starts = [s - arg.offset for s in section_starts]
@@ -342,7 +345,7 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
                     threads.append(thread)
                 else:
                     bwt.insert(hap)
-                    threads.append(([], [], [], [i for i, h in enumerate(hap) if h]))
+                    threads.append(([], [], [], [phys_pos[i] for i, h in enumerate(hap) if h]))
                 samples.append(i + s)
             mem_used_GB = psutil.virtual_memory()[3] / 1e9
             if mem_used_GB > max_mem_used_GB:
@@ -392,7 +395,7 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
             assert (bwt.threading_start, bwt.threading_end) == arg_range
 
             batch_size = int(np.ceil(2e6 / len(phys_pos)))
-            threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size)
+            threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phys_pos)
             assert len(threads) == bwt.num_samples
 
             if end >= num_samples:

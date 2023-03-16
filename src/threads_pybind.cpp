@@ -1,5 +1,7 @@
+#include "TGEN.hpp"
 #include "Threads.hpp"
 
+#include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <vector>
@@ -76,4 +78,11 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       // py::arg("genotypes")) .def("thread_from_file", &Threads::thread_from_file,
       // py::arg("hack_gz"), py::arg("n_cycle")=0)
       .def("fastLS", &Threads::fastLS);
+
+  py::class_<TGEN>(m, "TGEN")
+      .def(py::init<std::vector<int>, std::vector<std::vector<int>>, std::vector<std::vector<int>>,
+                    std::vector<std::vector<int>>>(),
+           "Initialize", py::arg("positions"), py::arg("bp_starts"), py::arg("target_ids"),
+           py::arg("het_sites"))
+      .def("query", &TGEN::query, py::return_value_policy::reference_internal);
 }
