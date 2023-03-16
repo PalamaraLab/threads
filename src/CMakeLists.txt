@@ -3,6 +3,7 @@
 
 # Find boost
 find_package(Boost)# COMPONENTS iostreams REQUIRED)
+find_package(Eigen3)
 
 set(
         threads_src
@@ -11,6 +12,7 @@ set(
         State.cpp
         Threads.cpp
         HMM.cpp
+        TGEN.cpp
 )
 
 set(
@@ -20,6 +22,7 @@ set(
         State.hpp
         Threads.hpp
         HMM.hpp
+        TGEN.hpp
 )
 
 add_library(threads STATIC ${threads_src} ${threads_hdr})

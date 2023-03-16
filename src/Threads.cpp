@@ -12,9 +12,9 @@
 #include <vector>
 // #include <boost/iostreams/filtering_stream.hpp>
 // #include <boost/iostreams/filter/gzip.hpp>
-#include <boost/foreach.hpp>
-#include <boost/lexical_cast.hpp>
-#include <boost/tokenizer.hpp>
+// #include <boost/foreach.hpp>
+// #include <boost/lexical_cast.hpp>
+// #include <boost/tokenizer.hpp>
 
 using std::cerr;
 using std::cout;
@@ -502,22 +502,27 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
   std::vector<std::tuple<int, std::vector<int>>> best_path;
   TracebackState* traceback = min_state.traceback;
   Node* match = min_state.below->above;
-  // int match_id = min_state.below->above->sample_ID;
   while (traceback != nullptr) {
     int n_matches = 1;
     int segment_start = traceback->site;
     int match_id = match->sample_ID;
     std::vector<int> div_states = {match_id};
     Node* div_node = match;
+    // We also keep track of the min_id, this is useful for genotype parsing
+    int min_id = match_id;
+    // Find all samples that match on the segment
     while (div_node->above != nullptr && div_node->divergence <= segment_start) {
       n_matches += 1;
-      // cout << div_node->above->sample_ID << endl;
       div_node = div_node->above;
       div_states.push_back(div_node->sample_ID);
+      if (div_node->sample_ID < min_id) {
+        min_id = div_node->sample_ID;
+      }
     }
     std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
-    std::vector<int> sampled_states; //(L);
-    sampled_states.reserve(L);
+    std::vector<int> sampled_states;
+    sampled_states.reserve(L + 1);
+    // Sample L threading targets
     if (div_states.size() < L) {
       for (int i = 0; i < L; i++) {
         sampled_states.push_back(div_states[distrib(rng)]);
@@ -526,10 +531,10 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
     else {
       std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), L, rng);
     }
+    // add the min-state as well
+    sampled_states.push_back(min_id);
 
     best_path.emplace_back(segment_start, sampled_states);
-    // best_path.emplace_back(segment_start, match_id);
-    // match_id = traceback->best_prev_ID;
     match = traceback->best_prev_node;
     traceback = traceback->prev;
   }
