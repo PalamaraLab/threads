@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import h5py
@@ -13,7 +14,9 @@ import pandas as pd
 
 from threads import Threads
 from datetime import datetime
-from pandas_plink import read_plink1_bin
+# from pandas_plink import read_plink1_bin
+import xarray as xr
+from cyvcf2 import VCF
 
 def print_help_msg(command):
     with click.Context(command) as ctx:
@@ -238,49 +241,65 @@ def decompress_threads(threads):
         "arg_range": arg_range
     }
 
+
+def parse_vcf(genotypes):
+    raise NotImplementedError
+
+
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
-@click.option("--hap_gz", required=True, help="Path to Oxford-format haps file. Required for 'files'")
-@click.option("--sample", required=True, help="Path to Oxford-format sample file. Required for 'files'")
-@click.option("--bfile", required=True, help="Prefix of threads-generated PLINK files. Required for 'files' and 'infer")
-def files(mode, hap_gz, sample, bfile):
+@click.option("--hap_gz", default=None, help="Path to Oxford-format haps file. Optional for 'files'")
+@click.option("--sample", default=None, help="Path to Oxford-format sample file. Required for 'files' with the hap_gz option")
+@click.option("--vcf", default=None, help="Path to vcf/vcf.gz/bcf file. Optional for 'files'")
+@click.option("--zarr", required=True)
+def files(mode, hap_gz, sample, vcf, zarr):
     """
     Prepares funky phased bedfiles for Threads inference as well as the allele count file
     """
+    # Todo: make this not read everything into memory
     start_time = time.time()
-    if hap_gz is None or sample is None or bfile is None:
+    if (hap_gz is None and vcf is None) or zarr is None:
         print_help_msg(files)
+    if hap_gz is not None and vcf is not None:
+        raise RuntimeError("Please only specify one of hap_gz or vcf")
     logging.info(f"Starting Threads-{mode} with the following parameters:")
-    logging.info(f"  hap_gz: {hap_gz}")
-    logging.info(f"  sample: {sample}")
-    logging.info(f"  bfile:  {bfile}")
+    if hap_gz is not None:
+        logging.info(f"  hap_gz: {hap_gz}")
+        logging.info(f"  sample: {sample}")
+    else:
+        logging.info(f"  vcf: {vcf}")
+    logging.info(f"  zarr:  {zarr}")
 
-    new_sample = f"{bfile}.new.sample"
-    new_hap_gz = f"{bfile}.new.hap.gz"
+    if hap_gz is not None:
+        raise NotImplementedError("Not sure if I'll ever support Oxford haps files again. Eugh!")
+    samples = []
+    for s in VCF(vcf).samples:
+        samples += [f"{s}_0", f"{s}_1"]
+    N = len(samples)
+    snp_ids = [v.ID for v in VCF(vcf)]
+    M = len(snp_ids)
+    genotypes = np.empty((N, M), dtype=bool)
+    for i, v in enumerate(VCF(vcf)):
+        v_gt = np.array([[g[0], g[1]] for g in v.genotypes]).flatten()
+        genotypes[:, i] = v_gt
 
-    logging.info(f"Making tmp file {new_sample}")
-    haploidify_samples(sample, new_sample)
-
-    # This is ripe for injection
-    logging.info(f"Making tmp file {new_hap_gz}")
-    # This adds an empty column next to all the haps to trick plink1 into reading haploids
-    # (this sets everything to chromosome 1, not great)
-    awk_cmd = '{printf "1 "; for (i=2; i<6; i++) printf $i " "; for (i=6; i<NF; i++) printf $i " 0 "; print $NF " 0"}'
-    subprocess.run(f"zcat {hap_gz} | awk '{awk_cmd}' | gzip > {new_hap_gz}", shell=True, check=True)
-    logging.info(f"Making {bfile}.[bim, bed, fam, acount]")
-    # subprocess.run(["plink2", "--make-bed", "--haps", new_hap_gz, "ref-first", "--sample", new_sample, "--freq", "counts", "--out", bfile], check=True)
-    subprocess.run(["plink2", "--make-bed", "--haps", new_hap_gz, "--sample", new_sample, "--freq", "counts", "--out", bfile], check=True)
-    logging.info(f"Removing tmp file {new_sample}")
-    subprocess.run(f"rm {new_sample}", shell=True, check=True)
-    logging.info(f"Removing tmp file {new_hap_gz}")
-    subprocess.run(f"rm {new_hap_gz}", shell=True, check=True)
+    ds = xr.Dataset(
+        {"genotypes": (("samples", "snp_ids"), genotypes),
+         "allele_counts": (("snp_ids",), genotypes.sum(axis=0))},
+        coords={
+            "samples": samples,
+            "snp_ids": snp_ids
+        }
+    )
+    ds = ds.chunk({"samples": "auto", "snp_ids": -1})
+    ds.to_zarr(zarr, mode="w")
     end_time = time.time()
     logging.info(f"Done, in {end_time - start_time} seconds")
     goodbye()
 
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert", "impute"]))
-@click.option("--bfile", required=True, help="Prefix of threads-generated PLINK files.")
+@click.option("--genotypes", required=True, help="zarr thingy")
 @click.option("--map_gz", required=True, help="Path to genotype map")
 @click.option("--adaptive", default=False, is_flag=True, help="If set, ultra-rare sites are gradually trimmed.")
 @click.option("--mutation_rate", required=True, type=float, help="Per-site-per-generation SNP mutation rate.")
@@ -289,11 +308,12 @@ def files(mode, hap_gz, sample, bfile):
 @click.option("--threads", required=True, help="Path to output .threads file.")
 @click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
 @click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
-def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, burn_in_left=0, burn_in_right=0, adaptive=False, max_ac=5, cycle_n=0):
+def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads, burn_in_left=0, burn_in_right=0, adaptive=False, max_ac=5, cycle_n=0):
     """Infer threading instructions from input data and save to .threads format"""
+    import xarray as xr
     start_time = time.time()
     logging.info(f"Starting Threads-{mode} with the following parameters:")
-    logging.info(f"  bfile:          {bfile}")
+    logging.info(f"  genotypes:      {genotypes}")
     logging.info(f"  map_gz:         {map_gz}")
     logging.info(f"  threads:        {threads}")
     logging.info(f"  demography:     {demography}")
@@ -303,12 +323,27 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
     logging.info(f"  burn_in_right:  {burn_in_right}")
     threads_out = threads
 
+    if os.path.isdir(genotypes):
+        logging.info(f"{genotypes} is a directory, interpreting as a .zarr archive")
+        z_dataset = xr.open_zarr(genotypes)
+        batch_size = z_dataset.chunks["samples"][0]
+        haps = z_dataset["genotypes"]
+        acounts = z_dataset["allele_counts"]
+    elif os.path.isfile(genotypes):
+        logging.info(f"{genotypes} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+        # This will do the whole conversion from vcf to zarr
+        haps = parse_vcf(genotypes)
+        batch_size = 4e6 // haps.shape[1]
+        acounts = haps.values.sum(axis=0)
+    else:
+        raise ValueError(f"{genotypes} not found")
+
+
     # Keep track of ram
     max_mem_used_GB = 0
 
     cm_pos, phys_pos = read_map_gz(map_gz)
     logging.info(f"Found a genotype map with {len(phys_pos)} markers")
-    haps = read_plink1_bin(f"{bfile}.bed", f"{bfile}.bim", f"{bfile}.fam")
     logging.info(f"Found genotype of shape {haps.shape}")
 
     phys_pos_0 = phys_pos
@@ -326,7 +361,7 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
 
     logging.info("Threading! This could take a while...")
     if modality == "array" or (modality == "seq" and not adaptive):
-        batch_size = int(np.ceil(2e6 / M))
+        # batch_size = int(np.ceil(2e6 / M))
         bwt = Threads(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
         assert (bwt.threading_start, bwt.threading_end) == arg_range
         for k in range(int(np.ceil(num_samples / batch_size))):
@@ -363,13 +398,15 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
                 if mem_used_GB > max_mem_used_GB:
                     max_mem_used_GB = mem_used_GB
     else:
-        counts_path = f"{bfile}.acount"
-        counts_df = pd.read_table(counts_path)
+        # counts_path = f"{bfile}.acount"
+        # counts_df = pd.read_table(counts_path)
         # weird fix because of plink hack
-        acounts = counts_df['ALT_CTS'].values
-        assert acounts.min() >= num_samples
+        # acounts = counts_df['ALT_CTS'].values
+
+        assert acounts.max() <= num_samples
+        # assert acounts.min() >= num_samples
         assert len(acounts) == len(phys_pos_0)
-        acounts -= num_samples
+        # acounts -= num_samples
 
         bwt = None
         mumumultiplier = 1.0
@@ -411,8 +448,8 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
 
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert", "impute"]))
-@click.option("--bfile_panel", required=True, help="Prefix of threads-generated PLINK files for reference panel.")
-@click.option("--bfile_target", required=True, help="Prefix of threads-generated PLINK files for samples to impute.")
+@click.option("--panel", required=True, help="Prefix of threads-generated PLINK files for reference panel.")
+@click.option("--target", required=True, help="Prefix of threads-generated PLINK files for samples to impute.")
 @click.option("--map_gz", required=True, help="Path to genotype map")
 @click.option("--mutation_rate", required=True, type=float, help="Per-site-per-generation SNP mutation rate.")
 @click.option("--demography", required=True, help="Path to file containing demographic history.")
@@ -420,13 +457,13 @@ def infer(mode, bfile, map_gz, mutation_rate, demography, modality, threads, bur
 @click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
 @click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
 @click.option("--l", default=128, help="Maximum number of matching states sampled per segment. Default is 128 (too high? too high)")
-def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, threads, burn_in_left, burn_in_right, l):
+def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn_in_left, burn_in_right, l):
     """Thread sequences in bfile_target to sequences in bfile_panel. Assumes data are from genotyping arrays"""
     start_time = time.time()
     L = l
     logging.info(f"Starting Threads-{mode} with the following parameters:")
-    logging.info(f"  bfile_panel:    {bfile_panel}")
-    logging.info(f"  bfile_target:   {bfile_target}")
+    logging.info(f"  panel:          {panel}")
+    logging.info(f"  target:         {target}")
     logging.info(f"  map_gz:         {map_gz}")
     logging.info(f"  threads:        {threads}")
     logging.info(f"  demography:     {demography}")
@@ -436,13 +473,38 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
     logging.info(f"  L:              {L}")
     threads_out = threads
 
+    if os.path.isdir(panel):
+        logging.info(f"{panel} is a directory, interpreting as a .zarr archive")
+        panel_dataset = xr.open_zarr(panel)
+        batch_size = panel_dataset.chunks["samples"][0]
+        haps_panel = panel_dataset["genotypes"]
+    elif os.path.isfile(panel):
+        logging.info(f"{panel} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+        # This will do the whole conversion from vcf to zarr
+        haps_panel = parse_vcf(panel)
+        batch_size = 4e6 // haps_panel.shape[1]
+    else:
+        raise ValueError(f"{panel} not found")
+
+    if os.path.isdir(target):
+        logging.info(f"{target} is a directory, interpreting as a .zarr archive")
+        target_dataset = xr.open_zarr(target)
+        haps_target = target_dataset["genotypes"]
+    elif os.path.isfile(target):
+        logging.info(f"{target} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+        # This will do the whole conversion from vcf to zarr
+        haps_target = parse_vcf(target)
+    else:
+        raise ValueError(f"{target} not found")
+
     # Keep track of ram
     max_mem_used_GB = 0
 
     cm_pos, phys_pos = read_map_gz(map_gz)
     logging.info(f"Found a genotype map with {len(phys_pos)} markers")
-    haps_panel = read_plink1_bin(f"{bfile_panel}.bed", f"{bfile_panel}.bim", f"{bfile_panel}.fam")
-    haps_target = read_plink1_bin(f"{bfile_target}.bed", f"{bfile_target}.bim", f"{bfile_target}.fam")
+
+    # haps_panel = read_plink1_bin(f"{bfile_panel}.bed", f"{bfile_panel}.bim", f"{bfile_panel}.fam")
+    # haps_target = read_plink1_bin(f"{bfile_target}.bed", f"{bfile_target}.bim", f"{bfile_target}.fam")
     if haps_panel.shape[1] != haps_target.shape[1]:
         raise ValueError(f"Panel has shape {haps_panel.shape} and target has shape {haps_target.shape}")
     elif haps_panel.shape[0] == 0:
@@ -464,7 +526,7 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
     use_hmm = False
     samples = []
 
-    batch_size = int(np.ceil(2e6 / M))
+    # batch_size = int(np.ceil(2e6 / M))
     max_mem_used_GB = 0
     bwt = Threads(phys_pos,
                   cm_pos,
@@ -512,7 +574,7 @@ def impute(mode, bfile_panel, bfile_target, map_gz, mutation_rate, demography, t
     logging.info(f"Saving results to {threads_out}")
     serialize(threads_out, threads, samples, phys_pos, arg_range, L)
     end_time = time.time()
-    logging.info(f"Done, in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM")
+    logging.info(f"Done, in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM (ram usage here is nonsense actually, sorry)")
     goodbye()
 
 @click.command()
