@@ -512,9 +512,13 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
     int min_id = match_id;
     // Find all samples that match on the segment
     while (div_node->above != nullptr && div_node->divergence <= segment_start) {
-      n_matches += 1;
       div_node = div_node->above;
+      // this is a bit awkward
+      if (div_node->sample_ID == -1) {
+        break;
+      }
       div_states.push_back(div_node->sample_ID);
+      n_matches += 1;
       if (div_node->sample_ID < min_id) {
         min_id = div_node->sample_ID;
       }
@@ -806,7 +810,8 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype, cons
     int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
     std::vector<int> target_ID_L = std::get<1>(best_path[i]);
 
-    if (use_hmm && num_samples <= 100) {
+    // is it ok to have 100 here?
+    if (use_hmm && num_samples <= 1000) {
       std::vector<bool> het_hom_sites =
           fetch_het_hom_sites(new_sample_ID, target_ID_L[0], segment_start, segment_end);
 
@@ -816,7 +821,8 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype, cons
           num_het_sites++;
         }
       }
-      if (num_het_sites > 10) {
+      // is it ok to have 10 here?
+      if (num_het_sites > 5) {
         // cout << "found " << num_het_sites << " het sites...\n";
         std::vector<int> breakpoints = hmm->breakpoints(het_hom_sites, segment_start);
         // cout << "broke [" << segment_start << ", " << segment_end << ") up into\n";

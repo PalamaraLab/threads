@@ -273,6 +273,7 @@ def files(mode, hap_gz, sample, vcf, zarr):
     if hap_gz is not None:
         raise NotImplementedError("Not sure if I'll ever support Oxford haps files again. Eugh!")
     samples = []
+    positions = [v.POS for v in VCF(vcf)]
     for s in VCF(vcf).samples:
         samples += [f"{s}_0", f"{s}_1"]
     N = len(samples)
@@ -284,11 +285,12 @@ def files(mode, hap_gz, sample, vcf, zarr):
         genotypes[:, i] = v_gt
 
     ds = xr.Dataset(
-        {"genotypes": (("samples", "snp_ids"), genotypes),
-         "allele_counts": (("snp_ids",), genotypes.sum(axis=0))},
+        {"genotypes": (("samples", "snp_ids"), genotypes)},
         coords={
             "samples": samples,
-            "snp_ids": snp_ids
+            "snp_ids": snp_ids,
+            "pos": np.array(positions),
+            "allele_counts": genotypes.sum(axis=0)
         }
     )
     ds = ds.chunk({"samples": "auto", "snp_ids": -1})
@@ -574,7 +576,7 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
     logging.info(f"Saving results to {threads_out}")
     serialize(threads_out, threads, samples, phys_pos, arg_range, L)
     end_time = time.time()
-    logging.info(f"Done, in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM (ram usage here is nonsense actually, sorry)")
+    logging.info(f"Done, in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM (ram usage here is nonsense actually, sorry about that, will fix)")
     goodbye()
 
 @click.command()
