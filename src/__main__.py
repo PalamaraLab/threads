@@ -4,7 +4,6 @@ import time
 import h5py
 import tszip
 import click
-import psutil
 import logging
 import subprocess
 import arg_needle_lib
@@ -384,9 +383,6 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
                     bwt.insert(hap)
                     threads.append(([], [], [], [phys_pos[i] for i, h in enumerate(hap) if h]))
                 samples.append(i + s)
-            mem_used_GB = psutil.virtual_memory()[3] / 1e9
-            if mem_used_GB > max_mem_used_GB:
-                max_mem_used_GB = mem_used_GB
         if cycle_n > 0:
             logging.info("Cycling! This shouldn't take too long...")
             haps_chunk = haps[:min(num_samples, cycle_n)].values.astype(bool)
@@ -396,9 +392,6 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
                 bwt.delete_ID(i)
                 thread = bwt.thread(i, g)
                 threads.append(thread)
-                mem_used_GB = psutil.virtual_memory()[3] / 1e9
-                if mem_used_GB > max_mem_used_GB:
-                    max_mem_used_GB = mem_used_GB
     else:
         # counts_path = f"{bfile}.acount"
         # counts_df = pd.read_table(counts_path)
@@ -444,7 +437,7 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
     logging.info(f"Saving results to {threads_out}")
     serialize(threads_out, threads, samples, phys_pos_0, arg_range)
     end_time = time.time()
-    logging.info(f"Done, in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM")
+    logging.info(f"Done, in (s) {end_time - start_time}")
     goodbye()
 
 
@@ -552,9 +545,6 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
             hap = haps_chunk[i]
             bwt.insert(hap)
             # samples.append(i + s)
-        mem_used_GB = psutil.virtual_memory()[3] / 1e9
-        if mem_used_GB > max_mem_used_GB:
-            max_mem_used_GB = mem_used_GB
 
     logging.info("Done building panel, imputing...")
     threads = []
@@ -569,14 +559,11 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
             threads.append(bwt.thread(hap, L))
             samples.append(i + s)
             bwt.remove(num_samples_panel)
-        mem_used_GB = psutil.virtual_memory()[3] / 1e9
-        if mem_used_GB > max_mem_used_GB:
-            max_mem_used_GB = mem_used_GB
 
     logging.info(f"Saving results to {threads_out}")
     serialize(threads_out, threads, samples, phys_pos, arg_range, L)
     end_time = time.time()
-    logging.info(f"Done, in (s) {end_time - start_time}, using {max_mem_used_GB:.1f}/{psutil.virtual_memory()[0] / 1e9:.1f} GB RAM (ram usage here is nonsense actually, sorry about that, will fix)")
+    logging.info(f"Done, in (s) {end_time - start_time}")
     goodbye()
 
 @click.command()
