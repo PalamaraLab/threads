@@ -9,6 +9,7 @@ import subprocess
 import arg_needle_lib
 
 import numpy as np
+import xarray as xr
 import pandas as pd
 
 from threads import Threads
@@ -107,7 +108,6 @@ def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phy
 def serialize(out, threads, samples, positions, arg_range, L=1):
     num_threads = len(samples)
     num_sites = len(positions)
-
 
     thread_starts = []
     mut_starts = []
@@ -240,10 +240,8 @@ def decompress_threads(threads):
         "arg_range": arg_range
     }
 
-
 def parse_vcf(genotypes):
     raise NotImplementedError
-
 
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
@@ -309,9 +307,9 @@ def files(mode, hap_gz, sample, vcf, zarr):
 @click.option("--threads", required=True, help="Path to output .threads file.")
 @click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
 @click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
-def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads, burn_in_left=0, burn_in_right=0, adaptive=False, max_ac=5, cycle_n=0):
+@click.option("--max_ac", default=5, help="If using adaptive, lowest allele count included in all analyses")
+def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive, max_ac, cycle_n=0):
     """Infer threading instructions from input data and save to .threads format"""
-    import xarray as xr
     start_time = time.time()
     logging.info(f"Starting Threads-{mode} with the following parameters:")
     logging.info(f"  genotypes:      {genotypes}")
@@ -329,7 +327,7 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
         z_dataset = xr.open_zarr(genotypes)
         batch_size = z_dataset.chunks["samples"][0]
         haps = z_dataset["genotypes"]
-        acounts = z_dataset["allele_counts"]
+        acounts = z_dataset["allele_counts"].values
     elif os.path.isfile(genotypes):
         logging.info(f"{genotypes} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
         # This will do the whole conversion from vcf to zarr
@@ -338,7 +336,6 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
         acounts = haps.values.sum(axis=0)
     else:
         raise ValueError(f"{genotypes} not found")
-
 
     # Keep track of ram
     max_mem_used_GB = 0
@@ -416,7 +413,7 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
             else:
                 if ac == max_ac:
                     end = num_samples
-                variant_filter = (ac < acounts) & (acounts < num_samples - ac)
+                variant_filter = (ac < acounts) * (acounts < num_samples - ac)
                 # We still need to get the whole range, though
                 variant_filter[0] = True
                 variant_filter[-1] = True  # this one might be unnecessary
