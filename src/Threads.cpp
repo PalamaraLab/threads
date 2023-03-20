@@ -404,8 +404,6 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
       cerr << "No states left on stack, something is messed up in the algorithm.\n";
       exit(1);
     }
-    // cout << "\nDoing site " << i << " with genotype " << allele << " and " <<
-    // current_states.size() << " states on the stack. ";
 
     // Heuristically get a bound on states we want to add
     double extension_cost = rho_c[i] + mu_c[i];
@@ -464,7 +462,6 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
     double recombinant_score = z - rho_c[i] + rho[i];
     traceback_states.emplace_back(std::make_unique<TracebackState>(
         i + 1, best_extension.below->above, best_extension.traceback));
-    // i + 1, best_extension.below->above->sample_ID, best_extension.traceback));
     new_states.emplace_back(bottoms[i + 1].get(), recombinant_score, traceback_states.back().get());
     if (recombinant_score < z) {
       best_extension = new_states.back();
@@ -479,8 +476,6 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
       StateTree tree = StateTree(new_states);
       tree.prune();
       current_states = tree.dump();
-      // cout << "Site " << i << " pruning: " << current_states.size() << " states left out of " <<
-      // old_size << endl;
     }
     else {
       current_states = new_states;
@@ -489,7 +484,6 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
   }
 
   // Trace back best final state
-  // cout << current_states.size() << " states in the end.\n";
   State min_state =
       *(std::min_element(current_states.begin(), current_states.end(),
                          [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
