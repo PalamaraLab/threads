@@ -10,9 +10,6 @@ module load GSL/2.7-GCC-11.3.0
 module load Boost/1.79.0-GCC-11.3.0
 module load Eigen/3.4.0-GCCcore-11.3.0
 module load pybind11/2.9.2-GCCcore-11.3.0
-module load htslib
-# for boost_iostreams
-LD_LIBRARY_PATH=/users/palamara/awo066/lib:$LD_LIBRARY_PATH
 ```
 
 Fire up and activate a new venv:
