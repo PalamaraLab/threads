@@ -6,9 +6,12 @@
 #include <iostream>
 #include <math.h>
 #include <memory>
+#include <numeric>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 // #include <boost/iostreams/filtering_stream.hpp>
 // #include <boost/iostreams/filter/gzip.hpp>
@@ -122,13 +125,6 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
   // Initialize RNG
   std::random_device rd;
   rng = std::mt19937(rd());
-
-  // Set imputation state
-  impute = false;
-}
-
-void Threads::set_impute(bool impute_state) {
-  impute = impute_state;
 }
 
 std::tuple<std::vector<double>, std::vector<double>>
@@ -365,25 +361,32 @@ void Threads::print_sorting() {
  * @param genotype
  * @return std::vector<std::tuple<int, int>> a pair containing path segments (start_pos, id)
  */
-// std::vector<std::tuple<int, int>> Threads::fastLS(const std::vector<bool>& genotype, const int L)
-// {
-std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector<bool>& genotype,
-                                                               const int L) {
+std::pair<TracebackState*, Node*> Threads::fastLS(const std::vector<bool>& genotype,
+                                                  bool imputation) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
   std::vector<double> mu_c;
-  std::tie(mu, mu_c) = impute ? mutation_penalties_impute5()
-                              : mutation_penalties_correct(); // mutation_penalties_impute5();
+  std::tie(mu, mu_c) = imputation ? mutation_penalties_impute5()
+                                  : mutation_penalties(); // mutation_penalties_impute5();
 
   // NB these still rely on padding around sites (like mutations), rather than distance between
   // them
   std::vector<double> rho;
   std::vector<double> rho_c;
   // std::tie(rho, rho_c) = recombination_penalties_correct();
-  std::tie(rho, rho_c) = // recombination_penalties_correct();
-      sparse_sites ? recombination_penalties() : recombination_penalties_correct();
+  if (imputation) {
+    std::tie(rho, rho_c) = recombination_penalties_correct();
+    // std::tie(rho, rho_c) = recombination_penalties();
+  }
+  else if (sparse_sites) {
+    std::tie(rho, rho_c) = recombination_penalties();
+  }
+  else {
+    std::tie(rho, rho_c) = recombination_penalties_correct();
+  }
+  // std::tie(rho, rho_c) = // recombination_penalties_correct();
+  //     sparse_sites ? recombination_penalties() : recombination_penalties_correct();
 
-  std::vector<std::unique_ptr<TracebackState>> traceback_states;
   // traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
   traceback_states.emplace_back(std::make_unique<TracebackState>(0, nullptr, nullptr));
   std::vector<State> current_states;
@@ -430,7 +433,7 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
         }
       }
 
-      // If extending the current sequence is worse than recombining on the best extension
+      // If mutating the current sequence is worse than recombining on the best extension
       // we've found so far, we don't bother.
       if (s.score + mutation_cost <= z + rho_delta) {
         Node* t_next = extend_node(s.below, !allele, i);
@@ -468,9 +471,9 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
       z = recombinant_score;
     }
 
-    // Need to consider how best to use this threshold, 100 might be too high
+    // Need to consider how best to use this threshold, 100 might be too high... or too low?
     // Not currently using, just adds overhead
-    // ...but may be useful in real data
+    // ...but may be useful in real data (?)
     if (n_prune >= 0 && i % 100 == 0 && new_states.size() >= n_prune) {
       int old_size = new_states.size();
       StateTree tree = StateTree(new_states);
@@ -493,12 +496,672 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
     cout << ", using a maximum of " << max_states << " states.\n";
   }
 
+  return std::pair<TracebackState*, Node*>(min_state.traceback, min_state.below->above);
+}
+
+/**
+ * @brief Run Li-Stephens on input haplotype *without* inserting into the dynamic panel.
+ *        See also Algorithm 4 of Lunter (2018), Bioinformatics.
+ *
+ * @param genotype
+ * @return std::vector<std::tuple<int, int>> a pair containing path segments (start_pos, id)
+ */
+// std::pair<std::vector<std::tuple<int, std::vector<int>>>, std::vector<std::tuple<int,
+// std::vector<int>>>>
+std::array<std::pair<TracebackState*, Node*>, 2>
+Threads::fastLS_diploid(const std::vector<int>& genotype) {
+  // Get mutation/recombination penalties;
+  std::vector<double> mu;
+  std::vector<double> mu_c;
+  std::tie(mu, mu_c) = mutation_penalties();
+
+  // NB these still rely on padding around sites (like mutations), rather than distance between
+  // them, which is slightly wrong but probably not super-bad
+  std::vector<double> rho;
+  std::vector<double> rho_c;
+  // Long story here...
+  std::tie(rho, rho_c) =
+      sparse_sites ? recombination_penalties() : recombination_penalties_correct();
+
+  // Initialize traceback states
+  traceback_states.emplace_back(std::make_unique<TracebackState>(0, nullptr, nullptr));
+  // Initialize the list of current state-pairs
+  // For haploids we have a list of states, here we have pairs
+  std::vector<StatePair> current_pairs;
+  current_pairs.emplace_back(bottoms[0].get(), bottoms[0].get(), 0, traceback_states.back().get(),
+                             traceback_states.back().get());
+
+  // Just like with insertion, we start at the bottom of the first column.
+  // z holds the best current score for pairs and individual sequences
+  double z;
+  int max_state_pairs = 0;
+  bool allele;
+  StatePair best_pair = current_pairs.back();
+  bool extensible_a0;
+  bool extensible_a1;
+  bool extensible_b0;
+  bool extensible_b1;
+
+  // Just like haploid, we iterate through sites
+  for (int i = 0; i < num_sites; i++) {
+    // cout << endl;
+    // cout << "Site " << i << endl;
+    int allele = genotype[i];
+    int n_state_pairs = current_pairs.size();
+    std::vector<StatePair> new_pairs;
+    max_state_pairs = std::max(n_state_pairs, max_state_pairs);
+    if (n_state_pairs == 0) {
+      cerr << "No state pairs left on stack, something is messed up in the algorithm.\n";
+      exit(1);
+    }
+
+    // Heuristically get a bound on states we want to add,
+    // this is identical to haploid
+    double extension_cost = rho_c[i] + mu_c[i];
+    double mutation_cost = rho_c[i] + mu[i];
+    double rho_delta = std::max(0.0, rho[i] - rho_c[i]);
+
+    // Find the cheapest extension of the best previous pair, if it can be extended
+    // this helps with filtering out which extensions to process.
+    // This is the "global" minimum
+    std::tie(extensible_a0, extensible_b0) = pair_extensible_by(best_pair, 0, i);
+    std::tie(extensible_a1, extensible_b1) = pair_extensible_by(best_pair, 1, i);
+    if (allele == 0) {
+      if (extensible_a0 && extensible_b0) {
+        z = best_pair.score + 2 * extension_cost;
+      }
+      else if (extensible_a0 || extensible_b0) {
+        z = best_pair.score + extension_cost + mutation_cost;
+      }
+      else {
+        z = best_pair.score + 2 * mutation_cost;
+      }
+    }
+    else if (allele == 1) {
+      if ((extensible_a0 && extensible_b1) || (extensible_a1 && extensible_b0)) {
+        z = best_pair.score + 2 * extension_cost;
+      }
+      else {
+        z = best_pair.score + extension_cost + mutation_cost;
+      }
+    }
+    else if (allele == 2) {
+      if (extensible_a1 && extensible_b1) {
+        z = best_pair.score + 2 * extension_cost;
+      }
+      else if (extensible_a1 || extensible_b1) {
+        z = best_pair.score + extension_cost + mutation_cost;
+      }
+      else {
+        z = best_pair.score + 2 * mutation_cost;
+      }
+    }
+    else {
+      cerr << "Only 0, 1, 2-alleles allowed." << endl;
+      exit(1);
+    }
+
+    // Set local minima, this maps (anchor, traceback) to a score
+    std::unordered_map<size_t, double> local_min;
+    std::unordered_map<size_t, bool> extmap_0;
+    std::unordered_map<size_t, bool> extmap_1;
+
+    for (StatePair& p : current_pairs) {
+      // cout << "computing local min for " << p << endl;
+      size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
+      size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
+      double z_pair;
+
+      // Set/get extensibility
+      if (extmap_0.count(key_a)) {
+        extensible_a0 = extmap_0.at(key_a);
+      }
+      else {
+        State tmp_a = State(p.below_a, 0., p.traceback_a);
+        Node* t_next_a = extend_node(tmp_a.below, 0, i);
+        extensible_a0 = extensible_by(tmp_a, t_next_a, 0, i);
+        extmap_0[key_a] = extensible_a0;
+      }
+      if (extmap_1.count(key_a)) {
+        extensible_a1 = extmap_1.at(key_a);
+      }
+      else {
+        State tmp_a = State(p.below_a, 1., p.traceback_a);
+        Node* t_next_a = extend_node(tmp_a.below, 1, i);
+        extensible_a1 = extensible_by(tmp_a, t_next_a, 1, i);
+        extmap_1[key_a] = extensible_a1;
+      }
+      if (extmap_0.count(key_b)) {
+        extensible_b0 = extmap_0.at(key_b);
+      }
+      else {
+        State tmp_b = State(p.below_b, 0., p.traceback_b);
+        Node* t_next_b = extend_node(tmp_b.below, 0, i);
+        extensible_b0 = extensible_by(tmp_b, t_next_b, 0, i);
+        extmap_0[key_b] = extensible_b0;
+      }
+      if (extmap_1.count(key_b)) {
+        extensible_b1 = extmap_1.at(key_b);
+      }
+      else {
+        State tmp_b = State(p.below_b, 1., p.traceback_b);
+        Node* t_next_b = extend_node(tmp_b.below, 1, i);
+        extensible_b1 = extensible_by(tmp_b, t_next_b, 1, i);
+        extmap_1[key_b] = extensible_b1;
+      }
+
+      // Compute scores
+      if (allele == 0) {
+        if (extensible_a0 && extensible_b0) {
+          z_pair = p.score + 2 * extension_cost;
+        }
+        else if (extensible_a0 || extensible_b0) {
+          z_pair = p.score + extension_cost + mutation_cost;
+        }
+        else {
+          z_pair = p.score + 2 * mutation_cost;
+        }
+      }
+      else if (allele == 1) {
+        if ((extensible_a0 && extensible_b1) || (extensible_a1 && extensible_b0)) {
+          z_pair = p.score + 2 * extension_cost;
+        }
+        else {
+          z_pair = p.score + extension_cost + mutation_cost;
+        }
+      }
+      else if (allele == 2) {
+        if (extensible_a1 && extensible_b1) {
+          z_pair = p.score + 2 * extension_cost;
+        }
+        else if (extensible_a1 || extensible_b1) {
+          z_pair = p.score + extension_cost + mutation_cost;
+        }
+        else {
+          z_pair = p.score + 2 * mutation_cost;
+        }
+      }
+      if (!local_min.count(key_a)) {
+        // Set local minima
+        local_min[key_a] = z_pair;
+      }
+      else {
+        local_min[key_a] = std::min(z_pair, local_min.at(key_a));
+      }
+      if (!local_min.count(key_b)) {
+        local_min[key_b] = z_pair;
+      }
+      else {
+        local_min[key_b] = std::min(z_pair, local_min.at(key_b));
+      }
+    }
+
+    // START OF MAIN EXTENSION LOOP
+    // cout << "going into loop with z=" << z << endl;
+    std::unordered_map<size_t, double> new_local_min;
+    for (StatePair& p : current_pairs) {
+      // cout << "processing " << p << endl;
+      bool extended = false;
+      size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
+      size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
+      double z_a = local_min.at(key_a);
+      double z_b = local_min.at(key_b);
+
+      Node* a_next;
+      Node* b_next;
+      extensible_a0 = extmap_0.at(key_a);
+      extensible_a1 = extmap_1.at(key_a);
+      extensible_b0 = extmap_0.at(key_b);
+      extensible_b1 = extmap_1.at(key_b);
+      // std::tie(extensible_a0, extensible_b0) = pair_extensible_by(p, 0, i);
+      // std::tie(extensible_a1, extensible_b1) = pair_extensible_by(p, 1, i);
+
+      // First case: we extend both sequences.
+      double case1_cost = p.score + 2 * extension_cost;
+      std::vector<Node*> added_1a;
+      std::vector<Node*> added_1b;
+      if (case1_cost <= std::min({z_a + rho_delta, z_b + rho_delta, z + 2 * rho_delta})) {
+        // extend both
+        // cout << "case 1" << endl;
+        if (allele == 0) {
+          if (extensible_a0 && extensible_b0) {
+            // extend by 0,0!
+            // cout << "extend 0,0 with score " << case1_cost << endl;
+            a_next = extend_node(p.below_a, 0, i);
+            b_next = extend_node(p.below_b, 0, i);
+            new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
+            added_1a.push_back(a_next);
+            added_1b.push_back(b_next);
+            extended = true;
+          }
+        }
+        else if (allele == 1) {
+          if (extensible_a0 && extensible_b1) {
+            // extend by 0,1!
+            // cout << "extend 0,1 with score " << case1_cost << endl;
+            a_next = extend_node(p.below_a, 0, i);
+            b_next = extend_node(p.below_b, 1, i);
+            new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
+            added_1a.push_back(a_next);
+            added_1b.push_back(b_next);
+            extended = true;
+          }
+          if (extensible_a1 && extensible_b0) {
+            // extend by 1,0!
+            // cout << "extend 1,0 with score " << case1_cost << endl;
+            a_next = extend_node(p.below_a, 1, i);
+            b_next = extend_node(p.below_b, 0, i);
+            new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
+            added_1a.push_back(a_next);
+            added_1b.push_back(b_next);
+            extended = true;
+          }
+        }
+        else {
+          if (extensible_a1 && extensible_b1) {
+            // extend by 1,1!
+            // cout << "extend 1,1 with score " << case1_cost << endl;
+            a_next = extend_node(p.below_a, 1, i);
+            b_next = extend_node(p.below_b, 1, i);
+            new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
+            added_1a.push_back(a_next);
+            added_1b.push_back(b_next);
+            extended = true;
+          }
+        }
+        // update local and global minima
+        if (extended) {
+          z = std::min(z, case1_cost);
+          local_min[key_a] = std::min(z_a, case1_cost);
+          local_min[key_b] = std::min(z_b, case1_cost);
+          for (auto a1 : added_1a) {
+            size_t new_key_a = pair_key(a1->above->sample_ID, p.traceback_a->site);
+            // cout << "adding new_key_a " << new_key_a << endl;
+            if (new_local_min.count(new_key_a)) {
+              new_local_min[new_key_a] = std::min(new_local_min.at(new_key_a), case1_cost);
+            }
+            else {
+              new_local_min[new_key_a] = case1_cost;
+            }
+          }
+          for (auto b1 : added_1b) {
+            size_t new_key_b = pair_key(b1->above->sample_ID, p.traceback_b->site);
+            // cout << "adding new_key_b " << new_key_b << endl;
+            if (new_local_min.count(new_key_b)) {
+              new_local_min[new_key_b] = std::min(new_local_min.at(new_key_b), case1_cost);
+            }
+            else {
+              new_local_min[new_key_b] = case1_cost;
+            }
+          }
+          extended = false;
+        }
+      }
+
+      // Second case: we mutate one sequence
+      double case2_cost = p.score + extension_cost + mutation_cost;
+      std::vector<Node*> added_2a;
+      std::vector<Node*> added_2b;
+      if (case2_cost <= std::min({z_a + rho_delta, z_b + rho_delta, z + 2 * rho_delta})) {
+        // extend one, mutate one
+        // cout << "case 2" << endl;
+        if (allele == 0 || allele == 2) {
+          if (extensible_a0 && extensible_b1) {
+            // extend by 0,1!
+            // cout << "extend 0,1 with score " << case2_cost << endl;
+            Node* a_next = extend_node(p.below_a, 0, i);
+            Node* b_next = extend_node(p.below_b, 1, i);
+            new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
+            added_2a.push_back(a_next);
+            added_2b.push_back(b_next);
+            extended = true;
+          }
+          if (extensible_a1 && extensible_b0) {
+            // extend by 1,0!
+            // cout << "extend 1,0 with score " << case2_cost << endl;
+            Node* a_next = extend_node(p.below_a, 1, i);
+            Node* b_next = extend_node(p.below_b, 0, i);
+            new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
+            added_2a.push_back(a_next);
+            added_2b.push_back(b_next);
+            extended = true;
+          }
+        }
+        else {
+          // allele = 1
+          if (extensible_a0 && extensible_b0) {
+            // extend by 0,0!
+            // cout << "extend 0,0 with score " << case2_cost << endl;
+            Node* a_next = extend_node(p.below_a, 0, i);
+            Node* b_next = extend_node(p.below_b, 0, i);
+            new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
+            added_2a.push_back(a_next);
+            added_2b.push_back(b_next);
+            extended = true;
+          }
+          if (extensible_a1 && extensible_b1) {
+            // extend by 1,1!
+            // cout << "extend 1,1 with score " << case2_cost << endl;
+            Node* a_next = extend_node(p.below_a, 1, i);
+            Node* b_next = extend_node(p.below_b, 1, i);
+            new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
+            added_2a.push_back(a_next);
+            added_2b.push_back(b_next);
+            extended = true;
+          }
+        }
+        // update local and global minima
+        if (extended) {
+          z = std::min(z, case2_cost);
+          local_min[key_a] = std::min(local_min.at(key_a), case2_cost);
+          local_min[key_b] = std::min(local_min.at(key_b), case2_cost);
+          for (auto a2 : added_2a) {
+            size_t new_key_a = pair_key(a2->above->sample_ID, p.traceback_a->site);
+            // cout << "adding new_key_a " << new_key_a << endl;
+            if (new_local_min.count(new_key_a)) {
+              new_local_min[new_key_a] = std::min(new_local_min.at(new_key_a), case2_cost);
+            }
+            else {
+              new_local_min[new_key_a] = case2_cost;
+            }
+          }
+          for (auto b2 : added_2b) {
+            size_t new_key_b = pair_key(b2->above->sample_ID, p.traceback_b->site);
+            // cout << "adding new_key_b " << new_key_b << endl;
+            if (new_local_min.count(new_key_b)) {
+              new_local_min[new_key_b] = std::min(new_local_min.at(new_key_b), case2_cost);
+            }
+            else {
+              new_local_min[new_key_b] = case2_cost;
+            }
+            extended = false;
+          }
+        }
+      }
+
+      // Third case: we mutate both sequences
+      double case3_cost = p.score + 2 * mutation_cost;
+      std::vector<Node*> added_3a;
+      std::vector<Node*> added_3b;
+      if (case3_cost <= std::min({z_a + rho_delta, z_b + rho_delta, z + 2 * rho_delta})) {
+        // extend both
+        // cout << "case 3" << endl;
+        if (allele == 0) {
+          if (extensible_a1 && extensible_b1) {
+            // extend by 1,1!
+            // cout << "extend 1,1 with " << case3_cost << endl;
+            Node* a_next = extend_node(p.below_a, 1, i);
+            Node* b_next = extend_node(p.below_b, 1, i);
+            new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
+            added_3a.push_back(a_next);
+            added_3b.push_back(b_next);
+            extended = true;
+          }
+        }
+        else if (allele == 1) {
+          if (extensible_a0 && extensible_b1) {
+            // extend by 0,1!
+            // cout << "extend 0,1 with " << case3_cost << endl;
+            Node* a_next = extend_node(p.below_a, 0, i);
+            Node* b_next = extend_node(p.below_b, 1, i);
+            new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
+            added_3a.push_back(a_next);
+            added_3b.push_back(b_next);
+            extended = true;
+          }
+          if (extensible_a1 && extensible_b0) {
+            // extend by 1,0!
+            // cout << "extend 1,0 with " << case3_cost << endl;
+            Node* a_next = extend_node(p.below_a, 1, i);
+            Node* b_next = extend_node(p.below_b, 0, i);
+            new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
+            added_3a.push_back(a_next);
+            added_3b.push_back(b_next);
+            extended = true;
+          }
+        }
+        else {
+          if (extensible_a0 && extensible_b0) {
+            // extend by 0,0!
+            // cout << "extend 0,0 with " << case3_cost << endl;
+            Node* a_next = extend_node(p.below_a, 0, i);
+            Node* b_next = extend_node(p.below_b, 0, i);
+            new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
+            added_3a.push_back(a_next);
+            added_3b.push_back(b_next);
+            extended = true;
+          }
+        }
+        // update local and global minima
+        if (extended) {
+          z = std::min(z, case3_cost);
+          local_min[key_a] = std::min(local_min.at(key_a), case3_cost);
+          local_min[key_b] = std::min(local_min.at(key_b), case3_cost);
+          for (auto a3 : added_3a) {
+            size_t new_key_a = pair_key(a3->above->sample_ID, p.traceback_a->site);
+            // cout << "adding new_key_a " << new_key_a << endl;
+            if (new_local_min.count(new_key_a)) {
+              new_local_min[new_key_a] = std::min(new_local_min.at(new_key_a), case3_cost);
+            }
+            else {
+              new_local_min[new_key_a] = case3_cost;
+            }
+          }
+          for (auto b3 : added_3b) {
+            size_t new_key_b = pair_key(b3->above->sample_ID, p.traceback_b->site);
+            // cout << "adding new_key_b " << new_key_b << endl;
+            if (new_local_min.count(new_key_b)) {
+              new_local_min[new_key_b] = std::min(new_local_min.at(new_key_b), case3_cost);
+            }
+            else {
+              new_local_min[new_key_b] = case3_cost;
+            }
+          }
+          extended = false;
+        }
+      }
+      // cout << "done, z=" << z << endl;
+    }
+    // END OF EXTENSION LOOP
+
+    if (new_pairs.size() == 0) {
+      cerr << "The algorithm is in an illegal state because no new_states were created.\n";
+      exit(1);
+    }
+
+    // SINGLE RECOMBINATION EVENTS
+    // this will add a lot of states
+    // cout << "have " << new_pairs.size() << " states after main loop" << endl;
+    std::unordered_set<size_t> already_recombined;
+    std::vector<StatePair> rec_pairs;
+    // cout << "newminmap" << endl;
+    // for (auto& it : new_local_min) {
+    //   cout << it.first << ": " << it.second << endl;
+    // }
+    for (StatePair& p : new_pairs) {
+      // cout << "doing single-rec for " << p << endl;
+      size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
+      size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
+      // cout << "key_a: " << key_a << endl;
+      // cout << "key_b: " << key_b << endl;
+      double recombinant_score = p.score - rho_c[i] + rho[i];
+      if (!already_recombined.count(key_a) &&
+          std::abs(new_local_min.at(key_a) - p.score) < 0.0001) {
+        already_recombined.insert(key_a);
+        // Best a-state, so we recombine b
+        traceback_states.emplace_back(
+            std::make_unique<TracebackState>(i + 1, p.below_b->above, p.traceback_b));
+        rec_pairs.emplace_back(p.below_a, bottoms[i + 1].get(), recombinant_score, p.traceback_a,
+                               traceback_states.back().get());
+      }
+      if (!already_recombined.count(key_b) &&
+          std::abs(new_local_min.at(key_b) - p.score) < 0.0001) {
+        already_recombined.insert(key_b);
+        // Best b-state, so we recombine a
+        traceback_states.emplace_back(
+            std::make_unique<TracebackState>(i + 1, p.below_a->above, p.traceback_a));
+        rec_pairs.emplace_back(bottoms[i + 1].get(), p.below_b, recombinant_score,
+                               traceback_states.back().get(), p.traceback_b);
+      }
+    }
+    // cout << "have " << new_pairs.size() << " states after single_recomb loop" << endl;
+
+    // DOUBLE RECOMBINATION EVENT
+    best_pair =
+        *(std::min_element(new_pairs.begin(), new_pairs.end(),
+                           [](const auto& p1, const auto& p2) { return p1.score < p2.score; }));
+    double double_recombinant_score = z - 2 * rho_c[i] + 2 * rho[i];
+    traceback_states.emplace_back(
+        std::make_unique<TracebackState>(i + 1, best_pair.below_a->above, best_pair.traceback_a));
+    traceback_states.emplace_back(
+        std::make_unique<TracebackState>(i + 1, best_pair.below_b->above, best_pair.traceback_b));
+
+    // Insert single recombination states
+    for (auto p : rec_pairs) {
+      new_pairs.push_back(p);
+    }
+    // Insert double recombination state
+    new_pairs.emplace_back(bottoms[i + 1].get(), bottoms[i + 1].get(), double_recombinant_score,
+                           traceback_states[traceback_states.size() - 2].get(),
+                           traceback_states.back().get());
+
+    if (double_recombinant_score < z) {
+      best_pair = new_pairs.back();
+      z = double_recombinant_score;
+    }
+    if (std::abs(best_pair.score - z) > 0.0001) {
+      cerr << "The algorithm is in an illegal state because z != best_pair.score, found ";
+      cerr << "best_pair.score=" << best_pair.score << " and z=" << z << endl;
+      exit(1);
+    }
+    current_pairs = new_pairs;
+    new_pairs.clear();
+    local_min.clear();
+    new_local_min.clear();
+  }
+
+  // TRACEBACK PART
+  // Find best final state
+  StatePair min_pair =
+      *(std::min_element(current_pairs.begin(), current_pairs.end(),
+                         [](const auto& p1, const auto& p2) { return p1.score < p2.score; }));
+
+  // cout << "Best path-pair ending at " << min_pair << endl;
+
+  return {std::pair<TracebackState*, Node*>(min_pair.traceback_a, min_pair.below_a->above),
+          std::pair<TracebackState*, Node*>(min_pair.traceback_b, min_pair.below_b->above)};
+  // // Traceback loop
+  // // TODO: DRY (also for haploid)
+  // std::vector<std::tuple<int, std::vector<int>>> best_path_a;
+  // TracebackState* traceback_a = min_pair.traceback_a;
+  // Node* match = min_pair.below_a->above;
+  // while (traceback_a != nullptr) {
+  //   int n_matches = 1;
+  //   int segment_start = traceback_a->site;
+  //   int match_id = match->sample_ID;
+  //   std::vector<int> div_states = {match_id};
+  //   Node* div_node = match;
+  //   // We also keep track of the min_id, this is useful for genotype parsing
+  //   int min_id = match_id;
+  //   // Find all samples that match on the segment
+  //   while (div_node->above != nullptr && div_node->divergence <= segment_start) {
+  //     div_node = div_node->above;
+  //     // this is a bit awkward
+  //     if (div_node->sample_ID == -1) {
+  //       break;
+  //     }
+  //     div_states.push_back(div_node->sample_ID);
+  //     n_matches += 1;
+  //     if (div_node->sample_ID < min_id) {
+  //       min_id = div_node->sample_ID;
+  //     }
+  //   }
+  //   std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
+  //   std::vector<int> sampled_states;
+  //   sampled_states.reserve(L + 1);
+  //   // Sample L threading targets
+  //   if (div_states.size() < L) {
+  //     for (int i = 0; i < L; i++) {
+  //       sampled_states.push_back(div_states[distrib(rng)]);
+  //     }
+  //   }
+  //   else {
+  //     std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), L,
+  //     rng);
+  //   }
+  //   // add the min-state as well
+  //   sampled_states.push_back(min_id);
+
+  //   best_path_a.emplace_back(segment_start, sampled_states);
+  //   match = traceback_a->best_prev_node;
+  //   traceback_a = traceback_a->prev;
+  // }
+  // std::reverse(best_path_a.begin(), best_path_a.end());
+
+  // std::vector<std::tuple<int, std::vector<int>>> best_path_b;
+  // TracebackState* traceback_b = min_pair.traceback_b;
+  // match = min_pair.below_b->above;
+  // while (traceback_b != nullptr) {
+  //   int n_matches = 1;
+  //   int segment_start = traceback_b->site;
+  //   int match_id = match->sample_ID;
+  //   std::vector<int> div_states = {match_id};
+  //   Node* div_node = match;
+  //   // We also keep track of the min_id, this is useful for genotype parsing
+  //   int min_id = match_id;
+  //   // Find all samples that match on the segment
+  //   while (div_node->above != nullptr && div_node->divergence <= segment_start) {
+  //     div_node = div_node->above;
+  //     // this is a bit awkward
+  //     if (div_node->sample_ID == -1) {
+  //       break;
+  //     }
+  //     div_states.push_back(div_node->sample_ID);
+  //     n_matches += 1;
+  //     if (div_node->sample_ID < min_id) {
+  //       min_id = div_node->sample_ID;
+  //     }
+  //   }
+  //   std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
+  //   std::vector<int> sampled_states;
+  //   sampled_states.reserve(L + 1);
+  //   // Sample L threading targets
+  //   if (div_states.size() < L) {
+  //     for (int i = 0; i < L; i++) {
+  //       sampled_states.push_back(div_states[distrib(rng)]);
+  //     }
+  //   }
+  //   else {
+  //     std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), L,
+  //     rng);
+  //   }
+  //   // add the min-state as well
+  //   sampled_states.push_back(min_id);
+
+  //   best_path_b.emplace_back(segment_start, sampled_states);
+  //   match = traceback_b->best_prev_node;
+  //   traceback_b = traceback_b->prev;
+  // }
+  // std::reverse(best_path_b.begin(), best_path_b.end());
+
+  // std::pair<std::vector<std::tuple<int, std::vector<int>>>, std::vector<std::tuple<int,
+  // std::vector<int>>>> path_pair(best_path_a, best_path_b); return path_pair;
+}
+
+/**
+ * This is a basic traceback that samples a random haplotype per from all matches per segment and
+ * also stores the lowest-numbered match (for compression)
+ */
+std::vector<std::tuple<int, std::vector<int>>> Threads::traceback(TracebackState* tb, Node* match,
+                                                                  bool return_all) {
+  // TracebackState* tb = traceback_match_pair.first;
+  // Node* match = traceback_match_pair.second;
   std::vector<std::tuple<int, std::vector<int>>> best_path;
-  TracebackState* traceback = min_state.traceback;
-  Node* match = min_state.below->above;
-  while (traceback != nullptr) {
+  // TracebackState* tb = min_state.tb;
+  // Node* match = min_state.below->above;
+  while (tb != nullptr) {
     int n_matches = 1;
-    int segment_start = traceback->site;
+    int segment_start = tb->site;
     int match_id = match->sample_ID;
     std::vector<int> div_states = {match_id};
     Node* div_node = match;
@@ -517,28 +1180,111 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::fastLS(const std::vector
         min_id = div_node->sample_ID;
       }
     }
-    std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
     std::vector<int> sampled_states;
-    sampled_states.reserve(L + 1);
-    // Sample L threading targets
-    if (div_states.size() < L) {
-      for (int i = 0; i < L; i++) {
-        sampled_states.push_back(div_states[distrib(rng)]);
-      }
+    if (return_all) {
+      sampled_states = std::vector<int>(div_states.begin(), div_states.end());
     }
     else {
-      std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), L, rng);
+
+      std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
+      // NB can replace this with array
+      sampled_states.reserve(2);
+      // Sample L threading targets
+      // if (div_states.size() < L) {
+      //   for (int i = 0; i < L; i++) {
+      //     sampled_states.push_back(div_states[distrib(rng)]);
+      //   }
+      // }
+      // else {
+      std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), 1, rng);
+      // add the min-state as well
+      sampled_states.push_back(min_id);
     }
-    // add the min-state as well
-    sampled_states.push_back(min_id);
 
     best_path.emplace_back(segment_start, sampled_states);
-    match = traceback->best_prev_node;
-    traceback = traceback->prev;
+    match = tb->best_prev_node;
+    tb = tb->prev;
   }
   std::reverse(best_path.begin(), best_path.end());
 
   return best_path;
+}
+
+/**
+ * Similar to normal traceback, but picks the up-to L best matches and stores their overlap with the
+ * input sequence returns a list of a tuple of lists :-P I.e., a list of segments, and each segment
+ * is a tuple (sample_IDs, starts, ends) all of equal length <= L
+ */
+std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>>
+Threads::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int L) {
+  std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> imputation_path;
+  int prev_end = num_sites;
+  while (tb != nullptr) {
+    int n_matches = 1;
+    int segment_start = tb->site;
+    // int segment_end;
+    // if (imputation_path.size() == 0) {
+    int segment_end = prev_end;
+    prev_end = segment_start;
+    // } else {
+    //   segment_end = imputation_path.back().first;
+    // }
+    int match_id = match->sample_ID;
+    std::vector<int> div_states = {match_id};
+    Node* div_node = match;
+    // We also keep track of the min_id, this is useful for genotype parsing
+    int min_id = match_id;
+    // Find all samples that match on the segment
+    while (div_node->above != nullptr && div_node->divergence <= segment_start) {
+      div_node = div_node->above;
+      // this is a bit awkward
+      if (div_node->sample_ID == -1) {
+        break;
+      }
+      div_states.push_back(div_node->sample_ID);
+      n_matches += 1;
+      if (div_node->sample_ID < min_id) {
+        min_id = div_node->sample_ID;
+      }
+    }
+
+    // Overlaps measured in matching sites
+    std::vector<std::pair<int, int>> overlaps;
+    overlaps.reserve(div_states.size());
+    // NB can replace this with array
+    for (const int s_id : div_states) {
+      overlaps.push_back(overflow_region(genotypes, s_id, segment_start, segment_end));
+    }
+
+    // initialize original index locations
+    std::vector<size_t> idx(overlaps.size());
+    std::iota(idx.begin(), idx.end(), 0);
+
+    // sort indexes based on comparing values in v
+    // using std::stable_sort instead of std::sort
+    // to avoid unnecessary index re-orderings
+    // when v contains elements of equal values
+    std::stable_sort(idx.begin(), idx.end(), [&overlaps](size_t i1, size_t i2) {
+      return overlaps[i1].second - overlaps[i1].first < overlaps[i2].second - overlaps[i2].first;
+    });
+
+    std::vector<int> segment_starts;
+    std::vector<int> sample_ids;
+    std::vector<int> segment_ends;
+    for (int j = idx.size() - 1; j >= std::max(0, (int) (idx.size() - L)); j--) {
+      // segment_starts.push_back(overlaps[idx[j]].first);
+      // segment_ends.push_back(overlaps[idx[j]].second);
+      segment_starts.push_back(segment_start);
+      segment_ends.push_back(segment_end);
+      sample_ids.push_back(div_states[idx[j]]);
+    }
+    imputation_path.emplace_back(sample_ids, segment_starts, segment_ends);
+    match = tb->best_prev_node;
+    tb = tb->prev;
+  }
+  std::reverse(imputation_path.begin(), imputation_path.end());
+
+  return imputation_path;
 }
 
 /**
@@ -564,42 +1310,58 @@ bool Threads::extensible_by(State& s, const Node* t_next, const bool g, const in
   }
   else if (genotype_interval_match(
                s.below->above->sample_ID, next_above_candidate, s.traceback->site, i)) {
+    // We had a trick here with divergence values but it was.. wrong?
+    // In the dPBWT, that would be O(N)
     return true;
   }
   return false;
 }
 
-/**
- * @brief This relies on panel size, mutation rate and physical map
- *
- * @return double
- */
+std::pair<bool, bool> Threads::pair_extensible_by(StatePair& p, const bool g, const int i) {
+  State tmp_a = State(p.below_a, 0., p.traceback_a);
+  Node* t_next_a = extend_node(tmp_a.below, g, i);
+  State tmp_b = State(p.below_b, 0., p.traceback_b);
+  Node* t_next_b = extend_node(tmp_b.below, g, i);
+  bool extensible_a = extensible_by(tmp_a, t_next_a, g, i);
+  bool extensible_b = extensible_by(tmp_b, t_next_b, g, i);
+  return std::pair<bool, bool>(extensible_a, extensible_b);
+}
+
+// /**
+//  * @brief This relies on panel size, mutation rate and physical map
+//  *
+//  * @return double
+//  */
+// std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_old() {
+//   std::vector<double> mu(num_sites);
+//   std::vector<double> mu_c(num_sites);
+
+//   // The expected branch length
+//   const double t = demography.expected_branch_length(num_samples + 1);
+
+//   for (int i = 0; i < num_sites; i++) {
+//     // l is in bp units
+//     double k = 2. * mutation_rate * bp_sizes[i] * t;
+//     mu_c[i] = k;
+//     mu[i] = -std::log1p(-std::exp(-k));
+//   }
+//   return std::tuple(mu, mu_c);
+// }
+
 std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
 
-  // The expected branch length
-  const double t = demography.expected_branch_length(num_samples + 1);
-
-  for (int i = 0; i < num_sites; i++) {
-    // l is in bp units
-    double k = 2. * mutation_rate * bp_sizes[i] * t;
-    mu_c[i] = k;
-    mu[i] = -std::log1p(-std::exp(-k));
-  }
-  return std::tuple(mu, mu_c);
-}
-
-std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_correct() {
-  std::vector<double> mu(num_sites);
-  std::vector<double> mu_c(num_sites);
+  double mean_bp_size =
+      (double) (physical_positions.back() - physical_positions[0]) / (double) num_sites;
 
   // The expected branch length
   const double t = demography.expected_branch_length(num_samples + 1);
 
   for (int i = 0; i < num_sites; i++) {
     // l is in bp units
-    double k = 2. * mutation_rate * bp_sizes[i] * t;
+    // double k = 2. * mutation_rate * bp_sizes[i] * t;
+    double k = 2. * mutation_rate * mean_bp_size * t;
     mu_c[i] = k;
     mu[i] = -std::log1p(-std::exp(-k));
   }
@@ -678,39 +1440,39 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_pena
  * @param end exclusive
  * @return double
  */
-double Threads::date_segment(const int id1, const int id2, const int start, const int end) {
+double Threads::date_segment(const int num_het_sites, const int start, const int end) {
   if (start > end) {
     cerr << "Can't date a segment with length <= 0\n";
     exit(1);
   }
   // this check should become unnecessary
-  if (ID_map.find(id1) == ID_map.end()) {
-    cerr << "date_segment bad id1 " << id1 << endl;
-    exit(1);
-  }
+  // if (ID_map.find(id1) == ID_map.end()) {
+  //   cerr << "date_segment bad id1 " << id1 << endl;
+  //   exit(1);
+  // }
 
-  if (ID_map.find(id2) == ID_map.end()) {
-    cerr << "date_segment bad id2 " << id2 << endl;
-    exit(1);
-  }
-  double m = 0;
+  // if (ID_map.find(id2) == ID_map.end()) {
+  //   cerr << "date_segment bad id2 " << id2 << endl;
+  //   exit(1);
+  // }
+  double m = (double) num_het_sites;
   double bp_size = 0;
   double cm_size = 0;
   for (int i = start; i < end; i++) {
-    if (panel[ID_map.at(id1)][i]->genotype != panel[ID_map.at(id2)][i]->genotype) {
-      m++;
-    }
+    // if (panel[ID_map.at(id1)][i]->genotype != panel[ID_map.at(id2)][i]->genotype) {
+    //   m++;
+    // }
     bp_size += bp_sizes[i];
     cm_size += cm_sizes[i];
   }
   double mu = 2. * mutation_rate * bp_size;
   double rho = 2. * 0.01 * cm_size;
   if (sparse_sites) {
-    if (m > 15) {
-      // cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
-      double gamma = 1. / demography.expected_time;
-      return 2. / (gamma + rho);
-    }
+    // HERE WE ONLY USE THE SEGMENT LENGTH
+    // if (m > 15) {
+    //   // cout << "Warning: very many heterozygous sites, defaulting to const-demography
+    //   method.\n"; double gamma = 1. / demography.expected_time; return 2. / (gamma + rho);
+    // }
     double numerator = 0;
     double denominator = 0;
     int K = demography.times.size();
@@ -775,18 +1537,21 @@ double Threads::date_segment(const int id1, const int id2, const int start, cons
 }
 
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
-Threads::thread(const std::vector<bool>& genotype, const int L) {
-  return thread(num_samples, genotype, L);
+Threads::thread(const std::vector<bool>& genotype) {
+  return thread(num_samples, genotype);
 }
 
+// todo: L is no longer required here
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
-Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype, const int L) {
+Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // Compute LS path
-  // std::vector<std::tuple<int, int>> best_path;
-
   std::vector<std::tuple<int, std::vector<int>>> best_path;
   if (num_samples > 0) {
-    best_path = fastLS(genotype, L);
+    TracebackState* tb;
+    Node* match;
+    std::tie(tb, match) = fastLS(genotype);
+    best_path = traceback(tb, match);
+    traceback_states.clear();
   }
 
   // Insert new genotype. NB, it's important we insert before we date,
@@ -797,24 +1562,27 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype, cons
   std::vector<int> bp_starts;
   std::vector<std::vector<int>> target_IDs;
   std::vector<double> segment_ages;
-
+  int total_num_het_sites = 0;
   // Date segments
   for (int i = 0; i < best_path.size(); i++) {
     int segment_start = std::get<0>(best_path[i]);
     int segment_end = (i == best_path.size() - 1) ? num_sites : std::get<0>(best_path[i + 1]);
     std::vector<int> target_ID_L = std::get<1>(best_path[i]);
 
-    // is it ok to have 100 here?
-    if (use_hmm && num_samples <= 1000) {
-      std::vector<bool> het_hom_sites =
-          fetch_het_hom_sites(new_sample_ID, target_ID_L[0], segment_start, segment_end);
+    std::vector<bool> het_hom_sites =
+        fetch_het_hom_sites(new_sample_ID, target_ID_L[0], segment_start, segment_end);
 
-      int num_het_sites = 0;
-      for (auto s : het_hom_sites) {
-        if (s) {
-          num_het_sites++;
-        }
+    int num_het_sites = 0;
+    for (auto s : het_hom_sites) {
+      if (s) {
+        num_het_sites++;
       }
+    }
+    total_num_het_sites += num_het_sites;
+    // if (best_path.size() == 1) {
+    // }
+    // is it ok to have 100 here?
+    if (use_hmm && num_samples < 1000) {
       // is it ok to have 10 here?
       if (num_het_sites > 5) {
         // cout << "found " << num_het_sites << " het sites...\n";
@@ -828,30 +1596,248 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype, cons
           // cout<< "[" << breakpoint_start << ", " << breakpoint_end << ") ";
           target_IDs.push_back(target_ID_L);
           bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[breakpoint_start])));
-          segment_ages.push_back(
-              date_segment(new_sample_ID, target_ID_L[0], breakpoint_start, breakpoint_end));
+          segment_ages.push_back(date_segment(num_het_sites, breakpoint_start, breakpoint_end));
         }
-        // cout << "\n";
       }
       else {
         target_IDs.push_back(target_ID_L);
         bp_starts.push_back(
             static_cast<int>(ceil(bp_boundaries[segment_start]))); // ceil bc should be int-like
-        segment_ages.push_back(
-            date_segment(new_sample_ID, target_ID_L[0], segment_start, segment_end));
+        segment_ages.push_back(date_segment(num_het_sites, segment_start, segment_end));
       }
     }
     else {
       target_IDs.push_back(target_ID_L);
       bp_starts.push_back(
           static_cast<int>(ceil(bp_boundaries[segment_start]))); // ceil bc should be int-like
-      segment_ages.push_back(
-          date_segment(new_sample_ID, target_ID_L[0], segment_start, segment_end));
+      segment_ages.push_back(date_segment(num_het_sites, segment_start, segment_end));
     }
   }
+  // cout << best_path.size() << ": " << total_num_het_sites << endl;
+  // todo: not this twice
   std::vector<int> het_sites = het_sites_from_thread(new_sample_ID, bp_starts, target_IDs);
   return remove_burn_in(bp_starts, target_IDs, segment_ages, het_sites);
   // return std::tuple(bp_starts, target_IDs, segment_ages, het_sites);
+}
+
+std::vector<ImputationSegment> Threads::impute(std::vector<bool>& genotype, int L) {
+  // vector of sample_ids, seg_starts, seg_ends (buffered)
+  std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> best_path;
+  Node* match;
+  TracebackState* traceback;
+  // if (num_samples > 0) {
+  std::tie(traceback, match) = fastLS(genotype);
+  best_path = traceback_impute(genotype, traceback, match, L);
+  traceback_states.clear();
+  // }
+
+  std::vector<double> seg_ages;
+  for (const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& segment :
+       best_path) {
+    // date anti-conservatively, using longest region (is this bad?)
+    // int match_id =
+    int seg_start = *std::min_element(std::get<1>(segment).begin(), std::get<1>(segment).end());
+    int seg_end = *std::max_element(std::get<2>(segment).begin(), std::get<2>(segment).end());
+    // NB num_het_sites is not used for sparse_sites, which we assume for imputation
+
+    seg_ages.push_back(date_segment(0, seg_start, seg_end));
+  }
+
+  int num_segs = best_path.size();
+  std::vector<ImputationSegment> imputation_segments;
+
+  // Special case for the first segment
+  // initialize 1/K weights
+  for (int i = 0; i < num_segs; i++) {
+    const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& segment = best_path[i];
+    const std::vector<int>& samples = std::get<0>(segment);
+    ImputationSegment imp_seg;
+    imp_seg.seg_start = physical_positions[std::get<1>(segment)[0]];
+    imp_seg.ids = samples;
+    std::vector<double> wts;
+    std::vector<double> ages(samples.size(), seg_ages[i]);
+    imp_seg.ages = ages;
+    for (auto s : samples) {
+      wts.push_back(1. / samples.size());
+    }
+    imp_seg.weights = wts;
+    imputation_segments.push_back(imp_seg);
+    // const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& segment =
+    // best_path[i]; const std::vector<int>& samples = std::get<0>(segment); double seg_age =
+    // seg_ages[i];
+
+    // const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& next_segment =
+    // best_path[i + 1]; const std::vector<int>& seg_ends = std::get<2>(segment); const
+    // std::vector<int>& next_samples = std::get<0>(next_segment); const std::vector<int>&
+    // next_seg_starts = std::get<1>(next_segment); double next_age = seg_ages[i + 1];
+    // std::vector<int> breakpoints(next_seg_starts.begin(), next_seg_starts.end());
+    // breakpoints.insert(breakpoints.end(), seg_ends.begin(), seg_ends.end());
+    // std::set<int> bp_set(breakpoints.begin(), breakpoints.end());
+    // for (int bp : bp_set) {
+    //   // initialize 1/K weights
+    //   ImputationSegment imp_seg;
+    //   imp_seg.seg_start = physical_positions[bp];
+    //   std::vector<int> impseg_samples(samples.begin(), samples.end());
+    //   impseg_samples.insert(impseg_samples.end(), next_samples.begin(), next_samples.end());
+    //   imp_seg.ids = impseg_samples;
+    //   std::vector<double> ages;
+    //   for (auto s : samples) {
+    //     ages.push_back(seg_age);
+    //   }
+    //   for (auto ns : next_samples) {
+    //     ages.push_back(next_age);
+    //   }
+    //   imp_seg.ages = ages;
+    //   std::vector<double> wts(samples.size() + next_samples.size(), 0.0);
+    //   for (int ns_idx = 0; ns_idx < next_samples.size(); ns_idx++) {
+    //     for (int s_idx = 0; s_idx < samples.size(); s_idx++) {
+    //       int s_vec_idx = s_idx;
+    //       int ns_vec_idx = samples.size() + ns_idx;
+    //       if (next_seg_starts[ns_idx] == seg_ends[s_idx]) {
+    //         // if there's no interpolation:
+    //         if (bp < next_seg_starts[ns_idx]) {
+    //           wts[s_vec_idx] += 1;
+    //         } else {
+    //           wts[ns_vec_idx] += 1;
+    //         }
+    //       } else {
+    //         // if we do have to interpolate:
+    //         if (bp <= next_seg_starts[ns_idx]) {
+    //           wts[s_vec_idx] += 1;
+    //           // here we always copy s
+    //         } else if (bp < seg_ends[s_idx]) {
+    //           // here we interpolate
+    //           double scale = (genetic_positions[bp] - genetic_positions[next_seg_starts[ns_idx]])
+    //           / (genetic_positions[seg_ends[s_idx]] -
+    //           genetic_positions[next_seg_starts[ns_idx]]); wts[s_vec_idx] += 1 - scale;
+    //           wts[ns_vec_idx] += scale;
+    //         } else {
+    //           // here we alwasys copy ns
+    //           wts[ns_vec_idx] += 1;
+    //         }
+    //       }
+    //     }
+    //   }
+    //   for (int j = 0; j < wts.size(); j++) {
+    //     wts[j] /= (next_samples.size() * samples.size());
+    //   }
+    //   imp_seg.weights = wts;
+    //   imputation_segments.push_back(imp_seg);
+    // }
+  }
+  // why is this so bad?!
+  return imputation_segments;
+}
+
+// todo: eigenize
+std::array<std::vector<int>, 2> Threads::phase(std::vector<int> unphased_genotypes) {
+  std::vector<std::tuple<int, std::vector<int>>> best_path_a;
+  std::vector<std::tuple<int, std::vector<int>>> best_path_b;
+
+  auto ls_output = fastLS_diploid(unphased_genotypes);
+  cout << "finished with diploid LS, made " << traceback_states.size() << " tb states" << endl;
+  best_path_a = traceback(ls_output[0].first, ls_output[0].second, true);
+  best_path_b = traceback(ls_output[1].first, ls_output[1].second, true);
+  cout << "finished traceback: a size " << best_path_a.size() << " b size: " << best_path_b.size()
+       << endl;
+  traceback_states.clear();
+
+  std::vector<int> phased_a;
+  phased_a.reserve(num_sites);
+  std::vector<int> phased_b;
+  phased_b.reserve(num_sites);
+  int a_path_idx = 0;
+  int b_path_idx = 0;
+  for (int i = 0; i < num_sites; i++) {
+    if (a_path_idx < best_path_a.size() - 1 && i >= std::get<0>(best_path_a[a_path_idx + 1])) {
+      a_path_idx++;
+    }
+    if (b_path_idx < best_path_b.size() - 1 && i >= std::get<0>(best_path_b[b_path_idx + 1])) {
+      b_path_idx++;
+    }
+    // first check if there's no need to phase
+    if (unphased_genotypes[i] == 0) {
+      phased_a.push_back(0);
+      phased_b.push_back(0);
+    }
+    else if (unphased_genotypes[i] == 2) {
+      phased_a.push_back(1);
+      phased_b.push_back(1);
+    }
+    else if (unphased_genotypes[i] == 1) {
+      cout << "phasing " << i << " ";
+      double a_gt = 0;
+      const std::vector<int>& a_nearest_neighbours = std::get<1>(best_path_a[a_path_idx]);
+      for (auto a_nn : a_nearest_neighbours) {
+        a_gt += (double) panel[ID_map[a_nn]][i]->genotype / a_nearest_neighbours.size();
+      }
+      cout << "done a gt ";
+      double b_gt = 0;
+      const std::vector<int>& b_nearest_neighbours = std::get<1>(best_path_b[b_path_idx]);
+      for (auto b_nn : b_nearest_neighbours) {
+        b_gt += (double) panel[ID_map[b_nn]][i]->genotype / b_nearest_neighbours.size();
+      }
+      cout << "done b gt " << endl;
+      // int a_nn = std::get<1>(best_path_a[a_path_idx])[0];
+      // int a_gt = (int)panel[ID_map[a_nn]][i]->genotype;
+      // int b_nn = std::get<1>(best_path_b[b_path_idx])[0];
+      // int b_gt = (int)panel[ID_map[b_nn]][i]->genotype;
+      // if we do need to phase, first check we get phasing for free
+      if (a_gt > b_gt) {
+        cout << "phasing a" << endl;
+        phased_a.push_back(1);
+        phased_b.push_back(0);
+      }
+      else if (b_gt > a_gt) {
+        cout << "phasing b" << endl;
+        phased_a.push_back(0);
+        phased_b.push_back(1);
+      }
+      else {
+        cout << "actual phasing ";
+        // otherwise, prefer the haplotype coming from the longer segment
+        int a_seg_start = std::get<0>(best_path_a[a_path_idx]);
+        int a_seg_end = (a_path_idx == best_path_a.size() - 1)
+                            ? num_sites - 1
+                            : std::get<0>(best_path_a[a_path_idx + 1]);
+        cout << "done segstartsends a ";
+        int b_seg_start = std::get<0>(best_path_b[b_path_idx]);
+        int b_seg_end = (b_path_idx == best_path_b.size() - 1)
+                            ? num_sites - 1
+                            : std::get<0>(best_path_b[b_path_idx + 1]);
+        cout << "done segstartsends b ";
+        // if  {
+        //   a_seg_end = num_sites;
+        // } else {
+        //   a_seg_end = std::get<0>(best_path_a[a_path_idx + 1]);
+        // }
+        // int b_seg_end;
+        // if (b_path_idx == best_path_b.size() - 1) {
+        //   b_seg_end = num_sites;
+        // } else {
+        //   b_seg_end = std::get<0>(best_path_b[b_path_idx + 1]);
+        // }
+        if (genetic_positions[a_seg_end] - genetic_positions[a_seg_start] >=
+            genetic_positions[b_seg_end] - genetic_positions[b_seg_start]) {
+          cout << "phasing a" << endl;
+          int a_round = (a_gt >= 0.5) ? 1 : 0;
+          phased_a.push_back(a_round);
+          phased_b.push_back(1 - a_round);
+        }
+        else {
+          cout << "phasing a" << endl;
+          int b_round = (b_gt >= 0.5) ? 1 : 0;
+          phased_a.push_back(1 - b_round);
+          phased_b.push_back(b_round);
+        }
+      }
+    }
+    else {
+      cerr << "unphased genotypes need to be 0,1,2" << endl;
+      exit(1);
+    }
+  }
+  return {phased_a, phased_b};
 }
 
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
@@ -923,6 +1909,36 @@ bool Threads::genotype_interval_match(const int id1, const int id2, const int st
     }
   }
   return true;
+}
+
+/**
+ * assuming input genotypes match sample_id on [segment_start, segment_end), how much can we extend
+ * the region in either direction with out hitting a mismatch
+ */
+std::pair<int, int> Threads::overflow_region(const std::vector<bool>& genotypes,
+                                             const int sample_id, const int segment_start,
+                                             const int segment_end) {
+  int overlap_start = segment_start;
+  int overlap_end = segment_end;
+
+  while (overlap_start > 0) {
+    if (genotypes[overlap_start - 1] == panel[ID_map.at(sample_id)][overlap_start - 1]->genotype) {
+      overlap_start--;
+    }
+    else {
+      break;
+    }
+  }
+
+  while (overlap_end < num_sites) {
+    if (genotypes[overlap_end] == panel[ID_map.at(sample_id)][overlap_end]->genotype) {
+      overlap_end++;
+    }
+    else {
+      break;
+    }
+  }
+  return std::pair<int, int>(overlap_start, overlap_end);
 }
 
 /**

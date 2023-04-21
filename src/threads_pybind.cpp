@@ -8,9 +8,15 @@
 
 namespace py = pybind11;
 PYBIND11_MODULE(threads_python_bindings, m) {
+  py::class_<ImputationSegment>(m, "ImputationSegment")
+      .def_readonly("seg_start", &ImputationSegment::seg_start)
+      .def_readonly("ids", &ImputationSegment::ids)
+      .def_readonly("weights", &ImputationSegment::weights)
+      .def_readonly("ages", &ImputationSegment::ages);
   py::class_<Node>(m, "Node")
       .def_readonly("sample_ID", &Node::sample_ID)
-      .def_readonly("genotype", &Node::genotype);
+      .def_readonly("genotype", &Node::genotype)
+      .def_readonly("divergence", &Node::divergence);
   py::class_<Demography>(m, "Demography")
       .def_readonly("times", &Demography::times)
       .def_readonly("sizes", &Demography::sizes)
@@ -53,12 +59,17 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def_readonly("hmm", &Threads::hmm)
       .def_readonly("threading_start", &Threads::threading_start)
       .def_readonly("threading_end", &Threads::threading_end)
+      .def(
+          "query_panel",
+          [](const Threads& threads, const int i, const int j) { return *(threads.panel[i][j]); },
+          "return panel entry at (i, j)")
       .def("trimmed_positions", &Threads::trimmed_positions)
-      .def("set_impute", &Threads::set_impute, py::arg("impute_state"))
       .def("delete_hmm", &Threads::delete_hmm)
       .def("mutation_penalties", &Threads::mutation_penalties)
+      .def("mutation_penalties_impute5", &Threads::mutation_penalties_impute5)
       .def("recombination_penalties", &Threads::recombination_penalties)
-      .def("date_segment", &Threads::date_segment, py::arg("id1"), py::arg("id2"), py::arg("start"),
+      .def("recombination_penalties_correct", &Threads::recombination_penalties_correct)
+      .def("date_segment", &Threads::date_segment, py::arg("num_het_sites"), py::arg("start"),
            py::arg("end"))
       .def("insert", py::overload_cast<const std::vector<bool>&>(&Threads::insert),
            py::arg("genotypes"))
@@ -66,18 +77,20 @@ PYBIND11_MODULE(threads_python_bindings, m) {
            py::arg("ID"), py::arg("genotypes"))
       .def("remove", &Threads::remove, py::arg("ID"))
       .def("print_sorting", &Threads::print_sorting)
-      .def("thread", py::overload_cast<const std::vector<bool>&, const int>(&Threads::thread),
-           py::arg("genotypes"), py::arg("L") = 1)
-      .def("thread",
-           py::overload_cast<const int, const std::vector<bool>&, const int>(&Threads::thread),
-           py::arg("new_sample_ID"), py::arg("genotypes"), py::arg("L") = 1)
+      .def("thread", py::overload_cast<const std::vector<bool>&>(&Threads::thread),
+           py::arg("genotypes"))
+      .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&Threads::thread),
+           py::arg("new_sample_ID"), py::arg("genotypes"))
+      .def("impute", &Threads::impute)
+      .def("phase", &Threads::phase)
       // .def("thread_with_mutations", py::overload_cast<const
       // std::vector<bool>&>(&Threads::thread_with_mutations), py::arg("genotypes"))
       // .def("thread_with_mutations", py::overload_cast<const int, const
       // std::vector<bool>&>(&Threads::thread_with_mutations), py::arg("new_sample_ID"),
       // py::arg("genotypes")) .def("thread_from_file", &Threads::thread_from_file,
       // py::arg("hack_gz"), py::arg("n_cycle")=0)
-      .def("fastLS", &Threads::fastLS);
+      //  .def("fastLS", &Threads::fastLS)
+      .def("fastLS_diploid", &Threads::fastLS_diploid, py::arg("genotypes"));
 
   py::class_<TGEN>(m, "TGEN")
       .def(py::init<std::vector<int>, std::vector<std::vector<int>>, std::vector<std::vector<int>>,
