@@ -6,6 +6,14 @@
 #include <unordered_map>
 #include <vector>
 
+struct ImputationSegment {
+  int seg_start;
+  std::vector<int> ids;
+  // these are at the *start* of the segment
+  std::vector<double> weights;
+  std::vector<double> ages;
+};
+
 class Threads {
 
 private:
@@ -13,7 +21,7 @@ private:
   std::vector<std::unique_ptr<Node>> tops;
   std::vector<std::unique_ptr<Node>> bottoms;  // Ha, ha
 
-  bool impute;
+  std::vector<std::unique_ptr<TracebackState>> traceback_states;
 
   // Burn-in quantities
   int trim_pos_start_idx;
@@ -21,9 +29,15 @@ private:
 
   std::mt19937 rng;
 
+  inline size_t pair_key(int i, int j) {
+    return (size_t) i << 32 | (unsigned int) j;
+  }
   Node* extend_node(Node* node, bool genotype, const int i);
   bool extensible_by(State& s, const Node* t_next, const bool g, const int i);
+  std::pair<bool, bool> pair_extensible_by(StatePair& p, const bool g, const int i);
   bool genotype_interval_match(const int id1, const int id2, const int start, const int end);
+  std::pair<int, int> overflow_region(const std::vector<bool>& genotypes, const int sample_id,
+                                      const int segment_start, const int segment_end);
   std::vector<bool> fetch_het_hom_sites(const int id1, const int id2, const int start, const int end);
   std::vector<int> het_sites_from_thread(const int focal_ID, std::vector<int> bp_starts,
                                          std::vector<std::vector<int>> target_IDs);
@@ -68,7 +82,6 @@ public:
 
   // More attributes
   std::vector<double> trimmed_positions();
-  void set_impute(bool impute_state);
 
   // Insertion/deletion
   // Insert and assign generic ID
@@ -83,25 +96,30 @@ public:
 
   // Algorithms
   std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
-  thread(const std::vector<bool>& genotype, const int L = 1);
+  thread(const std::vector<bool>& genotype);
   std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
-  thread(const int new_sample_ID, const std::vector<bool>& genotype, const int L = 1);
+  thread(const int new_sample_ID, const std::vector<bool>& genotype);
   std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
   remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int>>& target_IDs,
                  std::vector<double>& segment_ages, std::vector<int>& het_sites);
-  // std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const std::vector<bool>& genotype);
-  // std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>, std::vector<bool>> thread_with_mutations(const int new_sample_ID, const std::vector<bool>& genotype);
-  // std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>> thread_from_file(std::string file_path, int n_cycle);
-  std::vector<std::tuple<int, std::vector<int>>> fastLS(const std::vector<bool>& genotype,
-                                                        const int L = 1);
-  std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
+
+  std::vector<ImputationSegment> impute(std::vector<bool>& genotype, int L);
+  std::array<std::vector<int>, 2> phase(std::vector<int>);
+  std::pair<TracebackState*, Node*> fastLS(const std::vector<bool>& genotype,
+                                           bool imputation = false);
+  std::vector<std::tuple<int, std::vector<int>>> traceback(TracebackState* tb, Node* match,
+                                                           bool return_all = false);
+  std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>>
+  traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int L);
+  std::array<std::pair<TracebackState*, Node*>, 2> fastLS_diploid(const std::vector<int>& genotype);
+  // std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_impute5();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
-  std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_correct();
+  std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties_correct();
 
   // TMRCA estimation
-  double date_segment(const int id1, const int id2, const int start, const int end);
+  double date_segment(const int num_het_sites, const int start, const int end);
 
   // Debugging
   void print_sorting();

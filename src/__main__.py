@@ -16,7 +16,7 @@ from threads import Threads
 from datetime import datetime
 # from pandas_plink import read_plink1_bin
 import xarray as xr
-from cyvcf2 import VCF
+from cyvcf2 import VCF, Writer
 
 def print_help_msg(command):
     with click.Context(command) as ctx:
@@ -116,13 +116,6 @@ def serialize(out, threads, samples, positions, arg_range, L=1):
     all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
     for i, thread in enumerate(threads):
         bps, ids, ages, het_sites = thread
-        # try:
-        #     if i == 0:
-        #         bps, ids, ages, het_sites = [], [], [], thread[3]
-        #     else:
-        # except ValueError:
-        #     import pdb
-        #     pdb.set_trace()
         all_bps += bps
         all_ids += ids
         all_ages += ages
@@ -173,10 +166,31 @@ def serialize(out, threads, samples, positions, arg_range, L=1):
 
     f.close()
 
-def threads_to_arg(thread_dict, noise=0.0):
+# this is only for imputation
+def write_vcf(out_vcf_gz, samples, positions, snp_ids, afs, hap1_genotypes, hap2_genotypes, dosages, genotyped_pos):
+    chrom = "1"
+    # with gzip.open(out_vcf_gz, "wb") as f:
+    with open(out_vcf_gz, "w") as f:
+        f.write("##fileformat=VCFv4.2\n")
+        f.write("##FILTER=<ID=PASS,Description=\"All filters passed\">\n")
+        f.write(f"##fileDate={datetime.now().strftime('%m/%d/%Y, %H:%M:%S')}\n")
+        f.write("##source=Threads 0.0\n")
+        f.write(f"##contig=<ID={chrom}>\n")
+        f.write("##FPLOIDY=2\n")
+        f.write("##INFO=<ID=IMP,Number=0,Type=Flag,Description=\"Imputed marker\">\n")
+        f.write("##INFO=<ID=AF,Number=A,Type=Float,Description=\"Estimated allele frequency\">\n")
+        f.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Phased genotypes\">\n")
+        f.write("##FORMAT=<ID=DS,Number=A,Type=Float,Description=\"Genotype dosage\">\n")
+        f.write(("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(samples) + "\n"))
+        for (pos, snp_id, af, hap1_var, hap2_var, dosage_var) in zip(positions, snp_ids, afs, hap1_genotypes, hap2_genotypes, dosages):
+            imp_str = "" if pos in genotyped_pos else "IMP;"
+            gt_strings = [f"{hap_1}|{hap_2}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(hap1_var, hap2_var, dosage_var)]
+            f.write(("\t".join([chrom, str(pos), snp_id.replace("'", "").replace(":", "_"), "A", "C", ".", "PASS", f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
+
+def threads_to_arg(thread_dict, noise=0.0, max_n=None):
     threading_instructions = thread_dict['threads']
     pos = thread_dict['positions']
-    N = np.max(thread_dict['samples'].astype(int)) + 1
+    N = max_n if max_n is not None else np.max(thread_dict['samples'].astype(int)) + 1
     arg_start, arg_end = thread_dict['arg_range']
     # "+ 1" so we can include mutations on the last site... wait are we now adding two many +1's?
     # "+ 2" because.... >:-(
@@ -193,14 +207,18 @@ def threads_to_arg(thread_dict, noise=0.0):
             thread_heights += thread_heights * np.random.normal(0.0, noise, len(thread_heights))
             # this is weird, should fix
             arg_starts = [s - arg.offset for s in section_starts]
-            if arg_starts[-1] >= arg.end:
-                arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1])
-            else:
-                arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights)
+            try:
+                if arg_starts[-1] >= arg.end:
+                    arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1])
+                else:
+                    arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights)
+            except IndexError:
+                import pdb
+                pdb.set_trace()
 
     # Cycling pass
-    for i, t in enumerate(threading_instructions[N:]):
-        raise RuntimeError(f"Cycling not currently supported here until arg_needle_lib supports node deletion")
+    # for i, t in enumerate(threading_instructions[N:]):
+    #     raise RuntimeError(f"Cycling not currently supported here until arg_needle_lib supports node deletion")
         # arg.lazy_delete(i)
         # arg.add_sample(i, str(i))
         # section_starts, thread_ids, thread_heights = t
@@ -330,6 +348,7 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
         acounts = z_dataset["allele_counts"].values
     elif os.path.isfile(genotypes):
         logging.info(f"{genotypes} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+        raise NotImplementedError
         # This will do the whole conversion from vcf to zarr
         haps = parse_vcf(genotypes)
         batch_size = 4e6 // haps.shape[1]
@@ -440,30 +459,35 @@ def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads,
 
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert", "impute"]))
-@click.option("--panel", required=True, help="Prefix of threads-generated PLINK files for reference panel.")
+@click.option("--panel", required=True, help="Prefix of threads-generated PLINK files for reference panel. Array!!")
+@click.option("--panel_wgs", required=True, help="Prefix of threads-generated PLINK files for reference panel. Actual panel!!")
 @click.option("--target", required=True, help="Prefix of threads-generated PLINK files for samples to impute.")
 @click.option("--map_gz", required=True, help="Path to genotype map")
+@click.option("--argn", default=None, help="Path to reference arg")
 @click.option("--mutation_rate", required=True, type=float, help="Per-site-per-generation SNP mutation rate.")
 @click.option("--demography", required=True, help="Path to file containing demographic history.")
-@click.option("--threads", required=True, help="Path to output .threads file.")
-@click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
-@click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
+@click.option("--out", required=True, help="Path to output .vcf file.")
+@click.option("--start_pos", default=0, help="Where we start imputing")
+@click.option("--end_pos", default=0, help="Where we stop imputing")
 @click.option("--l", default=128, help="Maximum number of matching states sampled per segment. Default is 128 (too high? too high)")
-def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn_in_left, burn_in_right, l):
+def impute(mode, panel, panel_wgs, target, map_gz, argn, mutation_rate, demography, out, start_pos, end_pos, l):
     """Thread sequences in bfile_target to sequences in bfile_panel. Assumes data are from genotyping arrays"""
     start_time = time.time()
     L = l
     logging.info(f"Starting Threads-{mode} with the following parameters:")
     logging.info(f"  panel:          {panel}")
+    logging.info(f"  panel_wgs:      {panel_wgs}")
     logging.info(f"  target:         {target}")
     logging.info(f"  map_gz:         {map_gz}")
-    logging.info(f"  threads:        {threads}")
+    logging.info(f"  argn:           {argn}")
+    logging.info(f"  out:            {out}")
     logging.info(f"  demography:     {demography}")
     logging.info(f"  mutation_rate:  {mutation_rate}")
-    logging.info(f"  burn_in_left:   {burn_in_left}")
-    logging.info(f"  burn_in_right:  {burn_in_right}")
+    logging.info(f"  start_pos:      {start_pos}")
+    logging.info(f"  end_pos:        {end_pos}")
     logging.info(f"  L:              {L}")
-    threads_out = threads
+    vcf_out = out
+    RARE_VARIANT_CUTOFF = 0.01
 
     if os.path.isdir(panel):
         logging.info(f"{panel} is a directory, interpreting as a .zarr archive")
@@ -472,6 +496,7 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
         haps_panel = panel_dataset["genotypes"]
     elif os.path.isfile(panel):
         logging.info(f"{panel} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+        raise NotImplementedError
         # This will do the whole conversion from vcf to zarr
         haps_panel = parse_vcf(panel)
         batch_size = 4e6 // haps_panel.shape[1]
@@ -484,6 +509,7 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
         haps_target = target_dataset["genotypes"]
     elif os.path.isfile(target):
         logging.info(f"{target} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+        raise NotImplementedError
         # This will do the whole conversion from vcf to zarr
         haps_target = parse_vcf(target)
     else:
@@ -493,6 +519,7 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
     max_mem_used_GB = 0
 
     cm_pos, phys_pos = read_map_gz(map_gz)
+    genotyped_pos = [int(p) for p in phys_pos]
     logging.info(f"Found a genotype map with {len(phys_pos)} markers")
 
     # haps_panel = read_plink1_bin(f"{bfile_panel}.bed", f"{bfile_panel}.bim", f"{bfile_panel}.fam")
@@ -507,8 +534,6 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
     logging.info(f"Found panel of shape {haps_panel.shape}")
     logging.info(f"Found target of shape {haps_target.shape}")
 
-    arg_range = (phys_pos[0] + burn_in_left, phys_pos[-1] - burn_in_right)
-    # arg_range = (phys_pos[0] + burn_in_left, phys_pos[-1] - burn_in_right + 1)
     M = len(phys_pos)
     ne_times, ne_sizes = parse_demography(demography)
     num_samples_panel = haps_panel.shape[0]
@@ -516,64 +541,283 @@ def impute(mode, panel, target, map_gz, mutation_rate, demography, threads, burn
 
     sparse_sites = True
     use_hmm = False
-    samples = []
 
-    # batch_size = int(np.ceil(2e6 / M))
-    max_mem_used_GB = 0
     bwt = Threads(phys_pos,
                   cm_pos,
                   mutation_rate,
                   ne_sizes,
                   ne_times,
                   sparse_sites,
-                  use_hmm=use_hmm,
-                  burn_in_left=burn_in_left,
-                  burn_in_right=burn_in_right)
-    assert (bwt.threading_start, bwt.threading_end) == arg_range
-    bwt.set_impute(True)
+                  use_hmm=use_hmm)
 
     logging.info("Building panel...")
     for k in range(int(np.ceil(num_samples_panel / batch_size))):
         s = k * batch_size
         e = min(num_samples_panel, (k + 1) * batch_size)
         haps_chunk = haps_panel[s:e].values.astype(bool)
-
         for i, hap in enumerate(haps_chunk):
             hap = haps_chunk[i]
             bwt.insert(hap)
-            # samples.append(i + s)
 
     logging.info("Done building panel, imputing...")
-    threads = []
+    imputation_threads = []
     for k in range(int(np.ceil(num_samples_target / batch_size))):
         s = k * batch_size
         e = min(num_samples_target, (k + 1) * batch_size)
         haps_chunk = haps_target[s:e].values.astype(bool)
 
         for i, hap in enumerate(haps_chunk):
-            assert bwt.num_samples == num_samples_panel
             hap = haps_chunk[i]
-            threads.append(bwt.thread(hap, L))
-            samples.append(i + s)
-            bwt.remove(num_samples_panel)
+            imputation_thread = bwt.impute(hap, L)
+            imputation_threads.append(imputation_thread)
+            # print(len(imputation_thread))
+    assert len(imputation_threads) == num_samples_target
+    logging.info(f"Done HMM stuff, now doing all the dirty copying work")
 
-    logging.info(f"Saving results to {threads_out}")
-    serialize(threads_out, threads, samples, phys_pos, arg_range, L)
+    logging.info(f"{panel_wgs} is a directory, interpreting as a .zarr archive")
+    panel_dataset = xr.open_zarr(panel_wgs)
+    batch_size = panel_dataset.chunks["samples"][0]
+    positions = panel_dataset["pos"].values
+    snp_ids = panel_dataset["snp_ids"]
+    # incl_idx = (start_pos <= positions) * (positions <= end_pos)
+    haps = panel_dataset["genotypes"]
+    acount = panel_dataset["allele_counts"].values
+    M = haps.shape[1]
+    mafs = acount / haps.shape[0]
+    panel_ids = panel_dataset["samples"].values#haps.iid.values
+
+    mut_lookups = 0
+    dosage_lookups = 0
+
+    # Get actual sample names, this is an ugly workaround until we actually save sample names with threads (lazy)
+    N_dip = haps.shape[0] // 2
+    diploid_samples = []
+    for k in range(N_dip, N_dip + num_samples_target // 2):
+        diploid_samples.append(f"tsk_{k}")
+
+    arg = None
+    if argn is not None:
+        arg = arg_needle_lib.deserialize_arg(argn)
+        arg.populate_mutations_on_edges()
+        # an overabundance of caution here
+        arg_sites = (np.array(arg.get_sites()) + arg.offset).astype(int)
+        assert len(arg_sites) == M == len(mafs)
+        assert (arg_sites == positions).all()
+
+    haps = haps.values
+    imputed_genotypes = np.empty((num_samples_target, M), dtype=float)
+    imputed_genotypes[:] = np.nan
+    # eugh, clean this up, it's gotten just as ugly as the other thing
+    for target_id, imputation_thread in enumerate(imputation_threads):
+        num_segs = len(imputation_thread)
+        num_imputed = 0
+        for i, imp_segment in enumerate(imputation_thread):
+            seg_end = end_pos + 1 if i == num_segs - 1 else imputation_thread[i + 1].seg_start
+            if seg_end <= start_pos:
+                continue
+            if i == 0 or imp_segment.seg_start < start_pos:
+                seg_start = start_pos
+            else:
+                seg_start = imp_segment.seg_start
+            if seg_start > end_pos:
+                break
+            pos_indices = (seg_start <= positions) * (positions < seg_end)
+            seg_positions = positions[pos_indices]
+            M_batch = len(seg_positions)
+            if M_batch == 0:
+                continue
+            seg_start_index = np.nonzero(pos_indices)[0][0]#max(, num_imputed)
+            if num_imputed > seg_start_index:
+                raise RuntimeError
+                # this whole things is pretty nuts and shouldn't even be necessary, should take care of this c++-side
+                # will only happen with funky impute-overlaps (currently switched off)
+                offset = (num_imputed - seg_start_index)
+                M_batch -= offset
+                seg_positions = seg_positions[offset:]
+                seg_start_index = num_imputed
+                pos_indices[:seg_start_index] = False
+            if M_batch <= 0:
+                continue
+            # if i == num_segs - 1 or imp_segment.ids != imputation_thread[i + 1].ids:
+            # we're between overlap regions and we just average
+            seg_ids = np.array(imp_segment.ids)  # [np.array(imp_segment.weights) != 0]
+            # current chunking is hilariously bad for this
+            seg_haps = haps[seg_ids][:, pos_indices]#.values
+            assert np.isnan(imputed_genotypes[target_id, seg_start_index:seg_start_index + M_batch]).all()
+            imputed_genotypes[target_id, seg_start_index:seg_start_index + M_batch] = seg_haps.mean(axis=0)
+            # else:
+            #     next_segment = imputation_thread[i + 1]
+            #     # now we're going to interpolate
+            #     start_weights = np.array(imp_segment.weights)
+            #     end_weights = np.array(next_segment.weights)
+            #     seg_haps = haps[imp_segment.ids][:, pos_indices]#.values
+            #     pos_interpolation = (seg_positions - seg_start) / (seg_end - seg_start)
+            #     assert 0 <= pos_interpolation.min() and pos_interpolation.max() <= 1
+            #     seg_weights = np.matmul(start_weights[:, None], 1 - pos_interpolation[None, :]) + np.matmul(end_weights[:, None], pos_interpolation[None, :])
+            #     assert np.abs(seg_weights.sum(axis=0) - 1).max() < 0.001
+            #     assert seg_weights.shape == seg_haps.shape
+            #     assert np.isnan(imputed_genotypes[target_id, seg_start_index:seg_start_index + M_batch]).all()
+            #     imputed_genotypes[target_id, seg_start_index:seg_start_index + M_batch] = (seg_weights * seg_haps).sum(axis=0)
+            num_imputed += M_batch
+            if arg is not None:
+                # This is the imputation bit
+                mut_indices = np.nonzero(haps[imp_segment.ids, seg_start_index:seg_start_index + M_batch].sum(axis=0))[0]
+                mut_mafs = mafs[seg_start_index + mut_indices]
+                for mi, mut_maf in zip(mut_indices, mut_mafs):
+                    if mut_maf >= RARE_VARIANT_CUTOFF:
+                        continue
+                    dosages = []
+                    # for ti_c, tbi_c in zip(ti, tbi):
+                    for p_id, height in zip(imp_segment.ids, imp_segment.ages):  # ti_c, tbi_c in np.unique([(a, b) for (a, b) in zip(ti, tbi)], axis=0):
+                        if haps[p_id, seg_start_index + mi] == 1:
+                            # arguments are: arg, sample, site, height
+                            # print(ti_c, mi+segment_offset, mut_maf)
+                            try:
+                                _ = arg_needle_lib.most_recent_mutation(arg, p_id, mi + seg_start_index)
+                            except RuntimeError:
+                                site_muts = [m for m in arg.mutations() if m.site_id == mi + seg_start_index]
+                                import pdb
+                                pdb.set_trace()
+                            dosages.append(arg_needle_lib.threading_dosage(arg, p_id, mi + seg_start_index, height, Ne=40_000))
+                            dosage_lookups += 1
+                        else:
+                            dosages.append(0.)
+                    imputed_genotypes[target_id, seg_start_index + mi] = np.mean(dosages)
+
+                # raise NotImplementedError
+        try:
+            assert num_imputed == M
+        except AssertionError:
+            import pdb
+            pdb.set_trace()
+            # TODO: the arg bit
+            # imputed_genotypes += M_batch - seg_start_index
+        # assert imputed_genotypes == M
+    assert np.isnan(imputed_genotypes).sum() == 0
+    # merge haps to dips
+    diploid_dosages = imputed_genotypes[::2] + imputed_genotypes[1::2]
+    hap1_genotypes = np.rint(imputed_genotypes[::2]).astype(int)
+    hap2_genotypes = np.rint(imputed_genotypes[1::2]).astype(int)
+
+    # diploid_samples = [sid.replace("_0", "") for sid in target_sample_names[::2]]
+
+    logging.info(f"Writing imputed haplotypes to {out}")
+    write_vcf(out, diploid_samples, list(positions), list(snp_ids.values), mafs, hap1_genotypes.transpose(), hap2_genotypes.transpose(), diploid_dosages.transpose(), genotyped_pos)
     end_time = time.time()
     logging.info(f"Done, in (s) {end_time - start_time}")
     goodbye()
+
+@click.command()
+@click.argument("mode", type=click.Choice(["phase"]))
+@click.option("--panel", required=True)
+@click.option("--target", required=True)
+@click.option("--out", required=True)
+@click.option("--demography", required=True)
+@click.option("--mutation_rate", default=1.65e-8, type=float, help="Per-site-per-generation SNP mutation rate.")
+@click.option("--map_gz", required=True)
+@click.option("--argn", default=None)
+def phase(mode, panel, target, out, demography, map_gz, argn, mutation_rate):
+    if os.path.isdir(panel):
+        logging.info(f"{panel} is a directory, interpreting as a .zarr archive")
+        panel_dataset = xr.open_zarr(panel)
+        batch_size = panel_dataset.chunks["samples"][0]
+        haps_panel = panel_dataset["genotypes"]
+    elif os.path.isfile(panel):
+        logging.info(f"{panel} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+        raise NotImplementedError
+    else:
+        raise ValueError(f"{panel} not found")
+
+    if os.path.isdir(target):
+        logging.info(f"{target} is a directory, interpreting as a .zarr archive")
+        target_dataset = xr.open_zarr(target)
+        dips_target = target_dataset["genotypes"]
+    elif os.path.isfile(target):
+        dips_target = np.array([[g[0] + g[1] for g in v.genotypes] for v in VCF(target)]).transpose()
+    else:
+        raise ValueError(f"{target} not found")
+    
+    cm_pos, phys_pos = read_map_gz(map_gz)
+    genotyped_pos = [int(p) for p in phys_pos]
+    logging.info(f"Found a genotype map with {len(phys_pos)} markers")
+
+    # haps_panel = read_plink1_bin(f"{bfile_panel}.bed", f"{bfile_panel}.bim", f"{bfile_panel}.fam")
+    # haps_target = read_plink1_bin(f"{bfile_target}.bed", f"{bfile_target}.bim", f"{bfile_target}.fam")
+    if haps_panel.shape[1] != dips_target.shape[1]:
+        raise ValueError(f"Panel has shape {haps_panel.shape} and target has shape {dips_target.shape}")
+    elif haps_panel.shape[0] == 0:
+        raise ValueError("No sequences found in panel.")
+    elif dips_target.shape[0] == 0:
+        raise ValueError("No sequences found in target.")
+
+    logging.info(f"Found panel of shape {haps_panel.shape}")
+    logging.info(f"Found target of shape {dips_target.shape}")
+
+    M = len(phys_pos)
+    ne_times, ne_sizes = parse_demography(demography)
+    num_samples_panel = haps_panel.shape[0]
+    num_samples_target = dips_target.shape[0]
+
+    sparse_sites = False
+    use_hmm = False
+
+    bwt = Threads(phys_pos,
+                  cm_pos,
+                  mutation_rate,
+                  ne_sizes,
+                  ne_times,
+                  sparse_sites,
+                  use_hmm=use_hmm)
+
+    logging.info("Building panel...")
+    for k in range(int(np.ceil(num_samples_panel / batch_size))):
+        s = k * batch_size
+        e = min(num_samples_panel, (k + 1) * batch_size)
+        haps_chunk = haps_panel[s:e].values.astype(bool)
+        for i, hap in enumerate(haps_chunk):
+            hap = haps_chunk[i]
+            bwt.insert(hap)
+        #     if bwt.num_samples > 10:
+        #         break
+        # if bwt.num_samples > 10:
+        #     break
+
+    logging.info("Phasing...")
+    haps_a = np.empty((num_samples_target, M))
+    haps_b = np.empty((num_samples_target, M))
+    for j, dip in enumerate(dips_target):
+        hap_a, hap_b = bwt.phase(dip)
+        haps_a[j] = hap_a
+        haps_b[j] = hap_b
+
+    logging.info("Writing...")
+    # import pdb
+    # pdb.set_trace()
+    vcf = VCF(target)
+    w = Writer(out, vcf)
+    for v, hap_a, hap_b in zip(vcf, haps_a.transpose(), haps_b.transpose()):
+        for i in range(len(v.genotypes)):
+            v.genotypes[i] = [hap_a[i], hap_b[i], True]
+            # v.genotypes[i][1] = False
+        # need to reassign for some reason(?)
+        v.genotypes = v.genotypes
+        w.write_record(v)
+    w.close()
+    vcf.close()
 
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
 @click.option("--threads", required=True, help="Path to an input .threads file.")
 @click.option("--argn", default=None, help="Path to an output .argn file.")
 @click.option("--tsz", default=None, help="Path to an output .tsz file.")
-def convert(mode, threads, argn, tsz):
+@click.option("--max_n", default=None, help="Path to an output .tsz file.", type=int)
+def convert(mode, threads, argn, tsz, max_n):
     start_time = time.time()
     logging.info(f"Starting Threads-{mode} with the following parameters:")
     logging.info(f"  threads: {threads}")
     logging.info(f"  argn:    {argn}")
     logging.info(f"  tsz:     {tsz}")
+    logging.info(f"  max_n:   {max_n}")
 
     if argn is None and tsz is None:
         logging.info("Nothing to do, quitting.")
@@ -581,14 +825,14 @@ def convert(mode, threads, argn, tsz):
     decompressed_threads = decompress_threads(threads)
     try:
         logging.info("Attempting to convert to arg format...")
-        arg = threads_to_arg(decompressed_threads, noise=0.0)
+        arg = threads_to_arg(decompressed_threads, noise=0.0, max_n=max_n)
     except:# tskit.LibraryError:
         logging.info(f"Conflicting branches, retrying with noise=1e-5...")
         try:
-            arg = threads_to_arg(decompressed_threads, noise=1e-5)
+            arg = threads_to_arg(decompressed_threads, noise=1e-5, max_n=max_n)
         except:# tskit.LibraryError:
             logging.info(f"Conflicting branches, retrying with noise=1e-3...")
-            arg = threads_to_arg(decompressed_threads, noise=1e-3)
+            arg = threads_to_arg(decompressed_threads, noise=1e-3, max_n=max_n)
     if argn is not None:
         logging.info(f"Writing to {argn}")
         arg_needle_lib.serialize_arg(arg, argn)
@@ -612,10 +856,11 @@ if __name__ == "__main__":
             convert()
         elif mode == "impute":
             impute()
+        elif mode == "phase":
+            phase()
         elif mode == "-h" or mode == "--help":
             print("See documentation for each of the Threads functions: files, infer, convert, impute.")
         else:
             print(f"Unknown mode {mode}")
             sys.exit()
 
-    # main()

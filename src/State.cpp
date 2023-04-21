@@ -20,11 +20,28 @@ bool State::genotype() {
 }
 
 ostream& operator<<(ostream& os, State& state) {
-  os << "State between nodes " << state.below->sample_ID;
-  os << " and " << state.below->above->sample_ID;
-  os << " with score " << state.score;
+  os << "State with nodes (" << state.below->sample_ID;
+  os << ") and (" << state.below->above->sample_ID;
+  os << ") with score " << state.score;
   os << ", traceback to " << state.traceback->site;
   os << ", genotype " << state.genotype();
+  return os;
+}
+
+StatePair::StatePair(Node* _below_a, Node* _below_b, double _score, TracebackState* _traceback_a,
+                     TracebackState* _traceback_b)
+    : below_a(_below_a), below_b(_below_b), score(_score), traceback_a(_traceback_a),
+      traceback_b(_traceback_b) {
+}
+
+ostream& operator<<(ostream& os, StatePair& pair) {
+  os << "State-pair between a: nodes " << pair.below_a->sample_ID;
+  os << ", " << pair.below_a->above->sample_ID;
+  os << " and b: nodes " << pair.below_b->sample_ID;
+  os << ", " << pair.below_b->above->sample_ID;
+  os << " with score " << pair.score;
+  os << ", traceback to " << pair.traceback_a->site;
+  os << " and " << pair.traceback_b->site;
   return os;
 }
 
