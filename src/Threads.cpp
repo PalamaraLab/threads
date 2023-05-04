@@ -130,29 +130,30 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
 std::tuple<std::vector<double>, std::vector<double>>
 Threads::site_sizes(std::vector<double> positions) {
   // Find mid-points between sites
-  std::vector<double> pos_means(num_sites - 1);
-  for (int i = 0; i < num_sites - 1; i++) {
+  int M = positions.size();
+  std::vector<double> pos_means(M - 1);
+  for (int i = 0; i < M - 1; i++) {
     pos_means[i] = (positions[i] + positions[i + 1]) / 2.;
   }
   // Find the mean size of mid-point differences
-  std::vector<double> site_sizes(num_sites);
+  std::vector<double> site_sizes(M);
   // Mid-point deltas tell us about the area around each site
-  for (int i = 1; i < num_sites - 1; i++) {
+  for (int i = 1; i < M - 1; i++) {
     site_sizes[i] = (pos_means[i] - pos_means[i - 1]);
   }
-  double mean_size = (pos_means[num_sites - 2] - pos_means[0]) / double(num_sites - 2);
+  double mean_size = (pos_means[M - 2] - pos_means[0]) / double(M - 2);
   site_sizes[0] = mean_size;
-  site_sizes[num_sites - 1] = mean_size;
+  site_sizes[M - 1] = mean_size;
   for (double s : site_sizes) {
     if (s < 0) {
       cerr << "Found negative site size " << s << endl;
       exit(1);
     }
   }
-  std::vector<double> boundaries(num_sites + 1);
+  std::vector<double> boundaries(M + 1);
   boundaries[0] = positions[0];
-  boundaries[num_sites] = positions[num_sites - 1];
-  for (int i = 1; i < num_sites; i++) {
+  boundaries[M] = positions[M - 1];
+  for (int i = 1; i < M; i++) {
     boundaries[i] = pos_means[i - 1];
   }
   return std::tuple(boundaries, site_sizes);
@@ -1185,7 +1186,6 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::traceback(TracebackState
       sampled_states = std::vector<int>(div_states.begin(), div_states.end());
     }
     else {
-
       std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
       // NB can replace this with array
       sampled_states.reserve(2);
@@ -1468,72 +1468,143 @@ double Threads::date_segment(const int num_het_sites, const int start, const int
   double mu = 2. * mutation_rate * bp_size;
   double rho = 2. * 0.01 * cm_size;
   if (sparse_sites) {
-    // HERE WE ONLY USE THE SEGMENT LENGTH
-    // if (m > 15) {
-    //   // cout << "Warning: very many heterozygous sites, defaulting to const-demography
-    //   method.\n"; double gamma = 1. / demography.expected_time; return 2. / (gamma + rho);
-    // }
-    double numerator = 0;
-    double denominator = 0;
-    int K = demography.times.size();
-    for (int k = 0; k < K; k++) {
-      double T1 = demography.times[k];
-      double gamma_k = 1. / demography.sizes[k];
-      double lambda_k = gamma_k + rho;
-      double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
+    return Threads::date_segment_sparse(num_het_sites, cm_size, demography);
+    // // HERE WE ONLY USE THE SEGMENT LENGTH
+    // // if (m > 15) {
+    // //   // cout << "Warning: very many heterozygous sites, defaulting to const-demography
+    // //   method.\n"; double gamma = 1. / demography.expected_time; return 2. / (gamma + rho);
+    // // }
+    // double numerator = 0;
+    // double denominator = 0;
+    // int K = demography.times.size();
+    // for (int k = 0; k < K; k++) {
+    //   double T1 = demography.times[k];
+    //   double gamma_k = 1. / demography.sizes[k];
+    //   double lambda_k = gamma_k + rho;
+    //   double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
 
-      if (k < K - 1) {
-        double T2 = demography.times[k + 1];
-        numerator +=
-            coal_fac * (2. / std::pow(lambda_k, 3)) *
-            (boost::math::gamma_q(3, lambda_k * T1) - boost::math::gamma_q(3, lambda_k * T2));
-        denominator +=
-            coal_fac * (1. / std::pow(lambda_k, 2)) *
-            (boost::math::gamma_q(2, lambda_k * T1) - boost::math::gamma_q(2, lambda_k * T2));
-      }
-      else {
-        numerator +=
-            coal_fac * (2. / std::pow(lambda_k, 3)) * boost::math::gamma_q(3, lambda_k * T1);
-        denominator +=
-            coal_fac * (1. / std::pow(lambda_k, 2)) * boost::math::gamma_q(2, lambda_k * T1);
-      }
-    }
-    return numerator / denominator;
+    //   if (k < K - 1) {
+    //     double T2 = demography.times[k + 1];
+    //     numerator +=
+    //         coal_fac * (2. / std::pow(lambda_k, 3)) *
+    //         (boost::math::gamma_q(3, lambda_k * T1) - boost::math::gamma_q(3, lambda_k * T2));
+    //     denominator +=
+    //         coal_fac * (1. / std::pow(lambda_k, 2)) *
+    //         (boost::math::gamma_q(2, lambda_k * T1) - boost::math::gamma_q(2, lambda_k * T2));
+    //   }
+    //   else {
+    //     numerator +=
+    //         coal_fac * (2. / std::pow(lambda_k, 3)) * boost::math::gamma_q(3, lambda_k * T1);
+    //     denominator +=
+    //         coal_fac * (1. / std::pow(lambda_k, 2)) * boost::math::gamma_q(2, lambda_k * T1);
+    //   }
+    // }
+    // return numerator / denominator;
   }
   else {
-    if (m > 15) {
-      // cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
-      double gamma = 1. / demography.expected_time;
-      return (m + 2) / (gamma + rho + mu);
-    }
-    double numerator = 0;
-    double denominator = 0;
-    int K = demography.times.size();
-    for (int k = 0; k < K; k++) {
-      double T1 = demography.times[k];
-      double gamma_k = 1. / demography.sizes[k];
-      double lambda_k = gamma_k + rho + mu;
-      double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
-      double data_fac = std::pow(mu / lambda_k, m);
+    return Threads::date_segment(m, cm_size, bp_size, mutation_rate, demography);
+    // if (m > 15) {
+    //   // cout << "Warning: very many heterozygous sites, defaulting to const-demography
+    //   method.\n"; double gamma = 1. / demography.expected_time; return (m + 2) / (gamma + rho +
+    //   mu);
+    // }
+    // double numerator = 0;
+    // double denominator = 0;
+    // int K = demography.times.size();
+    // for (int k = 0; k < K; k++) {
+    //   double T1 = demography.times[k];
+    //   double gamma_k = 1. / demography.sizes[k];
+    //   double lambda_k = gamma_k + rho + mu;
+    //   double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
+    //   double data_fac = std::pow(mu / lambda_k, m);
 
-      if (k < K - 1) {
-        double T2 = demography.times[k + 1];
-        numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
-                     (boost::math::gamma_q(m + 3, lambda_k * T1) -
-                      boost::math::gamma_q(m + 3, lambda_k * T2));
-        denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
-                       (boost::math::gamma_q(m + 2, lambda_k * T1) -
-                        boost::math::gamma_q(m + 2, lambda_k * T2));
-      }
-      else {
-        numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
-                     boost::math::gamma_q(m + 3, lambda_k * T1);
-        denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
-                       boost::math::gamma_q(m + 2, lambda_k * T1);
-      }
-    }
-    return numerator / denominator;
+    //   if (k < K - 1) {
+    //     double T2 = demography.times[k + 1];
+    //     numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
+    //                  (boost::math::gamma_q(m + 3, lambda_k * T1) -
+    //                   boost::math::gamma_q(m + 3, lambda_k * T2));
+    //     denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
+    //                    (boost::math::gamma_q(m + 2, lambda_k * T1) -
+    //                     boost::math::gamma_q(m + 2, lambda_k * T2));
+    //   }
+    //   else {
+    //     numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
+    //                  boost::math::gamma_q(m + 3, lambda_k * T1);
+    //     denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
+    //                    boost::math::gamma_q(m + 2, lambda_k * T1);
+    //   }
+    // }
+    // return numerator / denominator;
   }
+}
+
+double Threads::date_segment(int num_het_sites, double cm_size, double bp_size,
+                             double mutation_rate, Demography& demography) {
+  int m = num_het_sites;
+  double mu = 2. * mutation_rate * bp_size;
+  double rho = 2. * 0.01 * cm_size;
+  if (m > 15) {
+    // cout << "Warning: very many heterozygous sites, defaulting to const-demography method.\n";
+    double gamma = 1. / demography.expected_time;
+    return (m + 2) / (gamma + rho + mu);
+  }
+  double numerator = 0;
+  double denominator = 0;
+  int K = demography.times.size();
+  for (int k = 0; k < K; k++) {
+    double T1 = demography.times[k];
+    double gamma_k = 1. / demography.sizes[k];
+    double lambda_k = gamma_k + rho + mu;
+    double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
+    double data_fac = std::pow(mu / lambda_k, m);
+
+    if (k < K - 1) {
+      double T2 = demography.times[k + 1];
+      numerator +=
+          coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
+          (boost::math::gamma_q(m + 3, lambda_k * T1) - boost::math::gamma_q(m + 3, lambda_k * T2));
+      denominator +=
+          coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
+          (boost::math::gamma_q(m + 2, lambda_k * T1) - boost::math::gamma_q(m + 2, lambda_k * T2));
+    }
+    else {
+      numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
+                   boost::math::gamma_q(m + 3, lambda_k * T1);
+      denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
+                     boost::math::gamma_q(m + 2, lambda_k * T1);
+    }
+  }
+  return numerator / denominator;
+}
+
+double Threads::date_segment_sparse(int num_het_sites, double cm_size, Demography& demography) {
+  int m = num_het_sites;
+  double rho = 2. * 0.01 * cm_size;
+  double numerator = 0;
+  double denominator = 0;
+  int K = demography.times.size();
+  for (int k = 0; k < K; k++) {
+    double T1 = demography.times[k];
+    double gamma_k = 1. / demography.sizes[k];
+    double lambda_k = gamma_k + rho;
+    double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
+
+    if (k < K - 1) {
+      double T2 = demography.times[k + 1];
+      numerator +=
+          coal_fac * (2. / std::pow(lambda_k, 3)) *
+          (boost::math::gamma_q(3, lambda_k * T1) - boost::math::gamma_q(3, lambda_k * T2));
+      denominator +=
+          coal_fac * (1. / std::pow(lambda_k, 2)) *
+          (boost::math::gamma_q(2, lambda_k * T1) - boost::math::gamma_q(2, lambda_k * T2));
+    }
+    else {
+      numerator += coal_fac * (2. / std::pow(lambda_k, 3)) * boost::math::gamma_q(3, lambda_k * T1);
+      denominator +=
+          coal_fac * (1. / std::pow(lambda_k, 2)) * boost::math::gamma_q(2, lambda_k * T1);
+    }
+  }
+  return numerator / denominator;
 }
 
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
@@ -1579,23 +1650,18 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
       }
     }
     total_num_het_sites += num_het_sites;
-    // if (best_path.size() == 1) {
-    // }
     // is it ok to have 100 here?
     if (use_hmm && num_samples < 1000) {
       // is it ok to have 10 here?
       if (num_het_sites > 5) {
-        // cout << "found " << num_het_sites << " het sites...\n";
         std::vector<int> breakpoints = hmm->breakpoints(het_hom_sites, segment_start);
-        // cout << "broke [" << segment_start << ", " << segment_end << ") up into\n";
 
-        // cout << "\t... found " << breakpoints.size() << " breakpoints\n";
         for (int i = 0; i < breakpoints.size(); i++) {
           int breakpoint_start = breakpoints[i];
           int breakpoint_end = (i == breakpoints.size() - 1) ? segment_end : breakpoints[i + 1];
-          // cout<< "[" << breakpoint_start << ", " << breakpoint_end << ") ";
           target_IDs.push_back(target_ID_L);
           bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[breakpoint_start])));
+          // This is wrong!!! need to actually re-do num het_sites!!!!
           segment_ages.push_back(date_segment(num_het_sites, breakpoint_start, breakpoint_end));
         }
       }
@@ -1613,7 +1679,6 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
       segment_ages.push_back(date_segment(num_het_sites, segment_start, segment_end));
     }
   }
-  // cout << best_path.size() << ": " << total_num_het_sites << endl;
   // todo: not this twice
   std::vector<int> het_sites = het_sites_from_thread(new_sample_ID, bp_starts, target_IDs);
   return remove_burn_in(bp_starts, target_IDs, segment_ages, het_sites);
@@ -1727,6 +1792,22 @@ std::vector<ImputationSegment> Threads::impute(std::vector<bool>& genotype, int 
   }
   // why is this so bad?!
   return imputation_segments;
+}
+
+std::array<std::vector<std::tuple<int, std::vector<int>>>, 2>
+Threads::diploid_ls(std::vector<int> unphased_genotypes) {
+  std::vector<std::tuple<int, std::vector<int>>> best_path_a;
+  std::vector<std::tuple<int, std::vector<int>>> best_path_b;
+
+  auto ls_output = fastLS_diploid(unphased_genotypes);
+  // cout << "finished with diploid LS, made " << traceback_states.size() << " tb states" << endl;
+  best_path_a = traceback(ls_output[0].first, ls_output[0].second, true);
+  best_path_b = traceback(ls_output[1].first, ls_output[1].second, true);
+  // cout << "finished traceback: a size " << best_path_a.size() << " b size: " <<
+  // best_path_b.size()
+  //  << endl;
+  traceback_states.clear();
+  return {best_path_a, best_path_b};
 }
 
 // todo: eigenize

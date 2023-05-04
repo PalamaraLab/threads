@@ -1,6 +1,21 @@
 from threads import Threads
 import numpy as np
 
+# mu = 0.001
+# rho = 0.001
+# # Test 1: perfect copying
+# pos1 = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+# t1 = Threads(pos1, 100 * rho * pos1, mu, Ne=1)
+# G1 = np.array([[0, 1, 0, 0, 0, 1, 0, 0, 1],
+#                 [0, 1, 1, 1, 0, 1, 1, 0, 1],
+#                 [1, 1, 1, 0, 0, 1, 0, 1, 1],
+#                 [1, 0, 0, 1, 0, 1, 1, 0, 1]])
+# t1.insert(G1[0])
+# t1.insert(G1[1])
+# t1.insert(G1[2])
+# t1.insert(G1[3])
+# path_a, path_b = t1.diploid_ls(G1[1] + G1[2])
+
 def test_diploid():
     mu = 0.001
     rho = 0.001
@@ -15,7 +30,7 @@ def test_diploid():
     t1.insert(G1[1])
     t1.insert(G1[2])
     t1.insert(G1[3])
-    path_a, path_b = t1.fastLS_diploid(G1[1] + G1[2])
+    path_a, path_b = t1.diploid_ls(G1[1] + G1[2])
     assert len(path_a) == len(path_b) == 1
     assert path_a[0][1][0] == 1 and path_b[0][1][0] == 2 or path_a[0][1][0] == 2 and path_b[0][1][0] == 1
 
