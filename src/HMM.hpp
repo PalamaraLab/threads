@@ -1,4 +1,7 @@
+#ifndef DEMOGRAPHY
+#define DEMOGRAPHY
 #include "Demography.hpp"
+#endif DEMOGRAPHY
 
 #include <vector>
 #include <iostream>

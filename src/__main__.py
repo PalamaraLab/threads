@@ -238,7 +238,10 @@ def decompress_threads(threads):
     flat_ids, flat_bps = f['thread_targets'][:, :-1], f['thread_targets'][:, -1]
     # flat_ids, flat_bps = f['thread_targets'][:, 0], f['thread_targets'][:, 1]
     flat_ages = f['thread_ages'][...]
-    arg_range = f['arg_range'][...]
+    try:
+        arg_range = f['arg_range'][...]
+    except KeyError:
+        arg_range = [np.nan, np.nan]
 
     threading_instructions = []
     for i, start in enumerate(thread_starts):

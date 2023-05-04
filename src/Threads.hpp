@@ -78,7 +78,9 @@ public:
   Threads(std::vector<double> _physical_positions, std::vector<double> _genetic_positions,
           double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times,
           bool _sparse_sites, int _n_prune, bool _use_hmm, int _burn_in_left, int _burn_in_right);
-  std::tuple<std::vector<double>, std::vector<double>> site_sizes(std::vector<double> positions);
+
+  static std::tuple<std::vector<double>, std::vector<double>>
+  site_sizes(std::vector<double> positions);
 
   // More attributes
   std::vector<double> trimmed_positions();
@@ -112,6 +114,8 @@ public:
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>>
   traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int L);
   std::array<std::pair<TracebackState*, Node*>, 2> fastLS_diploid(const std::vector<int>& genotype);
+  std::array<std::vector<std::tuple<int, std::vector<int>>>, 2>
+  diploid_ls(std::vector<int> unphased_genotypes);
   // std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_impute5();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
@@ -120,7 +124,9 @@ public:
 
   // TMRCA estimation
   double date_segment(const int num_het_sites, const int start, const int end);
-
+  static double date_segment(int num_het_sites, double cm_length, double bp_length,
+                             double mutation_rate, Demography& demography);
+  static double date_segment_sparse(int num_het_sites, double cm_length, Demography& demography);
   // Debugging
   void print_sorting();
 };

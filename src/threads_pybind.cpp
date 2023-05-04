@@ -1,5 +1,7 @@
+#include "Matcher.hpp"
 #include "TGEN.hpp"
-#include "Threads.hpp"
+// #include "Threads.hpp"
+#include "ThreadsLowMem.hpp"
 
 #include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>
@@ -33,6 +35,64 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def_readonly("transition_score", &HMM::transition_score)
       .def_readonly("non_transition_score", &HMM::non_transition_score)
       .def("breakpoints", &HMM::breakpoints);
+
+  py::class_<ThreadsLowMem>(m, "ThreadsLowMem")
+      .def(py::init<std::vector<int>, std::vector<double>, std::vector<double>, std::vector<double>,
+                    std::vector<double>, double, bool>(),
+           "Initialize", py::arg("target_ids"), py::arg("physical_positions"),
+           py::arg("genetic_positions"), py::arg("ne_sizes"), py::arg("ne_times"),
+           py::arg("mutation_rate"), py::arg("sparse"))
+      .def_readonly("physical_positions", &ThreadsLowMem::physical_positions)
+      .def_readonly("genetic_positions", &ThreadsLowMem::genetic_positions)
+      .def_readonly("num_samples", &ThreadsLowMem::num_samples)
+      .def_readonly("num_sites", &ThreadsLowMem::num_sites)
+      .def_readonly("paths", &ThreadsLowMem::paths)
+      .def_readonly("mean_bp_size", &ThreadsLowMem::mean_bp_size)
+      .def_readonly("mutation_rate", &ThreadsLowMem::mutation_rate)
+      .def_readonly("expected_branch_lengths", &ThreadsLowMem::expected_branch_lengths)
+      .def("initialize_viterbi", &ThreadsLowMem::initialize_viterbi)
+      .def("process_site_viterbi", &ThreadsLowMem::process_site_viterbi)
+      .def("process_site_hets", &ThreadsLowMem::process_site_hets)
+      .def("count_branches", &ThreadsLowMem::count_branches)
+      .def("prune", &ThreadsLowMem::prune)
+      .def("traceback", &ThreadsLowMem::traceback)
+      .def("date_segments", &ThreadsLowMem::date_segments)
+      .def("serialize_paths", &ThreadsLowMem::serialize_paths);
+
+  py::class_<ViterbiPath>(m, "ViterbiPath")
+      .def(py::init<int>(), "Initialize", py::arg("target_id"))
+      .def(py::init<int, std::vector<int>, std::vector<int>, std::vector<double>,
+                    std::vector<int>>(),
+           "Initialize", py::arg("target_id"), py::arg("sample_ids"), py::arg("segment_starts"),
+           py::arg("heights"), py::arg("het_sites"))
+      .def_readonly("segment_starts", &ViterbiPath::segment_starts)
+      .def_readonly("het_sites", &ViterbiPath::het_sites)
+      .def_readonly("heights", &ViterbiPath::heights)
+      .def_readonly("score", &ViterbiPath::score)
+      .def_readonly("sample_ids", &ViterbiPath::sample_ids)
+      .def("size", &ViterbiPath::size);
+
+  py::class_<MatchGroup>(m, "MatchGroup")
+      .def_readonly("match_candidates", &MatchGroup::match_candidates)
+      .def_readonly("match_candidates_counts", &MatchGroup::match_candidates_counts)
+      .def_readonly("cm_position", &MatchGroup::cm_position);
+
+  py::class_<Matcher>(m, "Matcher")
+      .def(py::init<int, std::vector<double>, double, double, int>(), "Initialize",
+           py::arg("num_samples"), py::arg("genetic_positions"), py::arg("query_interval_size"),
+           py::arg("match_group_interval_size"), py::arg("L") = 8)
+      .def_readonly("query_sites", &Matcher::query_sites)
+      .def_readonly("genetic_positions", &Matcher::genetic_positions)
+      .def_readonly("query_interval_size", &Matcher::query_interval_size)
+      .def_readonly("num_samples", &Matcher::num_samples)
+      .def_readonly("num_sites", &Matcher::num_sites)
+      .def("process_site", &Matcher::process_site)
+      .def("set_matches", &Matcher::set_matches)
+      .def("get_matches", &Matcher::get_matches)
+      .def("serializable_matches", &Matcher::serializable_matches)
+      .def("cm_positions", &Matcher::cm_positions)
+      .def("get_sorting", &Matcher::get_sorting)
+      .def("get_permutation", &Matcher::get_permutation);
 
   py::class_<Threads>(m, "Threads")
       .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int, bool, int,
@@ -69,8 +129,8 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def("mutation_penalties_impute5", &Threads::mutation_penalties_impute5)
       .def("recombination_penalties", &Threads::recombination_penalties)
       .def("recombination_penalties_correct", &Threads::recombination_penalties_correct)
-      .def("date_segment", &Threads::date_segment, py::arg("num_het_sites"), py::arg("start"),
-           py::arg("end"))
+      // .def("date_segment", &Threads::date_segment, py::arg("num_het_sites"), py::arg("start"),
+      //       py::arg("end"))
       .def("insert", py::overload_cast<const std::vector<bool>&>(&Threads::insert),
            py::arg("genotypes"))
       .def("insert", py::overload_cast<const int, const std::vector<bool>&>(&Threads::insert),
@@ -90,7 +150,7 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       // py::arg("genotypes")) .def("thread_from_file", &Threads::thread_from_file,
       // py::arg("hack_gz"), py::arg("n_cycle")=0)
       //  .def("fastLS", &Threads::fastLS)
-      .def("fastLS_diploid", &Threads::fastLS_diploid, py::arg("genotypes"));
+      .def("diploid_ls", &Threads::diploid_ls, py::arg("genotypes"));
 
   py::class_<TGEN>(m, "TGEN")
       .def(py::init<std::vector<int>, std::vector<std::vector<int>>, std::vector<std::vector<int>>,

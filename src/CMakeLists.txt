@@ -13,6 +13,9 @@ set(
         Threads.cpp
         HMM.cpp
         TGEN.cpp
+        Matcher.cpp
+        ViterbiLowMem.cpp
+        ThreadsLowMem.cpp
 )
 
 set(
@@ -23,6 +26,9 @@ set(
         Threads.hpp
         HMM.hpp
         TGEN.hpp
+        Matcher.hpp
+        ViterbiLowMem.hpp
+        ThreadsLowMem.hpp
 )
 
 add_library(threads STATIC ${threads_src} ${threads_hdr})
