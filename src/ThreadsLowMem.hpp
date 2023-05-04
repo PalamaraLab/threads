@@ -1,3 +1,4 @@
+#include "Matcher.hpp"
 #include "Threads.hpp"
 #include "ViterbiLowMem.hpp"
 #ifndef DEMOGRAPHY
