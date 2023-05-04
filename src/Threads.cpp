@@ -1846,47 +1846,47 @@ std::array<std::vector<int>, 2> Threads::phase(std::vector<int> unphased_genotyp
       phased_b.push_back(1);
     }
     else if (unphased_genotypes[i] == 1) {
-      cout << "phasing " << i << " ";
+      // cout << "phasing " << i << " ";
       double a_gt = 0;
       const std::vector<int>& a_nearest_neighbours = std::get<1>(best_path_a[a_path_idx]);
       for (auto a_nn : a_nearest_neighbours) {
         a_gt += (double) panel[ID_map[a_nn]][i]->genotype / a_nearest_neighbours.size();
       }
-      cout << "done a gt ";
+      // cout << "done a gt ";
       double b_gt = 0;
       const std::vector<int>& b_nearest_neighbours = std::get<1>(best_path_b[b_path_idx]);
       for (auto b_nn : b_nearest_neighbours) {
         b_gt += (double) panel[ID_map[b_nn]][i]->genotype / b_nearest_neighbours.size();
       }
-      cout << "done b gt " << endl;
+      // cout << "done b gt " << endl;
       // int a_nn = std::get<1>(best_path_a[a_path_idx])[0];
       // int a_gt = (int)panel[ID_map[a_nn]][i]->genotype;
       // int b_nn = std::get<1>(best_path_b[b_path_idx])[0];
       // int b_gt = (int)panel[ID_map[b_nn]][i]->genotype;
       // if we do need to phase, first check we get phasing for free
       if (a_gt > b_gt) {
-        cout << "phasing a" << endl;
+        // cout << "phasing a" << endl;
         phased_a.push_back(1);
         phased_b.push_back(0);
       }
       else if (b_gt > a_gt) {
-        cout << "phasing b" << endl;
+        // cout << "phasing b" << endl;
         phased_a.push_back(0);
         phased_b.push_back(1);
       }
       else {
-        cout << "actual phasing ";
+        // cout << "actual phasing ";
         // otherwise, prefer the haplotype coming from the longer segment
         int a_seg_start = std::get<0>(best_path_a[a_path_idx]);
         int a_seg_end = (a_path_idx == best_path_a.size() - 1)
                             ? num_sites - 1
                             : std::get<0>(best_path_a[a_path_idx + 1]);
-        cout << "done segstartsends a ";
+        // cout << "done segstartsends a ";
         int b_seg_start = std::get<0>(best_path_b[b_path_idx]);
         int b_seg_end = (b_path_idx == best_path_b.size() - 1)
                             ? num_sites - 1
                             : std::get<0>(best_path_b[b_path_idx + 1]);
-        cout << "done segstartsends b ";
+        // cout << "done segstartsends b ";
         // if  {
         //   a_seg_end = num_sites;
         // } else {
@@ -1900,13 +1900,13 @@ std::array<std::vector<int>, 2> Threads::phase(std::vector<int> unphased_genotyp
         // }
         if (genetic_positions[a_seg_end] - genetic_positions[a_seg_start] >=
             genetic_positions[b_seg_end] - genetic_positions[b_seg_start]) {
-          cout << "phasing a" << endl;
+          // cout << "phasing a" << endl;
           int a_round = (a_gt >= 0.5) ? 1 : 0;
           phased_a.push_back(a_round);
           phased_b.push_back(1 - a_round);
         }
         else {
-          cout << "phasing a" << endl;
+          // cout << "phasing a" << endl;
           int b_round = (b_gt >= 0.5) ? 1 : 0;
           phased_a.push_back(1 - b_round);
           phased_b.push_back(b_round);
