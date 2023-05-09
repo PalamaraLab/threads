@@ -219,7 +219,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
       sites_processed >= match_group_sites.at(match_group_idx + 1)) {
     // this check is awkward, rewrite
     match_group_idx++;
-    cout << "match group " << match_group_idx << " at " << sites_processed << endl;
+    // cout << "match group " << match_group_idx << " at " << sites_processed << endl;
   }
 
   // // cache a few sites in anticipation of neighbour querying

@@ -1,6 +1,7 @@
 #include "ViterbiLowMem.hpp"
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -43,7 +44,7 @@ void ViterbiPath::append(int segment_start, int sample_id) {
 }
 
 void ViterbiPath::append(int segment_start, int sample_id, double height,
-                         std::vector<int> new_het_sites) {
+                         std::vector<int>& new_het_sites) {
   if (segment_starts.size() > 0 && segment_start <= segment_starts.back()) {
     throw std::runtime_error("Illegal path append of segment start " +
                              std::to_string(segment_start) + " after segment " +
@@ -58,6 +59,49 @@ void ViterbiPath::append(int segment_start, int sample_id, double height,
   sample_ids.push_back(sample_id);
   heights.push_back(height);
   het_sites.insert(het_sites.end(), new_het_sites.begin(), new_het_sites.end());
+}
+
+void ViterbiPath::map_positions(std::vector<int>& positions) {
+  bp_starts.reserve(size());
+  for (auto s : segment_starts) {
+    bp_starts.push_back(positions.at(s));
+  }
+}
+
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
+ViterbiPath::dump_data_in_range(int start, int end) {
+  int n_segs = size();
+  if (start == -1 && end == -1 || n_segs == 0) {
+    return std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>(
+        bp_starts, sample_ids, heights, het_sites);
+  }
+  int tmp_end = end == -1 ? std::numeric_limits<int>::max() : end;
+  int tmp_start = std::max(start, bp_starts.at(0));
+
+  std::vector<int> out_starts;
+  std::vector<int> out_ids;
+  std::vector<double> out_heights;
+  std::vector<int> out_hetsites;
+  for (int i = 0; i < n_segs; i++) {
+    int seg_start = bp_starts.at(i);
+    int seg_end = i < n_segs - 1 ? bp_starts.at(i + 1) : tmp_end;
+    if (seg_start <= tmp_start && tmp_start < seg_end ||
+        tmp_start <= seg_start && seg_start < tmp_end) {
+      out_starts.push_back(std::max(tmp_start, seg_start));
+      out_ids.push_back(sample_ids.at(i));
+      out_heights.push_back(heights.at(i));
+    }
+    else if (tmp_end <= seg_start) {
+      break;
+    }
+  }
+  for (int h : het_sites) {
+    if (tmp_start <= h && h < tmp_end) {
+      out_hetsites.push_back(h);
+    }
+  }
+  return std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>(
+      out_starts, out_ids, out_heights, out_hetsites);
 }
 
 ViterbiState::ViterbiState(int _target_id,
@@ -128,7 +172,7 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
 void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
   std::vector<int> new_samples_vec(new_sample_ids.begin(), new_sample_ids.end());
   if (!new_sample_ids.count(best_match)) {
-    cout << "warning!! best current match not in new samples for target " << target_id << endl;
+    // cout << "warning!! best current match not in new samples for target " << target_id << endl;
     new_samples_vec.push_back(best_match);
   }
   for (int sample_id : sample_ids) {

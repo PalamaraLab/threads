@@ -23,6 +23,7 @@ private:
 public:
   double score;
   int target_id;
+  std::vector<int> bp_starts;
   std::vector<int> segment_starts;
   std::vector<int> sample_ids;
   std::vector<double> heights;
@@ -31,9 +32,12 @@ public:
   ViterbiPath(int _target_id, std::vector<int> _segment_starts, std::vector<int> _sample_ids,
               std::vector<double> _heights, std::vector<int> _het_sites);
   void append(int segment_start, int sample_id);
-  void append(int segment_start, int sample_id, double height, std::vector<int> new_het_sites);
+  void append(int segment_start, int sample_id, double height, std::vector<int>& new_het_sites);
+  std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
+  dump_data_in_range(int start = -1, int end = -1);
   void reverse();
   int size();
+  void map_positions(std::vector<int>& positions);
 };
 
 class ViterbiState {

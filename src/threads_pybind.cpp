@@ -70,6 +70,9 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def_readonly("heights", &ViterbiPath::heights)
       .def_readonly("score", &ViterbiPath::score)
       .def_readonly("sample_ids", &ViterbiPath::sample_ids)
+      .def("map_positions", &ViterbiPath::map_positions, py::arg("positions"))
+      .def("dump_data_in_range", &ViterbiPath::dump_data_in_range, py::arg("start") = -1,
+           py::arg("end") = -1)
       .def("size", &ViterbiPath::size);
 
   py::class_<MatchGroup>(m, "MatchGroup")

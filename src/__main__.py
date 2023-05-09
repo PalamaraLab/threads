@@ -5,17 +5,19 @@ import h5py
 import tszip
 import click
 import logging
+import pgenlib
 import subprocess
 import arg_needle_lib
 
+import ray
 import numpy as np
-import xarray as xr
+# import xarray as xr
 import pandas as pd
 
-from threads import Threads
+from threads import Threads, ThreadsLowMem, Matcher, ViterbiPath
 from datetime import datetime
 # from pandas_plink import read_plink1_bin
-import xarray as xr
+# import xarray as xr
 from cyvcf2 import VCF, Writer
 
 def print_help_msg(command):
@@ -104,6 +106,92 @@ def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phy
             else:
                 threads.append(bwt.thread(g))
     return threads
+
+def serialize_paths(paths, positions, out, start=None, end=None):
+    # paths = TLM.paths
+    samples = [i for i in range(len(paths))]
+    # positions = TLM.physical_positions
+    num_threads = len(samples)
+    num_sites = len(positions)
+
+    region_start = positions[0] if start == None else max(positions[0], start)
+
+    thread_starts = []
+    mut_starts = []
+    thread_start = 0
+    mut_start = 0
+    all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
+    for i, path in enumerate(paths):
+        path.map_positions(positions.astype(int))
+        bps, ids, ages, het_sites = path.dump_data_in_range(start, end)
+        # bp_ii = path.segment_starts
+        # ids = path.sample_ids
+        # ages = path.heights
+        # het_sites = path.het_sites
+        # bps = [positions[bp_idx] for bp_idx in bp_ii]
+        # import pdb
+        # pdb.set_trace()
+        # try:
+        if i > 0:
+            try:
+                assert bps[0] == region_start
+                if start is not None:
+                    assert bps[0] >= start
+                assert len(np.unique(bps)) == len(bps)
+                assert bps[-1] <= positions[-1]
+            except:
+                import pdb
+                pdb.set_trace()
+
+        all_bps += bps
+        all_ids += ids
+        all_ages += ages
+        all_het_sites += het_sites
+        thread_starts.append(thread_start)
+        mut_starts.append(mut_start)
+        thread_start += len(bps)
+        mut_start += len(het_sites)
+
+    num_stitches = len(all_bps)
+    num_mutations = len(all_het_sites)
+
+    assert len(all_bps) == len(all_ids) == len(all_ages)
+    assert len(paths) == len(samples)
+
+    f = h5py.File(out, "w")
+    f.attrs['datetime_created'] = datetime.now().isoformat()
+
+    compression_opts = 9
+    dset_samples = f.create_dataset("samples", (num_threads, 3), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+    dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+    # First L columns are random samples for imputation
+    dset_targets = f.create_dataset("thread_targets", (num_stitches, 2), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+    dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
+                                    compression_opts=compression_opts)
+    dset_het_s = f.create_dataset("het_sites", (num_mutations), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+    dset_range = f.create_dataset("arg_range", (2), dtype=np.double, compression='gzip',
+                                  compression_opts=compression_opts)
+
+    dset_samples[:, 0] = samples
+    dset_samples[:, 1] = thread_starts
+    dset_samples[:, 2] = mut_starts
+    dset_pos[:] = positions
+
+    dset_targets[:, 0] = all_ids
+
+    dset_targets[:, 1] = all_bps
+
+    dset_ages[:] = all_ages
+
+    dset_het_s[:] = all_het_sites
+
+    dset_range[:] = [region_start, positions[-1] + 1]
+
+    f.close()
 
 def serialize(out, threads, samples, positions, arg_range, L=1):
     num_threads = len(samples)
@@ -261,204 +349,383 @@ def decompress_threads(threads):
         "arg_range": arg_range
     }
 
-def parse_vcf(genotypes):
-    raise NotImplementedError
+# def parse_vcf(genotypes):
+#     raise NotImplementedError
 
+# @click.command()
+# @click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
+# @click.option("--hap_gz", default=None, help="Path to Oxford-format haps file. Optional for 'files'")
+# @click.option("--sample", default=None, help="Path to Oxford-format sample file. Required for 'files' with the hap_gz option")
+# @click.option("--vcf", default=None, help="Path to vcf/vcf.gz/bcf file. Optional for 'files'")
+# @click.option("--zarr", required=True)
+# def files(mode, hap_gz, sample, vcf, zarr):
+#     """
+#     Prepares funky phased bedfiles for Threads inference as well as the allele count file
+#     """
+#     # Todo: make this not read everything into memory
+#     start_time = time.time()
+#     if (hap_gz is None and vcf is None) or zarr is None:
+#         print_help_msg(files)
+#     if hap_gz is not None and vcf is not None:
+#         raise RuntimeError("Please only specify one of hap_gz or vcf")
+#     logging.info(f"Starting Threads-{mode} with the following parameters:")
+#     if hap_gz is not None:
+#         logging.info(f"  hap_gz: {hap_gz}")
+#         logging.info(f"  sample: {sample}")
+#     else:
+#         logging.info(f"  vcf: {vcf}")
+#     logging.info(f"  zarr:  {zarr}")
+
+#     if hap_gz is not None:
+#         raise NotImplementedError("Not sure if I'll ever support Oxford haps files again. Eugh!")
+#     samples = []
+#     positions = [v.POS for v in VCF(vcf)]
+#     for s in VCF(vcf).samples:
+#         samples += [f"{s}_0", f"{s}_1"]
+#     N = len(samples)
+#     snp_ids = [v.ID for v in VCF(vcf)]
+#     M = len(snp_ids)
+#     genotypes = np.empty((N, M), dtype=bool)
+#     for i, v in enumerate(VCF(vcf)):
+#         v_gt = np.array([[g[0], g[1]] for g in v.genotypes]).flatten()
+#         genotypes[:, i] = v_gt
+
+#     ds = xr.Dataset(
+#         {"genotypes": (("samples", "snp_ids"), genotypes)},
+#         coords={
+#             "samples": samples,
+#             "snp_ids": snp_ids,
+#             "pos": np.array(positions),
+#             "allele_counts": genotypes.sum(axis=0)
+#         }
+#     )
+#     ds = ds.chunk({"samples": "auto", "snp_ids": -1})
+#     ds.to_zarr(zarr, mode="w")
+#     end_time = time.time()
+#     logging.info(f"Done, in {end_time - start_time} seconds")
+#     goodbye()
+
+# @click.command()
+# @click.argument("mode", type=click.Choice(["files", "infer", "convert", "impute"]))
+# @click.option("--genotypes", required=True, help="zarr thingy")
+# @click.option("--map_gz", required=True, help="Path to genotype map")
+# @click.option("--adaptive", default=False, is_flag=True, help="If set, ultra-rare sites are gradually trimmed.")
+# @click.option("--mutation_rate", required=True, type=float, help="Per-site-per-generation SNP mutation rate.")
+# @click.option("--demography", required=True, help="Path to file containing demographic history.")
+# @click.option("--modality", required=True, type=click.Choice(['array', 'seq'], case_sensitive=False), help="Inference mode, must be either 'array' or 'seq'.")
+# @click.option("--threads", required=True, help="Path to output .threads file.")
+# @click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
+# @click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
+# @click.option("--max_ac", default=5, help="If using adaptive, lowest allele count included in all analyses")
+# def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive, max_ac, cycle_n=0):
+#     """Infer threading instructions from input data and save to .threads format"""
+#     start_time = time.time()
+#     logging.info(f"Starting Threads-{mode} with the following parameters:")
+#     logging.info(f"  genotypes:      {genotypes}")
+#     logging.info(f"  map_gz:         {map_gz}")
+#     logging.info(f"  threads:        {threads}")
+#     logging.info(f"  demography:     {demography}")
+#     logging.info(f"  mutation_rate:  {mutation_rate}")
+#     logging.info(f"  cycle_n:        {cycle_n}")
+#     logging.info(f"  burn_in_left:   {burn_in_left}")
+#     logging.info(f"  burn_in_right:  {burn_in_right}")
+#     threads_out = threads
+
+#     if os.path.isdir(genotypes):
+#         logging.info(f"{genotypes} is a directory, interpreting as a .zarr archive")
+#         z_dataset = xr.open_zarr(genotypes)
+#         batch_size = z_dataset.chunks["samples"][0]
+#         haps = z_dataset["genotypes"]
+#         acounts = z_dataset["allele_counts"].values
+#     elif os.path.isfile(genotypes):
+#         logging.info(f"{genotypes} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
+#         raise NotImplementedError
+#         # This will do the whole conversion from vcf to zarr
+#         haps = parse_vcf(genotypes)
+#         batch_size = 4e6 // haps.shape[1]
+#         acounts = haps.values.sum(axis=0)
+#     else:
+#         raise ValueError(f"{genotypes} not found")
+
+#     # Keep track of ram
+#     max_mem_used_GB = 0
+
+#     cm_pos, phys_pos = read_map_gz(map_gz)
+#     logging.info(f"Found a genotype map with {len(phys_pos)} markers")
+#     logging.info(f"Found genotype of shape {haps.shape}")
+
+#     phys_pos_0 = phys_pos
+#     # arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right + 1)
+#     arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right)
+#     cm_pos_0 = cm_pos
+#     M = len(phys_pos_0)
+#     ne_times, ne_sizes = parse_demography(demography)
+#     num_samples = haps.shape[0]
+
+#     sparse_sites = modality == "array"
+#     use_hmm = modality != "array"
+#     threads = []
+#     samples = []
+
+#     logging.info("Threading! This could take a while...")
+#     if modality == "array" or (modality == "seq" and not adaptive):
+#         # batch_size = int(np.ceil(2e6 / M))
+#         bwt = Threads(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
+#         assert (bwt.threading_start, bwt.threading_end) == arg_range
+#         for k in range(int(np.ceil(num_samples / batch_size))):
+#             s = k * batch_size
+#             e = min(num_samples, (k + 1) * batch_size)
+#             # TODO: use pandas_plink.Chunk ?
+#             haps_chunk = haps[s:e].values.astype(bool)
+
+#             for i, hap in enumerate(haps_chunk):
+#                 if (i + s + 1) % 1000 == 0:
+#                     logging.info("\n ")
+
+#                 hap = haps_chunk[i]
+#                 if (i + s > 0):
+#                     thread = bwt.thread(hap)
+#                     threads.append(thread)
+#                 else:
+#                     bwt.insert(hap)
+#                     threads.append(([], [], [], [phys_pos[i] for i, h in enumerate(hap) if h]))
+#                 samples.append(i + s)
+#         if cycle_n > 0:
+#             logging.info("Cycling! This shouldn't take too long...")
+#             haps_chunk = haps[:min(num_samples, cycle_n)].values.astype(bool)
+#             for i, g in enumerate(haps_chunk):
+#                 #g = haps[i].values.astype(bool)    
+#                 samples.append(i)
+#                 bwt.delete_ID(i)
+#                 thread = bwt.thread(i, g)
+#                 threads.append(thread)
+#     else:
+#         # counts_path = f"{bfile}.acount"
+#         # counts_df = pd.read_table(counts_path)
+#         # weird fix because of plink hack
+#         # acounts = counts_df['ALT_CTS'].values
+
+#         assert acounts.max() <= num_samples
+#         # assert acounts.min() >= num_samples
+#         assert len(acounts) == len(phys_pos_0)
+#         # acounts -= num_samples
+
+#         bwt = None
+#         mumumultiplier = 1.0
+#         for ac in range(max_ac + 1):
+#             start = int(1 + 1_000 * ac)
+#             end = int(1 + 1_000 * (ac + 1))
+#             use_hmm = False
+#             if ac == 0:
+#                 start = 0
+#                 use_hmm = True
+#                 variant_filter = None
+#             else:
+#                 if ac == max_ac:
+#                     end = num_samples
+#                 variant_filter = (ac < acounts) * (acounts < num_samples - ac)
+#                 # We still need to get the whole range, though
+#                 variant_filter[0] = True
+#                 variant_filter[-1] = True  # this one might be unnecessary
+#                 phys_pos = phys_pos_0[variant_filter]
+#                 cm_pos = cm_pos_0[variant_filter]
+#             mumumultiplier = 0.5 * len(phys_pos) / M
+#             bwt = Threads(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
+#             assert (bwt.threading_start, bwt.threading_end) == arg_range
+
+#             batch_size = int(np.ceil(2e6 / len(phys_pos)))
+#             threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phys_pos)
+#             assert len(threads) == bwt.num_samples
+
+#             if end >= num_samples:
+#                 break
+#         samples = [i for i in range(num_samples)]
+
+#     logging.info(f"Saving results to {threads_out}")
+#     serialize(threads_out, threads, samples, phys_pos_0, arg_range)
+#     end_time = time.time()
+#     logging.info(f"Done, in (s) {end_time - start_time}")
+#     goodbye()
+
+# @ray.remote
+def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_positions, demography, mu, sample_batch, s_match_group, match_cm_positions):
+    reader = pgenlib.PgenReader(pgen.encode())
+    ne_times, ne = parse_demography(demography)
+
+    sparse = None
+    if mode == "array":
+        sparse = True
+    elif mode == "wgs":
+        sparse = False
+    else:
+        raise RuntimeError
+    
+    TLM = ThreadsLowMem(sample_batch, physical_positions, genetic_positions, ne, ne_times, mu, sparse)
+    logging.info("Initializing HMMs")
+
+    TLM.initialize_viterbi(s_match_group, match_cm_positions)
+    # TLM.initialize_viterbi(match_subset)
+    M = reader.get_variant_ct()
+    BATCH_SIZE = int(2e7 // num_samples_hap)
+    n_batches = int(np.ceil(M / BATCH_SIZE))
+
+    logging.info("Starting HMM inference")
+    a_counter = 0
+    pruned_size = num_samples_hap
+    prune_count = 0
+    for b in range(n_batches):
+        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
+        b_start = b * BATCH_SIZE
+        b_end = min(M, (b+1) * BATCH_SIZE)
+        alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
+        phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
+        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
+        for g in alleles_out:
+            TLM.process_site_viterbi(g)
+            if a_counter % 10 == 0 and TLM.count_branches() > 20 * pruned_size:
+                # logging.info(f"trim at {a_counter}/{M}")
+                TLM.prune()
+                pruned_size = TLM.count_branches()
+                prune_count += 1
+            a_counter += 1
+
+    logging.info(f"HMMs done (did {prune_count} pruning steps)")
+    logging.info("Starting traceback")
+    TLM.traceback()
+
+    logging.info("Fetching heterozygous sites")
+    for b in range(n_batches):
+        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
+        b_start = b * BATCH_SIZE
+        b_end = min(M, (b+1) * BATCH_SIZE)
+        alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
+        phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
+        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
+        for g in alleles_out:
+            TLM.process_site_hets(g)
+    # gc.collect()
+
+    logging.info("Dating segments")
+    TLM.date_segments()
+    return TLM.serialize_paths()
+    # return TLM.paths
+
+def split_list(list, n):
+    """Yield n number of sequential chunks from l."""
+    sublists = []
+    d, r = divmod(len(list), n)
+    for i in range(n):
+        si = (d+1)*(i if i < r else r) + d*(0 if i < r else i - r)
+        sublists.append(list[si:si+(d+1 if i < r else d)])
+    return sublists
+
+
+# @profile
 @click.command()
-@click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
-@click.option("--hap_gz", default=None, help="Path to Oxford-format haps file. Optional for 'files'")
-@click.option("--sample", default=None, help="Path to Oxford-format sample file. Required for 'files' with the hap_gz option")
-@click.option("--vcf", default=None, help="Path to vcf/vcf.gz/bcf file. Optional for 'files'")
-@click.option("--zarr", required=True)
-def files(mode, hap_gz, sample, vcf, zarr):
-    """
-    Prepares funky phased bedfiles for Threads inference as well as the allele count file
-    """
-    # Todo: make this not read everything into memory
+@click.argument("command", type=click.Choice(["files", "infer", "convert", "impute"]))
+@click.option("--pgen", required=True)
+@click.option("--map_gz", required=True)
+@click.option("--demography", required=True)
+@click.option("--mode", required=True, type=click.Choice(['array', 'wgs']))
+@click.option("--mutation_rate", required=True, type=float)
+@click.option("--num_threads", type=int, default=1)
+@click.option("--region", help="Of format 123-345, end-exclusive") 
+@click.option("--out")
+def infer(command, pgen, map_gz, demography, mutation_rate, mode, num_threads, region, out):
+    assert command == "infer"
     start_time = time.time()
-    if (hap_gz is None and vcf is None) or zarr is None:
-        print_help_msg(files)
-    if hap_gz is not None and vcf is not None:
-        raise RuntimeError("Please only specify one of hap_gz or vcf")
-    logging.info(f"Starting Threads-{mode} with the following parameters:")
-    if hap_gz is not None:
-        logging.info(f"  hap_gz: {hap_gz}")
-        logging.info(f"  sample: {sample}")
+    logging.info(f"Starting Threads-infer with the following parameters:")
+    logging.info(f"  pgen:          {pgen}")
+    logging.info(f"  map_gz:        {map_gz}")
+    logging.info(f"  demography:    {demography}")
+    logging.info(f"  mutation_rate: {mutation_rate}")
+    logging.info(f"  num_threads:   {num_threads}")
+    logging.info(f"  region:        {region}")
+    logging.info(f"  out:           {out}")
+
+    genetic_positions, physical_positions = read_map_gz(map_gz)
+
+    out_start, out_end = None, None 
+    if region is not None: 
+        out_start, out_end = [int(r) for r in region.split("-")]
+
+    reader = pgenlib.PgenReader(pgen.encode())
+
+    num_samples = reader.get_raw_sample_ct()
+    num_sites = reader.get_variant_ct()
+
+    M = len(physical_positions)
+    assert num_sites == M
+    BATCH_SIZE = int(4e7 // num_samples)
+    n_batches = int(np.ceil(M / BATCH_SIZE))
+
+    logging.info("Finding singletons")
+    ac_mask = np.zeros(genetic_positions.shape, dtype=bool)
+    for b in range(n_batches):
+        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
+        b_start = b * BATCH_SIZE
+        b_end = min(M, (b+1) * BATCH_SIZE)
+        alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
+        phased_out = np.empty((g_size, num_samples), dtype=np.uint8)
+        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
+        ac_mask[b_start:b_end] = alleles_out.sum(axis=1) > 1
+
+    logging.info("Running PBWT matching")
+
+    # There are four params here to mess with:
+    #   - query interval
+    #   - match group size
+    #   - neighbourhood size (L)
+    #   - min_matches
+    # NB:
+    #   - very important to keep min_matches low for big sample sizes, can be 2 up to 1,000 (?) but then > 3
+    #   - might want to consider propagating top k (e.g. 4?) states from prev group instead of just the best
+    #   - unclear how much query interval/group size should change with N
+    #   - I suspect: raise min_matches to 5 and L to 8
+    matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], 0.01, 0.5, 4)  # <- smaller numbers are faster
+
+    for b in range(n_batches):
+        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
+        b_start = b * BATCH_SIZE
+        b_end = min(M, (b+1) * BATCH_SIZE)
+        batch_mask = ac_mask[b_start:b_end]
+        alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
+        phased_out = np.empty((g_size, num_samples), dtype=np.uint8)
+        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
+        for g in alleles_out[batch_mask]:
+            matcher.process_site(g)
+
+    MIN_MATCHES = 4  # maybe even higher for larger N? or should it scale up?
+    matcher.set_matches(MIN_MATCHES)
+
+    ### From here we want to parallelise
+    actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)
+    logging.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
+    if actual_num_threads > 1:
+        sample_batches = split_list(list(range(2 * num_samples)), num_threads)
+        s_match_groups = [matcher.serializable_matches(sample_batch) for sample_batch in sample_batches]
+        match_cm_positions = matcher.cm_positions()
+        partial_viterbi_remote = ray.remote(partial_viterbi)
+        ray.init()
+        results = ray.get([partial_viterbi_remote(pgen, mode, 2 * num_samples, physical_positions, genetic_positions, demography, mutation_rate, sample_batch, s_match_group, match_cm_positions) for sample_batch, s_match_group in zip(sample_batches, s_match_groups)])
+        ray.shutdown()
+        paths = []
+        for sample_batch, result_set in zip(sample_batches, results):
+            for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_set):
+                paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
     else:
-        logging.info(f"  vcf: {vcf}")
-    logging.info(f"  zarr:  {zarr}")
+        sample_batch = list(range(2 * num_samples))
+        s_match_group = matcher.serializable_matches(sample_batch)
+        match_cm_positions = matcher.cm_positions()
+        results = partial_viterbi(pgen, mode, 2 * num_samples, physical_positions, genetic_positions, demography, mutation_rate, sample_batch, s_match_group, match_cm_positions)
 
-    if hap_gz is not None:
-        raise NotImplementedError("Not sure if I'll ever support Oxford haps files again. Eugh!")
-    samples = []
-    positions = [v.POS for v in VCF(vcf)]
-    for s in VCF(vcf).samples:
-        samples += [f"{s}_0", f"{s}_1"]
-    N = len(samples)
-    snp_ids = [v.ID for v in VCF(vcf)]
-    M = len(snp_ids)
-    genotypes = np.empty((N, M), dtype=bool)
-    for i, v in enumerate(VCF(vcf)):
-        v_gt = np.array([[g[0], g[1]] for g in v.genotypes]).flatten()
-        genotypes[:, i] = v_gt
-
-    ds = xr.Dataset(
-        {"genotypes": (("samples", "snp_ids"), genotypes)},
-        coords={
-            "samples": samples,
-            "snp_ids": snp_ids,
-            "pos": np.array(positions),
-            "allele_counts": genotypes.sum(axis=0)
-        }
-    )
-    ds = ds.chunk({"samples": "auto", "snp_ids": -1})
-    ds.to_zarr(zarr, mode="w")
-    end_time = time.time()
-    logging.info(f"Done, in {end_time - start_time} seconds")
+        paths = []
+        for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results): # type: ignore
+            paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
+    logging.info(f"Writing to {out}")
+    serialize_paths(paths, physical_positions, out, start=out_start, end=out_end)
+    logging.info(f"Done in (s): {time.time() - start_time}")
     goodbye()
-
-@click.command()
-@click.argument("mode", type=click.Choice(["files", "infer", "convert", "impute"]))
-@click.option("--genotypes", required=True, help="zarr thingy")
-@click.option("--map_gz", required=True, help="Path to genotype map")
-@click.option("--adaptive", default=False, is_flag=True, help="If set, ultra-rare sites are gradually trimmed.")
-@click.option("--mutation_rate", required=True, type=float, help="Per-site-per-generation SNP mutation rate.")
-@click.option("--demography", required=True, help="Path to file containing demographic history.")
-@click.option("--modality", required=True, type=click.Choice(['array', 'seq'], case_sensitive=False), help="Inference mode, must be either 'array' or 'seq'.")
-@click.option("--threads", required=True, help="Path to output .threads file.")
-@click.option("--burn_in_left", default=0, help="Left burn-in in base-pairs. Default is 0.")
-@click.option("--burn_in_right", default=0, help="Right burn-in in base-pairs. Default is 0.")
-@click.option("--max_ac", default=5, help="If using adaptive, lowest allele count included in all analyses")
-def infer(mode, genotypes, map_gz, mutation_rate, demography, modality, threads, burn_in_left, burn_in_right, adaptive, max_ac, cycle_n=0):
-    """Infer threading instructions from input data and save to .threads format"""
-    start_time = time.time()
-    logging.info(f"Starting Threads-{mode} with the following parameters:")
-    logging.info(f"  genotypes:      {genotypes}")
-    logging.info(f"  map_gz:         {map_gz}")
-    logging.info(f"  threads:        {threads}")
-    logging.info(f"  demography:     {demography}")
-    logging.info(f"  mutation_rate:  {mutation_rate}")
-    logging.info(f"  cycle_n:        {cycle_n}")
-    logging.info(f"  burn_in_left:   {burn_in_left}")
-    logging.info(f"  burn_in_right:  {burn_in_right}")
-    threads_out = threads
-
-    if os.path.isdir(genotypes):
-        logging.info(f"{genotypes} is a directory, interpreting as a .zarr archive")
-        z_dataset = xr.open_zarr(genotypes)
-        batch_size = z_dataset.chunks["samples"][0]
-        haps = z_dataset["genotypes"]
-        acounts = z_dataset["allele_counts"].values
-    elif os.path.isfile(genotypes):
-        logging.info(f"{genotypes} is not a .zarr archive, interpreting as a vcf - this will read everything into memory")
-        raise NotImplementedError
-        # This will do the whole conversion from vcf to zarr
-        haps = parse_vcf(genotypes)
-        batch_size = 4e6 // haps.shape[1]
-        acounts = haps.values.sum(axis=0)
-    else:
-        raise ValueError(f"{genotypes} not found")
-
-    # Keep track of ram
-    max_mem_used_GB = 0
-
-    cm_pos, phys_pos = read_map_gz(map_gz)
-    logging.info(f"Found a genotype map with {len(phys_pos)} markers")
-    logging.info(f"Found genotype of shape {haps.shape}")
-
-    phys_pos_0 = phys_pos
-    # arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right + 1)
-    arg_range = (phys_pos_0[0] + burn_in_left, phys_pos_0[-1] - burn_in_right)
-    cm_pos_0 = cm_pos
-    M = len(phys_pos_0)
-    ne_times, ne_sizes = parse_demography(demography)
-    num_samples = haps.shape[0]
-
-    sparse_sites = modality == "array"
-    use_hmm = modality != "array"
-    threads = []
-    samples = []
-
-    logging.info("Threading! This could take a while...")
-    if modality == "array" or (modality == "seq" and not adaptive):
-        # batch_size = int(np.ceil(2e6 / M))
-        bwt = Threads(phys_pos, cm_pos, mutation_rate, ne_sizes, ne_times, sparse_sites, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
-        assert (bwt.threading_start, bwt.threading_end) == arg_range
-        for k in range(int(np.ceil(num_samples / batch_size))):
-            s = k * batch_size
-            e = min(num_samples, (k + 1) * batch_size)
-            # TODO: use pandas_plink.Chunk ?
-            haps_chunk = haps[s:e].values.astype(bool)
-
-            for i, hap in enumerate(haps_chunk):
-                if (i + s + 1) % 1000 == 0:
-                    logging.info("\n ")
-
-                hap = haps_chunk[i]
-                if (i + s > 0):
-                    thread = bwt.thread(hap)
-                    threads.append(thread)
-                else:
-                    bwt.insert(hap)
-                    threads.append(([], [], [], [phys_pos[i] for i, h in enumerate(hap) if h]))
-                samples.append(i + s)
-        if cycle_n > 0:
-            logging.info("Cycling! This shouldn't take too long...")
-            haps_chunk = haps[:min(num_samples, cycle_n)].values.astype(bool)
-            for i, g in enumerate(haps_chunk):
-                #g = haps[i].values.astype(bool)    
-                samples.append(i)
-                bwt.delete_ID(i)
-                thread = bwt.thread(i, g)
-                threads.append(thread)
-    else:
-        # counts_path = f"{bfile}.acount"
-        # counts_df = pd.read_table(counts_path)
-        # weird fix because of plink hack
-        # acounts = counts_df['ALT_CTS'].values
-
-        assert acounts.max() <= num_samples
-        # assert acounts.min() >= num_samples
-        assert len(acounts) == len(phys_pos_0)
-        # acounts -= num_samples
-
-        bwt = None
-        mumumultiplier = 1.0
-        for ac in range(max_ac + 1):
-            start = int(1 + 1_000 * ac)
-            end = int(1 + 1_000 * (ac + 1))
-            use_hmm = False
-            if ac == 0:
-                start = 0
-                use_hmm = True
-                variant_filter = None
-            else:
-                if ac == max_ac:
-                    end = num_samples
-                variant_filter = (ac < acounts) * (acounts < num_samples - ac)
-                # We still need to get the whole range, though
-                variant_filter[0] = True
-                variant_filter[-1] = True  # this one might be unnecessary
-                phys_pos = phys_pos_0[variant_filter]
-                cm_pos = cm_pos_0[variant_filter]
-            mumumultiplier = 0.5 * len(phys_pos) / M
-            bwt = Threads(phys_pos, cm_pos, mumumultiplier * mutation_rate, ne_sizes, ne_times, sparse_sites=False, use_hmm=use_hmm, burn_in_left=burn_in_left, burn_in_right=burn_in_right)
-            assert (bwt.threading_start, bwt.threading_end) == arg_range
-
-            batch_size = int(np.ceil(2e6 / len(phys_pos)))
-            threads += thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phys_pos)
-            assert len(threads) == bwt.num_samples
-
-            if end >= num_samples:
-                break
-        samples = [i for i in range(num_samples)]
-
-    logging.info(f"Saving results to {threads_out}")
-    serialize(threads_out, threads, samples, phys_pos_0, arg_range)
-    end_time = time.time()
-    logging.info(f"Done, in (s) {end_time - start_time}")
-    goodbye()
-
 
 @click.command()
 @click.argument("mode", type=click.Choice(["files", "infer", "convert", "impute"]))
