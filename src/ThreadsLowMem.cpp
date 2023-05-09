@@ -234,7 +234,7 @@ void ThreadsLowMem::date_segments() {
         }
         // Here we use the hmm to break the big segment up into smaller segments
         std::vector<int> breakpoints = psmc.breakpoints(het_hom_sites, segment_start);
-        cout << "found " << breakpoints.size() << " breakpoints" << endl;
+        // cout << "found " << breakpoints.size() << " breakpoints" << endl;
         for (int j = 0; j < breakpoints.size(); j++) {
           int breakpoint_start = breakpoints[j];
           int breakpoint_end = (j == breakpoints.size() - 1) ? segment_end : breakpoints[j + 1];
