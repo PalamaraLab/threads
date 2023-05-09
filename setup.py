@@ -115,7 +115,7 @@ setup(
     version='0.1',
     # author='PalamaraLab (https://palamaralab.github.io/)',
     url='https://github.com/PalamaraLab/TDPBWT/',
-    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg_needle_lib', 'cyvcf2'],
+    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg_needle_lib', 'cyvcf2', 'ray', 'pgenlib'],
     # extras_require={
     #     'dev': [
     #         'pytest',
