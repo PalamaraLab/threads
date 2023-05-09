@@ -1,4 +1,4 @@
-Steps towards set-up:
+Installation (rescomp only):
 
 Load everything we'll need (some of these won't be necessary but I haven't checked which ones) 
 ```
@@ -21,14 +21,6 @@ pip install --upgrade pip setuptools wheel
 pip install cmake ninja
 ```
 
-`arg_needle_lib` is not yet on pypi so we pull and install it:
-```
-git clone https://github.com/PalamaraLab/arg_needle_lib.git
-cd arg_needle_lib
-pip install .
-cd ..
-```
-
 Then do the same for threads:
 ```
 git clone https://github.com/PalamaraLab/TDPBWT.git
@@ -37,20 +29,21 @@ pip install .
 ```
 
 To make sure it works you need
-- genotypes in vcf/bcf format
-- genetic map with 4 columns: Chromosome, SNP, cM, bp
+- genotypes in pgen format
+- genetic map with 4 columns: Chromosome, SNP_id, cM, bp and one row for each marker in the pgen
 - demography file, interpreted as haploid, with two columns: generation, effective population size
 ```
-# Convert genotypes into zarr archives
-threads files --vcf data.[vcf/vcf.gz/bcf] --zarr data.zarr
 # Run the inference
 threads infer \
-    --genotypes snp_data \
-    --map_gz genetic_map.gz \
+    --pgen path/to/input.pgen \
+    --map_gz path/to/genetic_map.gz \
     --mutation_rate 1.65e-8 \
-    --demography CEU.demo \
-    --modality [array/seq] \
-    --threads snp_data.threads
+    --demography path/to/demography \
+    --modality [array|wgs] \
+    --out path/to/output.threads
+    --region 123-456789 (optional)
+    --num_threads 8 (optional)
+
 # Convert to .argn and/or .tsz
 threads convert \
     --threads snp_data.threads \
