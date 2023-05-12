@@ -1234,7 +1234,9 @@ Threads::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node
     Node* div_node = match;
     // We also keep track of the min_id, this is useful for genotype parsing
     int min_id = match_id;
+
     // Find all samples that match on the segment
+    // First traverse upwards
     while (div_node->above != nullptr && div_node->divergence <= segment_start) {
       div_node = div_node->above;
       // this is a bit awkward
@@ -1246,6 +1248,16 @@ Threads::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node
       if (div_node->sample_ID < min_id) {
         min_id = div_node->sample_ID;
       }
+    }
+    // Then traverse downwards
+    div_node = match->below;
+    while (div_node != nullptr && div_node->divergence <= segment_start) {
+      div_states.push_back(div_node->sample_ID);
+      n_matches += 1;
+      if (div_node->sample_ID < min_id) {
+        min_id = div_node->sample_ID;
+      }
+      div_node = div_node->below;
     }
 
     // Overlaps measured in matching sites
