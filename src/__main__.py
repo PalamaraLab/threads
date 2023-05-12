@@ -11,10 +11,11 @@ import arg_needle_lib
 
 import ray
 import numpy as np
-# import xarray as xr
+import xarray as xr
 import pandas as pd
 
 from threads import Threads, ThreadsLowMem, Matcher, ViterbiPath
+from .utils import decompress_threads, read_map_gz, parse_demography
 from datetime import datetime
 # from pandas_plink import read_plink1_bin
 # import xarray as xr
@@ -60,25 +61,6 @@ def haploidify_samples(samples, out):
         for l in lines:
             ohandle.write(l + "\n")
 
-def read_map_gz(map_gz):
-    """
-        Reading in haps and maps file for Li-Stephens
-    """
-    if (map_gz[:-3] == ".gz") :
-        maps = pd.read_table(map_gz, header=None, compression='gzip')
-    else:
-        maps = pd.read_table(map_gz, header=None)
-    cm_pos = maps[2].values.astype(np.float64)
-    phys_pos = maps[3].values.astype(np.float64)
-    for i in range(1, len(cm_pos)):
-        if cm_pos[i] <= cm_pos[i-1]:
-            cm_pos[i] = cm_pos[i-1] + 1e-5
-    return cm_pos, phys_pos
-
-def parse_demography(demography):
-    d = pd.read_table(demography, delim_whitespace=True, header=None)
-    return list(d[0]), list(d[1])
-
 def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phys_pos):
     threads = []
     range_size = min(end, haps.shape[0])
@@ -115,6 +97,7 @@ def serialize_paths(paths, positions, out, start=None, end=None):
     num_sites = len(positions)
 
     region_start = positions[0] if start == None else max(positions[0], start)
+    region_end = positions[-1] + 1 if start == None else max(positions[-1] + 1, end + 1)
 
     thread_starts = []
     mut_starts = []
@@ -189,7 +172,7 @@ def serialize_paths(paths, positions, out, start=None, end=None):
 
     dset_het_s[:] = all_het_sites
 
-    dset_range[:] = [region_start, positions[-1] + 1]
+    dset_range[:] = [region_start, region_end]
 
     f.close()
 
@@ -317,37 +300,6 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None):
     logging.info("Verifying ARG...")
     _ = arg_needle_lib.arg_to_tskit(arg)
     return arg
-
-def decompress_threads(threads):
-    f = h5py.File(threads, "r")
-
-    samples, thread_starts = f["samples"][:, 0], f["samples"][:, 1] #dset_samples[:, 0], dset_ = f['flags'][...]
-    positions = f['positions'][...]
-    flat_ids, flat_bps = f['thread_targets'][:, :-1], f['thread_targets'][:, -1]
-    # flat_ids, flat_bps = f['thread_targets'][:, 0], f['thread_targets'][:, 1]
-    flat_ages = f['thread_ages'][...]
-    try:
-        arg_range = f['arg_range'][...]
-    except KeyError:
-        arg_range = [np.nan, np.nan]
-
-    threading_instructions = []
-    for i, start in enumerate(thread_starts):
-        if i == len(thread_starts) - 1:
-            ids = flat_ids[start:]
-            bps = flat_bps[start:]
-            ages = flat_ages[start:]
-        else:
-            ids = flat_ids[start:thread_starts[i + 1]]
-            bps = flat_bps[start:thread_starts[i + 1]]
-            ages = flat_ages[start:thread_starts[i + 1]]
-        threading_instructions.append((bps, ids, ages))
-    return {
-        "threads": threading_instructions,
-        "samples": samples,
-        "positions": positions,
-        "arg_range": arg_range
-    }
 
 # def parse_vcf(genotypes):
 #     raise NotImplementedError
@@ -707,7 +659,7 @@ def infer(command, pgen, map_gz, demography, mutation_rate, mode, num_threads, r
         match_cm_positions = matcher.cm_positions()
         partial_viterbi_remote = ray.remote(partial_viterbi)
         ray.init()
-        results = ray.get([partial_viterbi_remote(pgen, mode, 2 * num_samples, physical_positions, genetic_positions, demography, mutation_rate, sample_batch, s_match_group, match_cm_positions) for sample_batch, s_match_group in zip(sample_batches, s_match_groups)])
+        results = ray.get([partial_viterbi_remote.remote(pgen, mode, 2 * num_samples, physical_positions, genetic_positions, demography, mutation_rate, sample_batch, s_match_group, match_cm_positions) for sample_batch, s_match_group in zip(sample_batches, s_match_groups)])
         ray.shutdown()
         paths = []
         for sample_batch, result_set in zip(sample_batches, results):
