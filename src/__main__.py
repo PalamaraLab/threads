@@ -97,7 +97,7 @@ def serialize_paths(paths, positions, out, start=None, end=None):
     num_sites = len(positions)
 
     region_start = positions[0] if start == None else max(positions[0], start)
-    region_end = positions[-1] + 1 if start == None else max(positions[-1] + 1, end + 1)
+    region_end = positions[-1] + 1 if end == None else max(positions[-1] + 1, end + 1)
 
     thread_starts = []
     mut_starts = []
@@ -106,7 +106,7 @@ def serialize_paths(paths, positions, out, start=None, end=None):
     all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
     for i, path in enumerate(paths):
         path.map_positions(positions.astype(int))
-        bps, ids, ages, het_sites = path.dump_data_in_range(start, end)
+        bps, ids, ages, het_sites = path.dump_data_in_range(region_start, region_end)
         # bp_ii = path.segment_starts
         # ids = path.sample_ids
         # ages = path.heights
