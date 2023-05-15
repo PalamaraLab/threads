@@ -26,12 +26,9 @@ private:
   int match_group_idx;
   int min_match_length = 1;
   std::vector<MatchGroup> match_groups;
-  // std::vector<std::vector<std::unordered_set<int>>> match_candidates;
   std::vector<int> sorting;
   std::vector<int> next_sorting;
   std::vector<int> permutation;
-  // std::vector<std::vector<int>> cached_genotypes;
-  // int cache_size = 10;
 
 public:
   int L;
@@ -60,3 +57,15 @@ public:
   std::vector<int> get_sorting();
   std::vector<int> get_permutation();
 };
+
+// class ImputationMatcher : public Matcher {
+
+// private:
+//   std::vector<int> divergence_values;
+
+// public:
+//   int num_ref_samples;
+//   int num_target_samples;
+
+//   void process_site(const std::vector<int>& genotype);
+// }

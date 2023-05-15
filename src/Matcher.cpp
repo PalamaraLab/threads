@@ -352,3 +352,123 @@ std::vector<int> Matcher::get_sorting() {
 std::vector<int> Matcher::get_permutation() {
   return permutation;
 }
+
+// void ImputationMatcher::process_site(const std::vector<int>& genotype) {
+//   if (sites_processed >= num_sites) {
+//     throw std::runtime_error("all sites have already been processed");
+//   }
+
+//   int allele_count = 0;
+//   for (int g : genotype) {
+//     if (g == 1) {
+//       allele_count++;
+//     }
+//   }
+//   int counter0 = 0;
+//   int counter1 = 0;
+//   if (genotype.size() != num_samples) {
+//     throw std::runtime_error("invalid genotype vector size");
+//   }
+
+//   for (int i = 0; i < num_samples; i++) {
+//     if (genotype.at(sorting.at(i)) == 1) {
+//       next_sorting[num_samples - allele_count + counter1] = sorting.at(i);
+//       counter1++;
+//     }
+//     else if (genotype.at(sorting.at(i)) == 0) {
+//       next_sorting[counter0] = sorting.at(i);
+//       counter0++;
+//     }
+//     else {
+//       std::string prompt = "invalid genotype" + std::to_string(genotype.at(sorting.at(i)));
+//       throw std::runtime_error(prompt);
+//     }
+//   }
+//   sorting = next_sorting;
+
+//   // do argsort(next_sorting)
+//   for (int i = 0; i < num_samples; i++) {
+//     permutation[sorting.at(i)] = i;
+//   }
+
+//   // do the threading-neighbour queries
+//   if (match_group_idx < match_group_sites.size() - 1 &&
+//       sites_processed >= match_group_sites.at(match_group_idx + 1)) {
+//     // this check is awkward, rewrite
+//     match_group_idx++;
+//     // cout << "match group " << match_group_idx << " at " << sites_processed << endl;
+//   }
+
+//   // // cache a few sites in anticipation of neighbour querying
+//   // if (next_query_site_idx < query_sites.size() && sites_processed >
+//   // query_sites.at(next_query_site_idx) - cache_size) {
+//   //   int cache_idx = sites_processed + cache_size - query_sites.at(next_query_site_idx);
+//   //   for (int i = 0; i < num_samples; i++) {
+//   //     cached_genotypes.at(cache_idx).at(i) = genotype.at(i);
+//   //   }
+//   // }
+
+//   if (next_query_site_idx < query_sites.size() &&
+//       sites_processed == query_sites.at(next_query_site_idx)) {
+//     next_query_site_idx++;
+
+//     std::set<int> threaded = {permutation.at(0)};
+
+//     for (int i = 1; i < num_samples; i++) {
+//       std::vector<int> matches;
+//       int allele = genotype.at(i);
+//       matches.reserve(L);
+//       auto iter = threaded.insert(permutation.at(i));
+//       auto iter_up = iter.first;
+//       auto iter_down = iter.first;
+//       // check if genotypes are identical, just to be sure
+//       // bool match_up = true;
+//       // bool match_down = true;
+//       while (matches.size() < L && (iter_down != threaded.begin() ||
+//                                     iter_up != threaded.end())) { //&& (match_down || match_up))
+//                                     {
+//         // bool added = false;
+//         if (iter_down != threaded.begin()) {
+//           iter_down--;
+//           // match_down = cached_match(i, sorting.at(*iter_down));
+//           // match_down = genotype.at(sorting.at(*iter_down)) == allele;
+//           // if (match_down) {
+//           matches.push_back(sorting.at(*iter_down));
+//           // added = true;
+//           // }
+//         }
+//         if (matches.size() < L && iter_up != threaded.end()) {
+//           iter_up++;
+//           if (iter_up != threaded.end()) {
+//             // match_up = cached_match(i, sorting.at(*iter_up));
+//             // match_up = genotype.at(sorting.at(*iter_up)) == allele;
+//             matches.push_back(sorting.at(*iter_up));
+//             // added = true;
+//             // if (match_up) {
+//             // }
+//           }
+//         }
+//         // if (!added) {
+//         //   break;
+//         // }
+//       }
+
+//       for (int m : matches) {
+//         std::unordered_map<int, int>& mmmap =
+//             match_groups.at(match_group_idx).match_candidates_counts.at(i);
+//         if (m >= i) {
+//           throw std::runtime_error("illegal match candidate " + std::to_string(m) +
+//                                    ", wth is going on");
+//         }
+//         // match_groups.at(match_group_idx).match_candidates.at(i).insert(m);
+//         if (!mmmap.count(m)) {
+//           mmmap[m] = 1;
+//         }
+//         else {
+//           mmmap[m]++;
+//         }
+//       }
+//     }
+//   }
+//   sites_processed++;
+// }
