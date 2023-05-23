@@ -13,6 +13,7 @@ set(
         Threads.cpp
         HMM.cpp
         TGEN.cpp
+        ImputationMatcher.cpp
         Matcher.cpp
         ViterbiLowMem.cpp
         ThreadsLowMem.cpp
@@ -26,6 +27,7 @@ set(
         Threads.hpp
         HMM.hpp
         TGEN.hpp
+        ImputationMatcher.hpp
         Matcher.hpp
         ViterbiLowMem.hpp
         ThreadsLowMem.hpp

@@ -1,6 +1,7 @@
 // #include "Matcher.hpp"
 #include "TGEN.hpp"
 // #include "Threads.hpp"
+#include "ImputationMatcher.hpp"
 #include "ThreadsLowMem.hpp"
 
 #include <pybind11/eigen.h>
@@ -96,6 +97,22 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def("cm_positions", &Matcher::cm_positions)
       .def("get_sorting", &Matcher::get_sorting)
       .def("get_permutation", &Matcher::get_permutation);
+
+  py::class_<ImputationMatcher>(m, "ImputationMatcher")
+      .def(py::init<int, int, const std::vector<double>&, double, int>(), "Initialize",
+           py::arg("num_reference"), py::arg("num_target"), py::arg("genetic_positions"),
+           py::arg("query_interval_size"), py::arg("L") = 8)
+      .def_readonly("query_sites", &ImputationMatcher::query_sites)
+      .def_readonly("genetic_positions", &ImputationMatcher::genetic_positions)
+      .def_readonly("query_interval_size", &ImputationMatcher::query_interval_size)
+      .def_readonly("num_samples", &ImputationMatcher::num_samples)
+      .def_readonly("num_reference", &ImputationMatcher::num_reference)
+      .def_readonly("num_target", &ImputationMatcher::num_target)
+      .def_readonly("num_sites", &ImputationMatcher::num_sites)
+      .def("process_site", &ImputationMatcher::process_site)
+      .def("get_matches", &ImputationMatcher::get_matches)
+      .def("get_sorting", &ImputationMatcher::get_sorting);
+  //   .def("get_permutation", &ImputationMatcher::get_permutation);
 
   py::class_<Threads>(m, "Threads")
       .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int, bool, int,

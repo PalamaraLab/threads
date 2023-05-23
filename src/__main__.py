@@ -92,7 +92,6 @@ def thread_range(haps, bwt, start, end, use_hmm, variant_filter, batch_size, phy
 def serialize_paths(paths, positions, out, start=None, end=None):
     # paths = TLM.paths
     samples = [i for i in range(len(paths))]
-    # positions = TLM.physical_positions
     num_threads = len(samples)
     num_sites = len(positions)
 
@@ -675,7 +674,7 @@ def infer(command, pgen, map_gz, demography, mutation_rate, mode, num_threads, r
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results): # type: ignore
             paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
     logging.info(f"Writing to {out}")
-    serialize_paths(paths, physical_positions, out, start=out_start, end=out_end)
+    serialize_paths(paths, physical_positions.astype(int), out, start=out_start, end=out_end)
     logging.info(f"Done in (s): {time.time() - start_time}")
     goodbye()
 
