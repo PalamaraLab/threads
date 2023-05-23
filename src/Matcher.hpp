@@ -57,15 +57,3 @@ public:
   std::vector<int> get_sorting();
   std::vector<int> get_permutation();
 };
-
-// class ImputationMatcher : public Matcher {
-
-// private:
-//   std::vector<int> divergence_values;
-
-// public:
-//   int num_ref_samples;
-//   int num_target_samples;
-
-//   void process_site(const std::vector<int>& genotype);
-// }
