@@ -14,13 +14,15 @@ public:
   MatchGroup(int _num_samples, double cm_position);
   MatchGroup(const std::vector<int>& target_ids,
              const std::vector<std::unordered_set<int>>& matches, const double _cm_position);
-  void set_candidates(int min_matches);
+  void filter_matches(int min_matches);
+  // void set_candidates(int min_matches);
   void insert_tops_from(MatchGroup& other);
 };
 
 class Matcher {
 
 private:
+  int min_matches;
   int sites_processed;
   int next_query_site_idx;
   int match_group_idx;
@@ -43,12 +45,13 @@ public:
   int neighborhood_size;
   std::vector<double> genetic_positions;
   Matcher(int _n, const std::vector<double>& _genetic_positions, double _query_interval_size,
-          double _match_group_interval_size, int _L);
+          double _match_group_interval_size, int _L, int _min_matches);
 
   // Do all the work
   void process_site(const std::vector<int>& genotype);
   // bool cached_match(int i, int j);
-  void set_matches(int min_matches = 0);
+  // void set_matches(int min_matches = 0);
+  void propagate_adjacent_matches();
   std::vector<MatchGroup> get_matches();
   std::vector<std::vector<std::unordered_set<int>>>
   serializable_matches(std::vector<int>& target_ids);

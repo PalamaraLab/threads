@@ -1,4 +1,5 @@
 import os
+import gc
 import sys
 import time
 import h5py
@@ -105,15 +106,15 @@ def serialize_paths(paths, positions, out, start=None, end=None):
     all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
     for i, path in enumerate(paths):
         path.map_positions(positions.astype(int))
-        bps, ids, ages, het_sites = path.dump_data_in_range(region_start, region_end)
+        bps, ids, ages = path.dump_data_in_range(region_start, region_end)
+        het_site_indices = np.array(path.het_sites, dtype=int)
+        het_sites = positions[het_site_indices]
+        het_indices_out = list(het_site_indices[(region_start <= het_sites) * (het_sites < region_end)])
         # bp_ii = path.segment_starts
         # ids = path.sample_ids
         # ages = path.heights
         # het_sites = path.het_sites
         # bps = [positions[bp_idx] for bp_idx in bp_ii]
-        # import pdb
-        # pdb.set_trace()
-        # try:
         if i > 0:
             try:
                 assert bps[0] == region_start
@@ -128,11 +129,11 @@ def serialize_paths(paths, positions, out, start=None, end=None):
         all_bps += bps
         all_ids += ids
         all_ages += ages
-        all_het_sites += het_sites
+        all_het_sites += het_indices_out
         thread_starts.append(thread_start)
         mut_starts.append(mut_start)
         thread_start += len(bps)
-        mut_start += len(het_sites)
+        mut_start += len(het_indices_out)
 
     num_stitches = len(all_bps)
     num_mutations = len(all_het_sites)
@@ -282,7 +283,7 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None):
                     arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1])
                 else:
                     arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights)
-            except IndexError:
+            except ValueError:
                 import pdb
                 pdb.set_trace()
 
@@ -525,9 +526,9 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     pruned_size = num_samples_hap
     prune_count = 0
     for b in range(n_batches):
-        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
         b_start = b * BATCH_SIZE
         b_end = min(M, (b+1) * BATCH_SIZE)
+        g_size = b_end - b_start
         alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
         phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
         reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
@@ -546,9 +547,9 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
     logging.info("Fetching heterozygous sites")
     for b in range(n_batches):
-        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
         b_start = b * BATCH_SIZE
         b_end = min(M, (b+1) * BATCH_SIZE)
+        g_size = b_end - b_start
         alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
         phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
         reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
@@ -578,21 +579,25 @@ def split_list(list, n):
 @click.option("--map_gz", required=True)
 @click.option("--demography", required=True)
 @click.option("--mode", required=True, type=click.Choice(['array', 'wgs']))
+@click.option("--query_interval", type=float, default=0.01, help="For the preliminary haplotype matching. Given in cM.")
+@click.option("--match_group_interval", type=float, default=0.5, help="For the preliminary haplotype matching. Given in cM.")
 @click.option("--mutation_rate", required=True, type=float)
 @click.option("--num_threads", type=int, default=1)
 @click.option("--region", help="Of format 123-345, end-exclusive") 
 @click.option("--out")
-def infer(command, pgen, map_gz, demography, mutation_rate, mode, num_threads, region, out):
+def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, out):
     assert command == "infer"
     start_time = time.time()
     logging.info(f"Starting Threads-infer with the following parameters:")
-    logging.info(f"  pgen:          {pgen}")
-    logging.info(f"  map_gz:        {map_gz}")
-    logging.info(f"  demography:    {demography}")
-    logging.info(f"  mutation_rate: {mutation_rate}")
-    logging.info(f"  num_threads:   {num_threads}")
-    logging.info(f"  region:        {region}")
-    logging.info(f"  out:           {out}")
+    logging.info(f"  pgen:                 {pgen}")
+    logging.info(f"  map_gz:               {map_gz}")
+    logging.info(f"  region:               {region}")
+    logging.info(f"  demography:           {demography}")
+    logging.info(f"  mutation_rate:        {mutation_rate}")
+    logging.info(f"  query_interval:       {query_interval}")
+    logging.info(f"  match_group_interval: {match_group_interval}")
+    logging.info(f"  num_threads:          {num_threads}")
+    logging.info(f"  out:                  {out}")
 
     genetic_positions, physical_positions = read_map_gz(map_gz)
 
@@ -611,11 +616,13 @@ def infer(command, pgen, map_gz, demography, mutation_rate, mode, num_threads, r
     n_batches = int(np.ceil(M / BATCH_SIZE))
 
     logging.info("Finding singletons")
+    alleles_out = None
+    phased_out = None
     ac_mask = np.zeros(genetic_positions.shape, dtype=bool)
     for b in range(n_batches):
-        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
         b_start = b * BATCH_SIZE
         b_end = min(M, (b+1) * BATCH_SIZE)
+        g_size = b_end - b_start
         alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
         phased_out = np.empty((g_size, num_samples), dtype=np.uint8)
         reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
@@ -633,32 +640,46 @@ def infer(command, pgen, map_gz, demography, mutation_rate, mode, num_threads, r
     #   - might want to consider propagating top k (e.g. 4?) states from prev group instead of just the best
     #   - unclear how much query interval/group size should change with N
     #   - I suspect: raise min_matches to 5 and L to 8
-    matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], 0.01, 0.5, 4)  # <- smaller numbers are faster
+    MIN_MATCHES = 4  # maybe even higher for larger N? or should it scale up?
+    L = 4
+    matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], query_interval, match_group_interval, L, MIN_MATCHES)  # <- smaller numbers are faster
 
     for b in range(n_batches):
-        g_size = BATCH_SIZE if b < n_batches - 1 else M % BATCH_SIZE
         b_start = b * BATCH_SIZE
         b_end = min(M, (b+1) * BATCH_SIZE)
+        g_size = b_end - b_start
         batch_mask = ac_mask[b_start:b_end]
         alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
         phased_out = np.empty((g_size, num_samples), dtype=np.uint8)
         reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
         for g in alleles_out[batch_mask]:
             matcher.process_site(g)
-
-    MIN_MATCHES = 4  # maybe even higher for larger N? or should it scale up?
-    matcher.set_matches(MIN_MATCHES)
+    matcher.propagate_adjacent_matches()
 
     ### From here we want to parallelise
     actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)
     logging.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
     if actual_num_threads > 1:
-        sample_batches = split_list(list(range(2 * num_samples)), num_threads)
+        sample_batches = split_list(list(range(2 * num_samples)), actual_num_threads)
         s_match_groups = [matcher.serializable_matches(sample_batch) for sample_batch in sample_batches]
         match_cm_positions = matcher.cm_positions()
+        del matcher
+        del alleles_out
+        del phased_out
+        gc.collect()
         partial_viterbi_remote = ray.remote(partial_viterbi)
         ray.init()
-        results = ray.get([partial_viterbi_remote.remote(pgen, mode, 2 * num_samples, physical_positions, genetic_positions, demography, mutation_rate, sample_batch, s_match_group, match_cm_positions) for sample_batch, s_match_group in zip(sample_batches, s_match_groups)])
+        results = ray.get([partial_viterbi_remote.remote(
+            pgen, 
+            mode, 
+            2 * num_samples, 
+            physical_positions, 
+            genetic_positions, 
+            demography, 
+            mutation_rate, 
+            sample_batch, 
+            s_match_group, 
+            match_cm_positions) for sample_batch, s_match_group in zip(sample_batches, s_match_groups)])
         ray.shutdown()
         paths = []
         for sample_batch, result_set in zip(sample_batches, results):
@@ -668,7 +689,19 @@ def infer(command, pgen, map_gz, demography, mutation_rate, mode, num_threads, r
         sample_batch = list(range(2 * num_samples))
         s_match_group = matcher.serializable_matches(sample_batch)
         match_cm_positions = matcher.cm_positions()
-        results = partial_viterbi(pgen, mode, 2 * num_samples, physical_positions, genetic_positions, demography, mutation_rate, sample_batch, s_match_group, match_cm_positions)
+        del matcher
+        gc.collect()
+        results = partial_viterbi(
+            pgen, 
+            mode, 
+            2 * num_samples, 
+            physical_positions, 
+            genetic_positions, 
+            demography, 
+            mutation_rate, 
+            sample_batch, 
+            s_match_group, 
+            match_cm_positions)
 
         paths = []
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results): # type: ignore
