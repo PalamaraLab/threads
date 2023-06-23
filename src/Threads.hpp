@@ -104,6 +104,7 @@ public:
   std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
   remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int>>& target_IDs,
                  std::vector<double>& segment_ages, std::vector<int>& het_sites);
+  std::vector<std::tuple<int, std::vector<int>>> threads_ls(const std::vector<bool>& genotype);
 
   std::vector<ImputationSegment> impute(std::vector<bool>& genotype, int L);
   std::array<std::vector<int>, 2> phase(std::vector<int>);

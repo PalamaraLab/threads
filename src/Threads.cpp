@@ -1624,6 +1624,19 @@ Threads::thread(const std::vector<bool>& genotype) {
   return thread(num_samples, genotype);
 }
 
+std::vector<std::tuple<int, std::vector<int>>>
+Threads::threads_ls(const std::vector<bool>& genotype) {
+  std::vector<std::tuple<int, std::vector<int>>> best_path;
+  if (num_samples > 0) {
+    TracebackState* tb;
+    Node* match;
+    std::tie(tb, match) = fastLS(genotype);
+    best_path = traceback(tb, match);
+    traceback_states.clear();
+  }
+  return best_path;
+}
+
 // todo: L is no longer required here
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
 Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {

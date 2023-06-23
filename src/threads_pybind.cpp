@@ -79,19 +79,20 @@ PYBIND11_MODULE(threads_python_bindings, m) {
   py::class_<MatchGroup>(m, "MatchGroup")
       .def_readonly("match_candidates", &MatchGroup::match_candidates)
       .def_readonly("match_candidates_counts", &MatchGroup::match_candidates_counts)
+      .def_readonly("top_four_maps", &MatchGroup::top_four_maps)
       .def_readonly("cm_position", &MatchGroup::cm_position);
 
   py::class_<Matcher>(m, "Matcher")
-      .def(py::init<int, std::vector<double>, double, double, int>(), "Initialize",
+      .def(py::init<int, std::vector<double>, double, double, int, int>(), "Initialize",
            py::arg("num_samples"), py::arg("genetic_positions"), py::arg("query_interval_size"),
-           py::arg("match_group_interval_size"), py::arg("L") = 8)
+           py::arg("match_group_interval_size"), py::arg("L") = 4, py::arg("min_matches") = 4)
       .def_readonly("query_sites", &Matcher::query_sites)
       .def_readonly("genetic_positions", &Matcher::genetic_positions)
       .def_readonly("query_interval_size", &Matcher::query_interval_size)
       .def_readonly("num_samples", &Matcher::num_samples)
       .def_readonly("num_sites", &Matcher::num_sites)
       .def("process_site", &Matcher::process_site)
-      .def("set_matches", &Matcher::set_matches)
+      .def("propagate_adjacent_matches", &Matcher::propagate_adjacent_matches)
       .def("get_matches", &Matcher::get_matches)
       .def("serializable_matches", &Matcher::serializable_matches)
       .def("cm_positions", &Matcher::cm_positions)
@@ -157,6 +158,7 @@ PYBIND11_MODULE(threads_python_bindings, m) {
            py::arg("ID"), py::arg("genotypes"))
       .def("remove", &Threads::remove, py::arg("ID"))
       .def("print_sorting", &Threads::print_sorting)
+      .def("threads_ls", &Threads::threads_ls)
       .def("thread", py::overload_cast<const std::vector<bool>&>(&Threads::thread),
            py::arg("genotypes"))
       .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&Threads::thread),

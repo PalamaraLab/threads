@@ -32,9 +32,8 @@ MatchGroup::MatchGroup(const std::vector<int>& target_ids,
   }
 }
 
-void MatchGroup::set_candidates(int min_matches) {
+void MatchGroup::filter_matches(int min_matches) {
   // First set the candidates for this group
-  // match_candidates.reserve(num_samples);
   for (int i = 0; i < num_samples; i++) {
     match_candidates[i] = {};
     if (i < 100) {
@@ -43,7 +42,6 @@ void MatchGroup::set_candidates(int min_matches) {
       }
     }
     else if (i < 1000) {
-      // int imin_matches = i < 500 ? 1 : min_matches;
       for (auto counts : match_candidates_counts.at(i)) {
         if (counts.second >= std::min(2, min_matches)) {
           match_candidates.at(i).insert(counts.first);
@@ -51,7 +49,6 @@ void MatchGroup::set_candidates(int min_matches) {
       }
     }
     else {
-      // int imin_matches = i < 500 ? 1 : min_matches;
       for (auto counts : match_candidates_counts.at(i)) {
         if (counts.second >= min_matches) {
           match_candidates.at(i).insert(counts.first);
@@ -71,11 +68,12 @@ void MatchGroup::set_candidates(int min_matches) {
       }
     }
   }
+
   // Then determine top 4 candidates for neighbouring groups
-  // std::vector<std::pair<int, int>> top_four_map(4);
   top_four_maps.reserve(num_samples);
   for (int i = 0; i < num_samples; i++) {
-    top_four_maps.push_back({});
+    top_four_maps.emplace_back(std::min(4, (int) match_candidates.at(i).size()));
+    // top_four_maps.resize();
     std::partial_sort_copy(match_candidates_counts.at(i).begin(),
                            match_candidates_counts.at(i).end(), top_four_maps.at(i).begin(),
                            top_four_maps.at(i).end(),
@@ -86,18 +84,19 @@ void MatchGroup::set_candidates(int min_matches) {
 }
 
 void MatchGroup::insert_tops_from(MatchGroup& other) {
-  for (int i = 0; i < num_samples; i++) {
+  for (int i = 1; i < num_samples; i++) {
+    // cout << "tops " << i << endl;
     for (auto p : other.top_four_maps.at(i)) {
-      match_candidates.at(i).insert(p.second);
+      match_candidates.at(i).insert(p.first);
     }
   }
 }
 
 Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _query_interval_size,
-                 double _match_group_interval_size, int _L)
+                 double _match_group_interval_size, int _L, int _min_matches)
     : num_samples(_n), genetic_positions(_genetic_positions),
       query_interval_size(_query_interval_size),
-      match_group_interval_size(_match_group_interval_size), L(_L) {
+      match_group_interval_size(_match_group_interval_size), L(_L), min_matches(_min_matches) {
   if (genetic_positions.size() <= 2) {
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(genetic_positions.size()));
@@ -166,14 +165,7 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
     sorting.push_back(i);
     next_sorting.push_back(i);
     permutation.push_back(i);
-
-    // match_candidates.push_back(std::vector<std::unordered_set<int>>(match_group_sites.size()));
   }
-  // neighborhood_size = 8;
-  // cached_genotypes.reserve(cache_size);
-  // for (int l = 0; l < cache_size; l++) {
-  //   cached_genotypes.push_back(std::vector<int>(num_samples, 0));
-  // }
 }
 
 void Matcher::process_site(const std::vector<int>& genotype) {
@@ -209,30 +201,21 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   }
   sorting = next_sorting;
 
-  // do argsort(next_sorting)
-  for (int i = 0; i < num_samples; i++) {
-    permutation[sorting.at(i)] = i;
-  }
 
   // do the threading-neighbour queries
   if (match_group_idx < match_group_sites.size() - 1 &&
       sites_processed >= match_group_sites.at(match_group_idx + 1)) {
     // this check is awkward, rewrite
     match_group_idx++;
-    // cout << "match group " << match_group_idx << " at " << sites_processed << endl;
+    match_groups.at(match_group_idx - 1).filter_matches(min_matches);
   }
-
-  // // cache a few sites in anticipation of neighbour querying
-  // if (next_query_site_idx < query_sites.size() && sites_processed >
-  // query_sites.at(next_query_site_idx) - cache_size) {
-  //   int cache_idx = sites_processed + cache_size - query_sites.at(next_query_site_idx);
-  //   for (int i = 0; i < num_samples; i++) {
-  //     cached_genotypes.at(cache_idx).at(i) = genotype.at(i);
-  //   }
-  // }
 
   if (next_query_site_idx < query_sites.size() &&
       sites_processed == query_sites.at(next_query_site_idx)) {
+    // do argsort(next_sorting)
+    for (int i = 0; i < num_samples; i++) {
+      permutation[sorting.at(i)] = i;
+    }
     next_query_site_idx++;
 
     std::set<int> threaded = {permutation.at(0)};
@@ -245,34 +228,17 @@ void Matcher::process_site(const std::vector<int>& genotype) {
       auto iter_up = iter.first;
       auto iter_down = iter.first;
       // check if genotypes are identical, just to be sure
-      // bool match_up = true;
-      // bool match_down = true;
-      while (matches.size() < L && (iter_down != threaded.begin() ||
-                                    iter_up != threaded.end())) { //&& (match_down || match_up)) {
-        // bool added = false;
+      while (matches.size() < L && (iter_down != threaded.begin() || iter_up != threaded.end())) {
         if (iter_down != threaded.begin()) {
           iter_down--;
-          // match_down = cached_match(i, sorting.at(*iter_down));
-          // match_down = genotype.at(sorting.at(*iter_down)) == allele;
-          // if (match_down) {
           matches.push_back(sorting.at(*iter_down));
-          // added = true;
-          // }
         }
         if (matches.size() < L && iter_up != threaded.end()) {
           iter_up++;
           if (iter_up != threaded.end()) {
-            // match_up = cached_match(i, sorting.at(*iter_up));
-            // match_up = genotype.at(sorting.at(*iter_up)) == allele;
             matches.push_back(sorting.at(*iter_up));
-            // added = true;
-            // if (match_up) {
-            // }
           }
         }
-        // if (!added) {
-        //   break;
-        // }
       }
 
       for (int m : matches) {
@@ -291,6 +257,11 @@ void Matcher::process_site(const std::vector<int>& genotype) {
         }
       }
     }
+
+    // special case for last query
+    if (next_query_site_idx == query_sites.size()) {
+      match_groups.at(match_group_sites.size() - 1).filter_matches(min_matches);
+    }
   }
   sites_processed++;
 }
@@ -304,10 +275,10 @@ void Matcher::process_site(const std::vector<int>& genotype) {
 //   return true;
 // }
 
-void Matcher::set_matches(int min_matches) {
-  for (MatchGroup& group : match_groups) {
-    group.set_candidates(min_matches);
-  }
+void Matcher::propagate_adjacent_matches() {
+  // for (MatchGroup& group : match_groups) {
+  //   group.set_candidates(min_matches);
+  // }
 
   for (int i = 1; i < match_groups.size(); i++) {
     MatchGroup& group = match_groups.at(i);

@@ -68,20 +68,20 @@ void ViterbiPath::map_positions(std::vector<int>& positions) {
   }
 }
 
-std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>
+std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>
 ViterbiPath::dump_data_in_range(int start, int end) {
   int n_segs = size();
   if (start == -1 && end == -1 || n_segs == 0) {
-    return std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>(
-        bp_starts, sample_ids, heights, het_sites);
+    return std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>(
+        bp_starts, sample_ids, heights);
   }
+  // these are in base-pair units
   int tmp_end = end == -1 ? std::numeric_limits<int>::max() : end;
   int tmp_start = std::max(start, bp_starts.at(0));
 
   std::vector<int> out_starts;
   std::vector<int> out_ids;
   std::vector<double> out_heights;
-  std::vector<int> out_hetsites;
   for (int i = 0; i < n_segs; i++) {
     int seg_start = bp_starts.at(i);
     int seg_end = i < n_segs - 1 ? bp_starts.at(i + 1) : tmp_end;
@@ -95,13 +95,8 @@ ViterbiPath::dump_data_in_range(int start, int end) {
       break;
     }
   }
-  for (int h : het_sites) {
-    if (tmp_start <= h && h < tmp_end) {
-      out_hetsites.push_back(h);
-    }
-  }
-  return std::tuple<std::vector<int>, std::vector<int>, std::vector<double>, std::vector<int>>(
-      out_starts, out_ids, out_heights, out_hetsites);
+  return std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>(
+      out_starts, out_ids, out_heights);
 }
 
 ViterbiState::ViterbiState(int _target_id,
