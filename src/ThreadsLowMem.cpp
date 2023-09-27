@@ -30,17 +30,23 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
 
   // Check maps are strictly increasing
   for (int i = 0; i < num_sites - 1; i++) {
-    if (physical_positions.at(i + 1) <= physical_positions.at(i)) {
-      std::string prompt = "Physical positions must be strictly increasing, found ";
+    if (physical_positions.at(i + 1) < physical_positions.at(i)) {
+      std::string prompt = "Physical positions must be increasing, found ";
       prompt += std::to_string(physical_positions[i + 1]) + " after " +
                 std::to_string(physical_positions[i]);
       throw std::runtime_error(prompt);
     }
-    if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
-      std::string prompt = "Genetic coordinates must be strictly increasing, found ";
+    else if (physical_positions.at(i + 1) == physical_positions.at(i)) {
+      physical_positions.at(i + 1) = physical_positions.at(i) + 1;
+    }
+    if (genetic_positions.at(i + 1) < genetic_positions.at(i)) {
+      std::string prompt = "Genetic coordinates must be increasing, found ";
       prompt += std::to_string(genetic_positions[i + 1]) + " after " +
                 std::to_string(genetic_positions[i]);
       throw std::runtime_error(prompt);
+    }
+    else if (genetic_positions.at(i + 1) == genetic_positions.at(i)) {
+      genetic_positions.at(i + 1) = genetic_positions.at(i) + 0.0000001;
     }
   }
   // repeat last element
@@ -60,7 +66,16 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
   // 0.5 here...???
   // mutation_rate = 1.65e-8;
   std::tie(bp_boundaries, bp_sizes) = Threads::site_sizes(physical_positions);
-  std::tie(cm_boundaries, cm_sizes) = Threads::site_sizes(genetic_positions);
+
+  for (int i = 0; i < genetic_positions.size(); i++) {
+    if (i == genetic_positions.size() - 1) {
+      cm_sizes.push_back(0.0000001); // hack .. for now
+    }
+    else {
+      cm_sizes.push_back(genetic_positions.at(i + 1) - genetic_positions.at(i));
+    }
+  }
+  // std::tie(cm_boundaries, cm_sizes) = Threads::site_sizes(genetic_positions);
 }
 
 // void ThreadsLowMem::initialize_viterbi(std::vector<MatchGroup>& new_match_groups) {
