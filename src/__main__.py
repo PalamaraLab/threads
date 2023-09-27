@@ -104,6 +104,7 @@ def serialize_paths(paths, positions, out, start=None, end=None):
     thread_start = 0
     mut_start = 0
     all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
+
     for i, path in enumerate(paths):
         path.map_positions(positions.astype(int))
         bps, ids, ages = path.dump_data_in_range(region_start, region_end)
@@ -122,7 +123,14 @@ def serialize_paths(paths, positions, out, start=None, end=None):
                     assert bps[0] >= start
                 assert len(np.unique(bps)) == len(bps)
                 assert bps[-1] <= positions[-1]
-            except:
+            except AssertionError:
+                logging.info("funky fragments!")
+                logging.info(f"bps[0] {bps[0]}")
+                logging.info(f"region_start {region_start}")
+                logging.info(f"len(np.unique(bps)) {len(np.unique(bps))}")
+                logging.info(f"len(bps) {len(bps)}")
+                logging.info(f"bps[-1] {bps[-1]}")
+                logging.info(f"positions[-1] {positions[-1]}")
                 import pdb
                 pdb.set_trace()
 
@@ -522,9 +530,12 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     n_batches = int(np.ceil(M / BATCH_SIZE))
 
     logging.info("Starting HMM inference")
-    a_counter = 0
+    a_counter   = 0
     pruned_size = num_samples_hap
+    prune_threshold = 10 * num_samples_hap
     prune_count = 0
+    last_prune  = 0
+    branch_tracker = []
     for b in range(n_batches):
         b_start = b * BATCH_SIZE
         b_end = min(M, (b+1) * BATCH_SIZE)
@@ -533,12 +544,19 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
         phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
         reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
         for g in alleles_out:
+            # more stable: have hard threshold here and if it's being too restrictive, slightly ease it, x20 seems too spiky
             TLM.process_site_viterbi(g)
-            if a_counter % 10 == 0 and TLM.count_branches() > 20 * pruned_size:
-                # logging.info(f"trim at {a_counter}/{M}")
-                TLM.prune()
-                pruned_size = TLM.count_branches()
-                prune_count += 1
+            if a_counter % 10 == 0:
+                n_branches = TLM.count_branches()
+                if n_branches > prune_threshold: #10 * pruned_size:
+                    if a_counter - last_prune <= 30:
+                        prune_threshold *= 2
+                    # logging.info(f"trim at {a_counter}/{M}")
+                    TLM.prune()
+                    pruned_size = TLM.count_branches()
+                    prune_count += 1
+                    last_prune = a_counter
+                # branch_tracker.append(n_branches)
             a_counter += 1
 
     logging.info(f"HMMs done (did {prune_count} pruning steps)")
@@ -559,7 +577,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
     logging.info("Dating segments")
     TLM.date_segments()
-    return TLM.serialize_paths()
+    return branch_tracker, TLM.serialize_paths()
     # return TLM.paths
 
 def split_list(list, n):
@@ -609,6 +627,7 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
 
     num_samples = reader.get_raw_sample_ct()
     num_sites = reader.get_variant_ct()
+    logging.info(f"Will build an ARG on {2 * num_samples} haplotypes using {num_sites} sites")
 
     M = len(physical_positions)
     assert num_sites == M
@@ -659,6 +678,8 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
     ### From here we want to parallelise
     actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)
     logging.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
+    paths = []
+    branch_trackers = []
     if actual_num_threads > 1:
         sample_batches = split_list(list(range(2 * num_samples)), actual_num_threads)
         s_match_groups = [matcher.serializable_matches(sample_batch) for sample_batch in sample_batches]
@@ -681,8 +702,9 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
             s_match_group, 
             match_cm_positions) for sample_batch, s_match_group in zip(sample_batches, s_match_groups)])
         ray.shutdown()
-        paths = []
-        for sample_batch, result_set in zip(sample_batches, results):
+        for sample_batch, result_tuple in zip(sample_batches, results):
+            branch_tracker, result_set = result_tuple
+            branch_trackers.append(branch_tracker)
             for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_set):
                 paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
     else:
@@ -691,7 +713,7 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
         match_cm_positions = matcher.cm_positions()
         del matcher
         gc.collect()
-        results = partial_viterbi(
+        branch_tracker, results = partial_viterbi(
             pgen, 
             mode, 
             2 * num_samples, 
@@ -703,10 +725,11 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
             s_match_group, 
             match_cm_positions)
 
-        paths = []
+        branch_trackers.append(branch_tracker)
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results): # type: ignore
             paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
-    logging.info(f"Writing to {out}")
+    logging.info(f"Writing to {out}, {out}.branches.gz")
+    # np.savetxt(f"{out}.branches.gz", np.array(branch_trackers))
     serialize_paths(paths, physical_positions.astype(int), out, start=out_start, end=out_end)
     logging.info(f"Done in (s): {time.time() - start_time}")
     goodbye()

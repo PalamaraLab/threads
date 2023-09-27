@@ -104,10 +104,12 @@ private:
 
   std::unordered_map<int, int> pos_idx_map;
   Eigen::VectorXi reference_genome;
+  std::vector<bool> reference_genome_vec;
   std::vector<std::vector<int>> bp_starts;
   std::vector<std::vector<int>> target_IDs;
   std::vector<std::vector<int>> het_sites;
   std::vector<int> positions;
+  std::vector<std::vector<bool>> genotypes;
 
   Eigen::MatrixXi genotype_cache;
   std::unordered_map<int, int> cached_genotypes_map;
@@ -121,6 +123,8 @@ public:
        std::vector<std::vector<int>> _target_IDs, std::vector<std::vector<int>> _het_sites);
 
   Eigen::MatrixXi& query(const int start_pos, const int end_pos, const std::vector<int>& samples);
+  std::vector<std::vector<bool>>& query2(const int start_pos, const int end_pos,
+                                         const std::vector<int>& samples);
 
   void clear_cache();
 };

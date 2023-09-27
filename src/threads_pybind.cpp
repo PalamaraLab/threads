@@ -179,5 +179,6 @@ PYBIND11_MODULE(threads_python_bindings, m) {
                     std::vector<std::vector<int>>>(),
            "Initialize", py::arg("positions"), py::arg("bp_starts"), py::arg("target_ids"),
            py::arg("het_sites"))
-      .def("query", &TGEN::query, py::return_value_policy::reference_internal);
+      .def("query", &TGEN::query, py::return_value_policy::take_ownership)
+      .def("query2", &TGEN::query2, py::return_value_policy::take_ownership);
 }
