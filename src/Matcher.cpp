@@ -34,6 +34,7 @@ MatchGroup::MatchGroup(const std::vector<int>& target_ids,
 
 void MatchGroup::filter_matches(int min_matches) {
   // First set the candidates for this group
+  // Changes on 28/09/23: added the "<10000"-clause
   for (int i = 0; i < num_samples; i++) {
     match_candidates[i] = {};
     if (i < 100) {
@@ -48,9 +49,17 @@ void MatchGroup::filter_matches(int min_matches) {
         }
       }
     }
-    else {
+    else if (i < 10000) {
       for (auto counts : match_candidates_counts.at(i)) {
         if (counts.second >= min_matches) {
+          match_candidates.at(i).insert(counts.first);
+        }
+      }
+    }
+    else {
+      // Don't want too much stuff for very big studies
+      for (auto counts : match_candidates_counts.at(i)) {
+        if (counts.second >= 2 * min_matches) {
           match_candidates.at(i).insert(counts.first);
         }
       }
@@ -80,6 +89,7 @@ void MatchGroup::filter_matches(int min_matches) {
                            [](std::pair<int, int> const& l, std::pair<int, int> const& r) {
                              return l.second > r.second;
                            });
+    match_candidates_counts.at(i).clear();
   }
 }
 
@@ -90,6 +100,12 @@ void MatchGroup::insert_tops_from(MatchGroup& other) {
       match_candidates.at(i).insert(p.first);
     }
   }
+}
+
+void MatchGroup::clear() {
+  match_candidates.clear();
+  match_candidates_counts.clear();
+  top_four_maps.clear();
 }
 
 Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _query_interval_size,
@@ -150,7 +166,7 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
     throw std::runtime_error(prompt);
   }
   match_group_idx = 0;
-  cout << "found " << query_sites.size() << " query sites and " << match_group_sites.size()
+  cout << "Will use " << query_sites.size() << " query sites and " << match_group_sites.size()
        << " match_group_sites" << endl;
 
   match_groups.reserve(match_group_sites.size());
@@ -295,16 +311,57 @@ std::vector<MatchGroup> Matcher::get_matches() {
 // This returns a list (groups) of lists (targets) of sets (matches)
 std::vector<std::vector<std::unordered_set<int>>>
 Matcher::serializable_matches(std::vector<int>& target_ids) {
-  std::vector<std::vector<std::unordered_set<int>>> serialized_matches;
-  serialized_matches.reserve(match_groups.size());
+  std::vector<std::vector<std::unordered_set<int>>> serialized_matches(match_groups.size());
+  // serialized_matches.reserve(match_groups.size());
+  int group_counter = 0;
   for (MatchGroup& match_group : match_groups) {
-    std::vector<std::unordered_set<int>> current_group_matches;
+    std::vector<std::unordered_set<int>> current_group_matches(target_ids.size());
+    // current_group_matches.reserve(target_ids.size());
+    int match_counter = 0;
     for (int target_id : target_ids) {
-      current_group_matches.push_back(match_group.match_candidates.at(target_id));
+      current_group_matches[match_counter] = std::move(match_group.match_candidates.at(target_id));
+      match_group.match_candidates.at(target_id).clear();
+      // current_group_matches.push_back(match_group.match_candidates.at(target_id));
+      match_counter++;
     }
-    serialized_matches.push_back(current_group_matches);
+    serialized_matches[group_counter] = std::move(current_group_matches);
+    // serialized_matches.push_back(current_group_matches);
+    group_counter++;
+    // match_group.clear();
   }
   return serialized_matches;
+}
+
+// std::pair<std::vector<std::vector<std::unordered_set<int>>>,
+// std::vector<std::vector<std::unordered_set<int>>>> Matcher::serializable_diffs(std::vector<int>&
+// target_ids) {
+//   std::vector<std::vector<std::unordered_set<int>>> serialized_ins(match_groups.size());
+//   std::vector<std::vector<std::unordered_set<int>>> serialized_outs(match_groups.size());
+
+//   //   std::vector<std::vector<std::unordered_set<int>>> serialized_matches(match_groups.size());
+//   // // serialized_matches.reserve(match_groups.size());
+//   // int group_counter = 0;
+//   // for (MatchGroup& match_group : match_groups) {
+//   //   std::vector<std::unordered_set<int>> current_group_matches(target_ids.size());
+//   //   // current_group_matches.reserve(target_ids.size());
+//   //   int match_counter = 0;
+//   //   for (int target_id : target_ids) {
+//   //     current_group_matches[match_counter] =
+//   std::move(match_group.match_candidates.at(target_id));
+//   //     match_group.match_candidates.at(target_id).clear();
+//   //     // current_group_matches.push_back(match_group.match_candidates.at(target_id));
+//   //     match_counter++;
+//   //   }
+//   //   serialized_matches[group_counter] = std::move(current_group_matches);
+//   //   // serialized_matches.push_back(current_group_matches);
+//   //   group_counter++;
+//   //   // match_group.clear();
+//   // }
+//   return serialized_matches;
+// }
+
+void Matcher::clear() {
+  match_groups.clear();
 }
 
 std::vector<double> Matcher::cm_positions() {

@@ -7,7 +7,6 @@ class MatchGroup {
 public:
   int num_samples;
   std::unordered_map<int, std::unordered_set<int>> match_candidates;
-  // only for testing purposes
   std::vector<std::unordered_map<int, int>> match_candidates_counts;
   std::vector<std::vector<std::pair<int, int>>> top_four_maps;
   double cm_position;
@@ -17,6 +16,7 @@ public:
   void filter_matches(int min_matches);
   // void set_candidates(int min_matches);
   void insert_tops_from(MatchGroup& other);
+  void clear();
 };
 
 class Matcher {
@@ -52,6 +52,7 @@ public:
   // bool cached_match(int i, int j);
   // void set_matches(int min_matches = 0);
   void propagate_adjacent_matches();
+  void clear();
   std::vector<MatchGroup> get_matches();
   std::vector<std::vector<std::unordered_set<int>>>
   serializable_matches(std::vector<int>& target_ids);

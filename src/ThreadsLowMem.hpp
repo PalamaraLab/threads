@@ -81,6 +81,7 @@ public:
 
   int count_branches();
 
+  // Make pickle-able path output
   std::tuple<std::vector<std::vector<int>>, std::vector<std::vector<int>>,
              std::vector<std::vector<double>>, std::vector<std::vector<int>>>
   serialize_paths();

@@ -1,5 +1,6 @@
 #include "ThreadsLowMem.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <math.h>
 #include <string>
@@ -75,6 +76,14 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
       cm_sizes.push_back(genetic_positions.at(i + 1) - genetic_positions.at(i));
     }
   }
+
+  int min_target_id = *(std::min_element(target_ids.begin(), target_ids.end()));
+  if (min_target_id < n_hmm_samples) {
+    psmc = HMM(demography, bp_sizes, cm_sizes, mutation_rate, 64);
+  }
+  else {
+    psmc = HMM();
+  }
   // std::tie(cm_boundaries, cm_sizes) = Threads::site_sizes(genetic_positions);
 }
 
@@ -112,7 +121,8 @@ void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
           match_groups.at(match_group_idx + 1).cm_position) {
     match_group_idx++;
     group_change = true;
-    cout << "switching match group at cM " << match_groups.at(match_group_idx).cm_position << endl;
+    // cout << "switching match group at cM " << match_groups.at(match_group_idx).cm_position <<
+    // endl;
   }
   double k = 2. * 0.01 * cm_sizes.at(hmm_sites_processed);
   double l = 2. * mutation_rate * bp_sizes.at(hmm_sites_processed);
@@ -204,7 +214,9 @@ void ThreadsLowMem::date_segments() {
       throw std::runtime_error(prompt);
     }
   }
-  HMM psmc(demography, bp_sizes, cm_sizes, mutation_rate, 64);
+
+  // I get segfault on this?
+
   // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {

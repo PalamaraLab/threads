@@ -7,9 +7,12 @@ import tszip
 import click
 import logging
 import pgenlib
+import importlib
+from memory_profiler import profile
 import subprocess
 import arg_needle_lib
 
+os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
 import numpy as np
 import xarray as xr
@@ -507,79 +510,6 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None):
 #     logging.info(f"Done, in (s) {end_time - start_time}")
 #     goodbye()
 
-# @ray.remote
-def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_positions, demography, mu, sample_batch, s_match_group, match_cm_positions):
-    reader = pgenlib.PgenReader(pgen.encode())
-    ne_times, ne = parse_demography(demography)
-
-    sparse = None
-    if mode == "array":
-        sparse = True
-    elif mode == "wgs":
-        sparse = False
-    else:
-        raise RuntimeError
-    
-    TLM = ThreadsLowMem(sample_batch, physical_positions, genetic_positions, ne, ne_times, mu, sparse)
-    logging.info("Initializing HMMs")
-
-    TLM.initialize_viterbi(s_match_group, match_cm_positions)
-    # TLM.initialize_viterbi(match_subset)
-    M = reader.get_variant_ct()
-    BATCH_SIZE = int(2e7 // num_samples_hap)
-    n_batches = int(np.ceil(M / BATCH_SIZE))
-
-    logging.info("Starting HMM inference")
-    a_counter   = 0
-    pruned_size = num_samples_hap
-    prune_threshold = 10 * num_samples_hap
-    prune_count = 0
-    last_prune  = 0
-    branch_tracker = []
-    for b in range(n_batches):
-        b_start = b * BATCH_SIZE
-        b_end = min(M, (b+1) * BATCH_SIZE)
-        g_size = b_end - b_start
-        alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
-        phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
-        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
-        for g in alleles_out:
-            # more stable: have hard threshold here and if it's being too restrictive, slightly ease it, x20 seems too spiky
-            TLM.process_site_viterbi(g)
-            if a_counter % 10 == 0:
-                n_branches = TLM.count_branches()
-                if n_branches > prune_threshold: #10 * pruned_size:
-                    if a_counter - last_prune <= 30:
-                        prune_threshold *= 2
-                    # logging.info(f"trim at {a_counter}/{M}")
-                    TLM.prune()
-                    pruned_size = TLM.count_branches()
-                    prune_count += 1
-                    last_prune = a_counter
-                # branch_tracker.append(n_branches)
-            a_counter += 1
-
-    logging.info(f"HMMs done (did {prune_count} pruning steps)")
-    logging.info("Starting traceback")
-    TLM.traceback()
-
-    logging.info("Fetching heterozygous sites")
-    for b in range(n_batches):
-        b_start = b * BATCH_SIZE
-        b_end = min(M, (b+1) * BATCH_SIZE)
-        g_size = b_end - b_start
-        alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
-        phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
-        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
-        for g in alleles_out:
-            TLM.process_site_hets(g)
-    # gc.collect()
-
-    logging.info("Dating segments")
-    TLM.date_segments()
-    return branch_tracker, TLM.serialize_paths()
-    # return TLM.paths
-
 def split_list(list, n):
     """Yield n number of sequential chunks from l."""
     sublists = []
@@ -590,7 +520,117 @@ def split_list(list, n):
     return sublists
 
 
+# @ray.remote
 # @profile
+def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_positions, demography, mu, sample_batch, s_match_group, match_cm_positions, max_sample_batch_size, num_threads, thread_id):
+    start_time = time.time()
+    # Force logging to go straight to stdout, instead of into ray tmp files
+    logging.shutdown()
+    importlib.reload(logging)
+    pid = os.getpid()
+    logging.basicConfig(format=f"%(asctime)s %(levelname)-8s PID {pid} %(message)s", 
+                        level=logging.INFO,
+                        datefmt='%Y-%m-%d %H:%M:%S')
+    local_logger = logging.getLogger(__name__)
+
+    reader = pgenlib.PgenReader(pgen.encode())
+    ne_times, ne = parse_demography(demography)
+
+    sparse = None
+    if mode == "array":
+        sparse = True
+    elif mode == "wgs":
+        sparse = False
+    else:
+        raise RuntimeError
+
+    num_samples = len(sample_batch)
+    sample_indices = list(range(num_samples))
+    num_subsets = int(np.ceil(num_samples // max_sample_batch_size))
+    sample_batch_subsets = split_list(sample_batch, num_subsets)
+    sample_index_subsets = split_list(sample_indices, num_subsets)
+    # local_logger.info(f"Thread {thread_id}: Inferring threading instructions in {num_subsets} batches")
+
+    seg_starts = []
+    match_ids  = []
+    heights    = []
+    hetsites   = []
+
+    for batch_index, (sample_batch_subset, sample_index_subset) in enumerate(zip(sample_batch_subsets, sample_index_subsets)):
+        local_logger.info(f"Thread {thread_id}: HMM batch {batch_index + 1}/{num_subsets}...")
+        TLM = ThreadsLowMem(sample_batch_subset, physical_positions, genetic_positions, ne, ne_times, mu, sparse)
+        # logging.info("Initializing HMMs")
+
+        # THIS CREATES BIG COPIES
+        # s_match_group_subset = [[s[k] for k in sample_index_subset] for s in s_match_group]
+        TLM.initialize_viterbi([[s[k] for k in sample_index_subset] for s in s_match_group], match_cm_positions)
+        # TLM.initialize_viterbi(match_subset, match_cm_positions)
+        M = reader.get_variant_ct()
+        BATCH_SIZE = int(4e7 // num_samples_hap)# * num_threads)
+        n_batches = int(np.ceil(M / BATCH_SIZE))
+
+        # logging.info("Starting HMM inference")
+        a_counter   = 0
+        prune_threshold = 10 * num_samples_hap
+        prune_count = 0
+        last_prune  = 0
+        for b in range(n_batches):
+            b_start = b * BATCH_SIZE
+            b_end = min(M, (b+1) * BATCH_SIZE)
+            g_size = b_end - b_start
+            alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
+            phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
+            reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
+            for g in alleles_out:
+                # more stable: have hard threshold here and if it's being too restrictive, slightly ease it, x20 seems too spiky
+                TLM.process_site_viterbi(g)
+                if a_counter % 10 == 0:
+                    n_branches = TLM.count_branches()
+                    if n_branches > prune_threshold: #10 * pruned_size:
+                        if a_counter - last_prune <= 30:
+                            prune_threshold *= 2
+                        # logging.info(f"trim at {a_counter}/{M}")
+                        TLM.prune()
+                        prune_count += 1
+                        last_prune = a_counter
+                    # branch_tracker.append(n_branches)
+                a_counter += 1
+
+        # local_logger.info(f"Thread {thread_id}: HMMs done (did {prune_count} pruning steps)")
+        # local_logger.info(f"Thread {thread_id}: Starting traceback")
+        TLM.traceback()
+
+        # local_logger.info(f"Thread {thread_id}: Fetching heterozygous sites")
+        for b in range(n_batches):
+            b_start = b * BATCH_SIZE
+            b_end = min(M, (b+1) * BATCH_SIZE)
+            g_size = b_end - b_start
+            alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
+            phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
+            reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
+            for g in alleles_out:
+                TLM.process_site_hets(g)
+        # gc.collect()
+
+        # local_logger.info(f"Thread {thread_id}: Dating segments")
+        TLM.date_segments()
+        seg_starts_sub, match_ids_sub, heights_sub, hetsites_sub = TLM.serialize_paths()
+        seg_starts += seg_starts_sub
+        match_ids += match_ids_sub
+        heights += heights_sub
+        hetsites += hetsites_sub
+    
+    end_time = time.time()
+    local_logger.info(f"Thread {thread_id}: HMMs done in (s) {end_time - start_time:.1f}")
+    return seg_starts, match_ids, heights, hetsites
+
+    # for sample_batch, result_tuple in zip(sample_batches, results):
+    #     for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_tuple):
+    #         paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
+    # return TLM.serialize_paths()
+    # return TLM.paths
+
+
 @click.command()
 @click.argument("command", type=click.Choice(["files", "infer", "convert", "impute"]))
 @click.option("--pgen", required=True)
@@ -602,20 +642,23 @@ def split_list(list, n):
 @click.option("--mutation_rate", required=True, type=float)
 @click.option("--num_threads", type=int, default=1)
 @click.option("--region", help="Of format 123-345, end-exclusive") 
+@click.option("--max_sample_batch_size", help="Of format 123-345, end-exclusive", default=None, type=int) 
 @click.option("--out")
-def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, out):
+@profile
+def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     assert command == "infer"
     start_time = time.time()
     logging.info(f"Starting Threads-infer with the following parameters:")
-    logging.info(f"  pgen:                 {pgen}")
-    logging.info(f"  map_gz:               {map_gz}")
-    logging.info(f"  region:               {region}")
-    logging.info(f"  demography:           {demography}")
-    logging.info(f"  mutation_rate:        {mutation_rate}")
-    logging.info(f"  query_interval:       {query_interval}")
-    logging.info(f"  match_group_interval: {match_group_interval}")
-    logging.info(f"  num_threads:          {num_threads}")
-    logging.info(f"  out:                  {out}")
+    logging.info(f"  pgen:                  {pgen}")
+    logging.info(f"  map_gz:                {map_gz}")
+    logging.info(f"  region:                {region}")
+    logging.info(f"  demography:            {demography}")
+    logging.info(f"  mutation_rate:         {mutation_rate}")
+    logging.info(f"  query_interval:        {query_interval}")
+    logging.info(f"  match_group_interval:  {match_group_interval}")
+    logging.info(f"  num_threads:           {num_threads}")
+    logging.info(f"  max_sample_batch_size: {max_sample_batch_size}")
+    logging.info(f"  out:                   {out}")
 
     genetic_positions, physical_positions = read_map_gz(map_gz)
 
@@ -628,6 +671,8 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
     num_samples = reader.get_raw_sample_ct()
     num_sites = reader.get_variant_ct()
     logging.info(f"Will build an ARG on {2 * num_samples} haplotypes using {num_sites} sites")
+    if max_sample_batch_size is None:
+        max_sample_batch_size = 2 * num_samples
 
     M = len(physical_positions)
     assert num_sites == M
@@ -655,7 +700,7 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
     #   - neighbourhood size (L)
     #   - min_matches
     # NB:
-    #   - very important to keep min_matches low for big sample sizes, can be 2 up to 1,000 (?) but then > 3
+    #   - very important to keep min_matches low for big (small?) sample sizes, can be 2 up to 1,000 (?) but then > 3
     #   - might want to consider propagating top k (e.g. 4?) states from prev group instead of just the best
     #   - unclear how much query interval/group size should change with N
     #   - I suspect: raise min_matches to 5 and L to 8
@@ -679,12 +724,14 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
     actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)
     logging.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
     paths = []
-    branch_trackers = []
     if actual_num_threads > 1:
         sample_batches = split_list(list(range(2 * num_samples)), actual_num_threads)
-        s_match_groups = [matcher.serializable_matches(sample_batch) for sample_batch in sample_batches]
         match_cm_positions = matcher.cm_positions()
-        del matcher
+
+        # THIS CREATES VERY BIG COPIES
+        # s_match_groups = [matcher.serializable_matches(sample_batch) for sample_batch in sample_batches]
+        # matcher.clear()
+        # del matcher
         del alleles_out
         del phased_out
         gc.collect()
@@ -699,21 +746,25 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
             demography, 
             mutation_rate, 
             sample_batch, 
-            s_match_group, 
-            match_cm_positions) for sample_batch, s_match_group in zip(sample_batches, s_match_groups)])
+            matcher.serializable_matches(sample_batch),  # this might also create very big copies, maybe not good
+            match_cm_positions,
+            max_sample_batch_size,
+            actual_num_threads,
+            thread_id) for thread_id, sample_batch in enumerate(sample_batches)])
+            # thread_id) for thread_id, (sample_batch, s_match_group) in enumerate(zip(sample_batches, s_match_groups))])
         ray.shutdown()
         for sample_batch, result_tuple in zip(sample_batches, results):
-            branch_tracker, result_set = result_tuple
-            branch_trackers.append(branch_tracker)
-            for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_set):
+            for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_tuple):
                 paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
     else:
         sample_batch = list(range(2 * num_samples))
         s_match_group = matcher.serializable_matches(sample_batch)
         match_cm_positions = matcher.cm_positions()
+        matcher.clear()
         del matcher
         gc.collect()
-        branch_tracker, results = partial_viterbi(
+        thread_id = 1
+        results = partial_viterbi(
             pgen, 
             mode, 
             2 * num_samples, 
@@ -723,12 +774,14 @@ def infer(command, pgen, map_gz, demography, mutation_rate, query_interval, matc
             mutation_rate, 
             sample_batch, 
             s_match_group, 
-            match_cm_positions)
+            match_cm_positions,
+            max_sample_batch_size,
+            actual_num_threads,
+            thread_id)
 
-        branch_trackers.append(branch_tracker)
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results): # type: ignore
             paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
-    logging.info(f"Writing to {out}, {out}.branches.gz")
+    logging.info(f"Writing to {out}")
     # np.savetxt(f"{out}.branches.gz", np.array(branch_trackers))
     serialize_paths(paths, physical_positions.astype(int), out, start=out_start, end=out_end)
     logging.info(f"Done in (s): {time.time() - start_time}")
