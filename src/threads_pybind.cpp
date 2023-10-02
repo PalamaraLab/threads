@@ -97,7 +97,8 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def("serializable_matches", &Matcher::serializable_matches)
       .def("cm_positions", &Matcher::cm_positions)
       .def("get_sorting", &Matcher::get_sorting)
-      .def("get_permutation", &Matcher::get_permutation);
+      .def("get_permutation", &Matcher::get_permutation)
+      .def("clear", &Matcher::clear);
 
   py::class_<ImputationMatcher>(m, "ImputationMatcher")
       .def(py::init<int, int, const std::vector<double>&, double, int>(), "Initialize",
