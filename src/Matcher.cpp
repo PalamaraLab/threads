@@ -264,7 +264,6 @@ void Matcher::process_site(const std::vector<int>& genotype) {
           throw std::runtime_error("illegal match candidate " + std::to_string(m) +
                                    ", wth is going on");
         }
-        // match_groups.at(match_group_idx).match_candidates.at(i).insert(m);
         if (!mmmap.count(m)) {
           mmmap[m] = 1;
         }
@@ -282,19 +281,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   sites_processed++;
 }
 
-// bool Matcher::cached_match(int i, int j) {
-//   for (int l = 0; l < cache_size; l++) {
-//     if (cached_genotypes.at(l).at(i) != cached_genotypes.at(l).at(j)) {
-//       return false;
-//     }
-//   }
-//   return true;
-// }
-
 void Matcher::propagate_adjacent_matches() {
-  // for (MatchGroup& group : match_groups) {
-  //   group.set_candidates(min_matches);
-  // }
 
   for (int i = 1; i < match_groups.size(); i++) {
     MatchGroup& group = match_groups.at(i);
@@ -312,53 +299,20 @@ std::vector<MatchGroup> Matcher::get_matches() {
 std::vector<std::vector<std::unordered_set<int>>>
 Matcher::serializable_matches(std::vector<int>& target_ids) {
   std::vector<std::vector<std::unordered_set<int>>> serialized_matches(match_groups.size());
-  // serialized_matches.reserve(match_groups.size());
   int group_counter = 0;
   for (MatchGroup& match_group : match_groups) {
     std::vector<std::unordered_set<int>> current_group_matches(target_ids.size());
-    // current_group_matches.reserve(target_ids.size());
     int match_counter = 0;
     for (int target_id : target_ids) {
       current_group_matches[match_counter] = std::move(match_group.match_candidates.at(target_id));
       match_group.match_candidates.at(target_id).clear();
-      // current_group_matches.push_back(match_group.match_candidates.at(target_id));
       match_counter++;
     }
     serialized_matches[group_counter] = std::move(current_group_matches);
-    // serialized_matches.push_back(current_group_matches);
     group_counter++;
-    // match_group.clear();
   }
   return serialized_matches;
 }
-
-// std::pair<std::vector<std::vector<std::unordered_set<int>>>,
-// std::vector<std::vector<std::unordered_set<int>>>> Matcher::serializable_diffs(std::vector<int>&
-// target_ids) {
-//   std::vector<std::vector<std::unordered_set<int>>> serialized_ins(match_groups.size());
-//   std::vector<std::vector<std::unordered_set<int>>> serialized_outs(match_groups.size());
-
-//   //   std::vector<std::vector<std::unordered_set<int>>> serialized_matches(match_groups.size());
-//   // // serialized_matches.reserve(match_groups.size());
-//   // int group_counter = 0;
-//   // for (MatchGroup& match_group : match_groups) {
-//   //   std::vector<std::unordered_set<int>> current_group_matches(target_ids.size());
-//   //   // current_group_matches.reserve(target_ids.size());
-//   //   int match_counter = 0;
-//   //   for (int target_id : target_ids) {
-//   //     current_group_matches[match_counter] =
-//   std::move(match_group.match_candidates.at(target_id));
-//   //     match_group.match_candidates.at(target_id).clear();
-//   //     // current_group_matches.push_back(match_group.match_candidates.at(target_id));
-//   //     match_counter++;
-//   //   }
-//   //   serialized_matches[group_counter] = std::move(current_group_matches);
-//   //   // serialized_matches.push_back(current_group_matches);
-//   //   group_counter++;
-//   //   // match_group.clear();
-//   // }
-//   return serialized_matches;
-// }
 
 void Matcher::clear() {
   match_groups.clear();

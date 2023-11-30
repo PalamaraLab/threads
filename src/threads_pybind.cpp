@@ -114,7 +114,6 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def("process_site", &ImputationMatcher::process_site)
       .def("get_matches", &ImputationMatcher::get_matches)
       .def("get_sorting", &ImputationMatcher::get_sorting);
-  //   .def("get_permutation", &ImputationMatcher::get_permutation);
 
   py::class_<Threads>(m, "Threads")
       .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int, bool, int,
@@ -151,8 +150,6 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def("mutation_penalties_impute5", &Threads::mutation_penalties_impute5)
       .def("recombination_penalties", &Threads::recombination_penalties)
       .def("recombination_penalties_correct", &Threads::recombination_penalties_correct)
-      // .def("date_segment", &Threads::date_segment, py::arg("num_het_sites"), py::arg("start"),
-      //       py::arg("end"))
       .def("insert", py::overload_cast<const std::vector<bool>&>(&Threads::insert),
            py::arg("genotypes"))
       .def("insert", py::overload_cast<const int, const std::vector<bool>&>(&Threads::insert),
@@ -165,14 +162,6 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&Threads::thread),
            py::arg("new_sample_ID"), py::arg("genotypes"))
       .def("impute", &Threads::impute)
-      .def("phase", &Threads::phase)
-      // .def("thread_with_mutations", py::overload_cast<const
-      // std::vector<bool>&>(&Threads::thread_with_mutations), py::arg("genotypes"))
-      // .def("thread_with_mutations", py::overload_cast<const int, const
-      // std::vector<bool>&>(&Threads::thread_with_mutations), py::arg("new_sample_ID"),
-      // py::arg("genotypes")) .def("thread_from_file", &Threads::thread_from_file,
-      // py::arg("hack_gz"), py::arg("n_cycle")=0)
-      //  .def("fastLS", &Threads::fastLS)
       .def("diploid_ls", &Threads::diploid_ls, py::arg("genotypes"));
 
   py::class_<TGEN>(m, "TGEN")

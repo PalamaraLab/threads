@@ -107,7 +107,6 @@ public:
   std::vector<std::tuple<int, std::vector<int>>> threads_ls(const std::vector<bool>& genotype);
 
   std::vector<ImputationSegment> impute(std::vector<bool>& genotype, int L);
-  std::array<std::vector<int>, 2> phase(std::vector<int>);
   std::pair<TracebackState*, Node*> fastLS(const std::vector<bool>& genotype,
                                            bool imputation = false);
   std::vector<std::tuple<int, std::vector<int>>> traceback(TracebackState* tb, Node* match,
@@ -117,7 +116,6 @@ public:
   std::array<std::pair<TracebackState*, Node*>, 2> fastLS_diploid(const std::vector<int>& genotype);
   std::array<std::vector<std::tuple<int, std::vector<int>>>, 2>
   diploid_ls(std::vector<int> unphased_genotypes);
-  // std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties_impute5();
   std::tuple<std::vector<double>, std::vector<double>> recombination_penalties();
   std::tuple<std::vector<double>, std::vector<double>> mutation_penalties();

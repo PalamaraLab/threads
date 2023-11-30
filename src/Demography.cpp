@@ -42,19 +42,7 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
   }
 
   // Compute the expected pairwise coalescent time
-  // expected_time = expected_branch_length(2);//0;
-  expected_time = std_to_gen(1); // 0;
-  // for (int i = 0; i < K; i++) {
-  //   double T1 = static_cast<double>(times[i]);
-  //   double gamma_k = 1. / sizes[i];
-  //   if (i < K - 1) {
-  //     double T2 = static_cast<double>(times[i + 1]);
-  //     expected_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) *
-  //     std::exp(-gamma_k * T2)) / gamma_k;
-  //   } else {
-  //     expected_time += (gamma_k * T1 + 1) * std::exp(-gamma_k * T1) / gamma_k;
-  //   }
-  // }
+  expected_time = std_to_gen(1);
 }
 
 double Demography::std_to_gen(const double t) {
@@ -68,35 +56,6 @@ double Demography::std_to_gen(const double t) {
   return times[i] + (t - std_times[i]) * sizes[i];
 }
 
-// /**
-//  * @brief Expected length of branch number N
-//  *
-//  * @param N
-//  * @return double
-//  */
-// double Demography::expected_branch_length(const int N)
-// {
-//   if (N <= 2) {
-//     return expected_time;
-//   }
-//   int K = times.size();
-//   double binom_factor = N * (N - 1) / 2;
-//   // Compute the expected pairwise coalescent time
-//   double e_time = 0.;
-//   for (int i = 0; i < K; i++) {
-//     double T1 = static_cast<double>(times[i]);
-//     double gamma_k = binom_factor / sizes[i];
-//     if (i < K - 1) {
-//       double T2 = static_cast<double>(times[i + 1]);
-//       e_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) *
-//       std::exp(-gamma_k * T2)) / gamma_k;
-//     } else {
-//       e_time += (gamma_k * T1 + 1) * std::exp(-gamma_k * T1) / gamma_k;
-//     }
-//   }
-//   return N * e_time;
-// }
-
 /**
  * @brief Expected length of branch number N
  *
@@ -105,42 +64,11 @@ double Demography::std_to_gen(const double t) {
  */
 double Demography::expected_branch_length(const int N) {
   return std_to_gen(2. / N);
-  // if (N >= 2) {
-  //   return std_to_gen(2 / N);
-  // } //else {
-  //   return expected_time
-  // }
-  // ****
-  // * rest of this is untested and may have bugs
-  // ****
-  // int K = times.size();
-  // double binom_factor = N * (N + 1) / 2;
-  // // Compute the expected pairwise coalescent time
-  // double e_time = 0.;
-  // for (int k = 0; k < K; k++) {
-  //   double T1 = times[k];
-  //   double gamma_k = 1 / sizes[k];
-  //   double lambda_k = binom_factor * gamma_k;
-
-  //   double coal_fac = std::exp(-binom_factor * std_times[k]);
-
-  //   if (k < K - 1) {
-  //     double T2 = times[k + 1];
-  //     e_time += coal_fac * ((lambda_k * T1 + 1) - (lambda_k * T2 + 1) * std::exp(-lambda_k * (T2
-  //     - T1))) / lambda_k;
-  //     // e_time += ((gamma_k * T1 + 1) * std::exp(-gamma_k * T1) - (gamma_k * T2 + 1) *
-  //     std::exp(-gamma_k * T2)) / gamma_k;
-  //   } else {
-  //     e_time += coal_fac * (lambda_k * T1 + 1) / lambda_k;
-  //   }
-  // }
-  // return N * e_time;
 }
 
 ostream& operator<<(ostream& os, const Demography& d) {
   for (int i = 0; i < d.sizes.size(); i++) {
     cout << d.times[i] << " " << d.sizes[i] << " " << d.std_times[i] << endl;
   }
-  // os << "Node for sample " << node.sample_ID << " carrying allele " << node.genotype;
   return os;
 }

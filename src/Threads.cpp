@@ -1707,7 +1707,6 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // todo: not this twice
   std::vector<int> het_sites = het_sites_from_thread(new_sample_ID, bp_starts, target_IDs);
   return remove_burn_in(bp_starts, target_IDs, segment_ages, het_sites);
-  // return std::tuple(bp_starts, target_IDs, segment_ages, het_sites);
 }
 
 std::vector<ImputationSegment> Threads::impute(std::vector<bool>& genotype, int L) {
@@ -1715,17 +1714,14 @@ std::vector<ImputationSegment> Threads::impute(std::vector<bool>& genotype, int 
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> best_path;
   Node* match;
   TracebackState* traceback;
-  // if (num_samples > 0) {
   std::tie(traceback, match) = fastLS(genotype);
   best_path = traceback_impute(genotype, traceback, match, L);
   traceback_states.clear();
-  // }
 
   std::vector<double> seg_ages;
   for (const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& segment :
        best_path) {
     // date anti-conservatively, using longest region (is this bad?)
-    // int match_id =
     int seg_start = *std::min_element(std::get<1>(segment).begin(), std::get<1>(segment).end());
     int seg_end = *std::max_element(std::get<2>(segment).begin(), std::get<2>(segment).end());
     // NB num_het_sites is not used for sparse_sites, which we assume for imputation
@@ -1752,70 +1748,7 @@ std::vector<ImputationSegment> Threads::impute(std::vector<bool>& genotype, int 
     }
     imp_seg.weights = wts;
     imputation_segments.push_back(imp_seg);
-    // const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& segment =
-    // best_path[i]; const std::vector<int>& samples = std::get<0>(segment); double seg_age =
-    // seg_ages[i];
-
-    // const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& next_segment =
-    // best_path[i + 1]; const std::vector<int>& seg_ends = std::get<2>(segment); const
-    // std::vector<int>& next_samples = std::get<0>(next_segment); const std::vector<int>&
-    // next_seg_starts = std::get<1>(next_segment); double next_age = seg_ages[i + 1];
-    // std::vector<int> breakpoints(next_seg_starts.begin(), next_seg_starts.end());
-    // breakpoints.insert(breakpoints.end(), seg_ends.begin(), seg_ends.end());
-    // std::set<int> bp_set(breakpoints.begin(), breakpoints.end());
-    // for (int bp : bp_set) {
-    //   // initialize 1/K weights
-    //   ImputationSegment imp_seg;
-    //   imp_seg.seg_start = physical_positions[bp];
-    //   std::vector<int> impseg_samples(samples.begin(), samples.end());
-    //   impseg_samples.insert(impseg_samples.end(), next_samples.begin(), next_samples.end());
-    //   imp_seg.ids = impseg_samples;
-    //   std::vector<double> ages;
-    //   for (auto s : samples) {
-    //     ages.push_back(seg_age);
-    //   }
-    //   for (auto ns : next_samples) {
-    //     ages.push_back(next_age);
-    //   }
-    //   imp_seg.ages = ages;
-    //   std::vector<double> wts(samples.size() + next_samples.size(), 0.0);
-    //   for (int ns_idx = 0; ns_idx < next_samples.size(); ns_idx++) {
-    //     for (int s_idx = 0; s_idx < samples.size(); s_idx++) {
-    //       int s_vec_idx = s_idx;
-    //       int ns_vec_idx = samples.size() + ns_idx;
-    //       if (next_seg_starts[ns_idx] == seg_ends[s_idx]) {
-    //         // if there's no interpolation:
-    //         if (bp < next_seg_starts[ns_idx]) {
-    //           wts[s_vec_idx] += 1;
-    //         } else {
-    //           wts[ns_vec_idx] += 1;
-    //         }
-    //       } else {
-    //         // if we do have to interpolate:
-    //         if (bp <= next_seg_starts[ns_idx]) {
-    //           wts[s_vec_idx] += 1;
-    //           // here we always copy s
-    //         } else if (bp < seg_ends[s_idx]) {
-    //           // here we interpolate
-    //           double scale = (genetic_positions[bp] - genetic_positions[next_seg_starts[ns_idx]])
-    //           / (genetic_positions[seg_ends[s_idx]] -
-    //           genetic_positions[next_seg_starts[ns_idx]]); wts[s_vec_idx] += 1 - scale;
-    //           wts[ns_vec_idx] += scale;
-    //         } else {
-    //           // here we alwasys copy ns
-    //           wts[ns_vec_idx] += 1;
-    //         }
-    //       }
-    //     }
-    //   }
-    //   for (int j = 0; j < wts.size(); j++) {
-    //     wts[j] /= (next_samples.size() * samples.size());
-    //   }
-    //   imp_seg.weights = wts;
-    //   imputation_segments.push_back(imp_seg);
-    // }
   }
-  // why is this so bad?!
   return imputation_segments;
 }
 
@@ -1825,125 +1758,10 @@ Threads::diploid_ls(std::vector<int> unphased_genotypes) {
   std::vector<std::tuple<int, std::vector<int>>> best_path_b;
 
   auto ls_output = fastLS_diploid(unphased_genotypes);
-  // cout << "finished with diploid LS, made " << traceback_states.size() << " tb states" << endl;
   best_path_a = traceback(ls_output[0].first, ls_output[0].second, true);
   best_path_b = traceback(ls_output[1].first, ls_output[1].second, true);
-  // cout << "finished traceback: a size " << best_path_a.size() << " b size: " <<
-  // best_path_b.size()
-  //  << endl;
   traceback_states.clear();
   return {best_path_a, best_path_b};
-}
-
-// todo: eigenize
-std::array<std::vector<int>, 2> Threads::phase(std::vector<int> unphased_genotypes) {
-  std::vector<std::tuple<int, std::vector<int>>> best_path_a;
-  std::vector<std::tuple<int, std::vector<int>>> best_path_b;
-
-  auto ls_output = fastLS_diploid(unphased_genotypes);
-  cout << "finished with diploid LS, made " << traceback_states.size() << " tb states" << endl;
-  best_path_a = traceback(ls_output[0].first, ls_output[0].second, true);
-  best_path_b = traceback(ls_output[1].first, ls_output[1].second, true);
-  cout << "finished traceback: a size " << best_path_a.size() << " b size: " << best_path_b.size()
-       << endl;
-  traceback_states.clear();
-
-  std::vector<int> phased_a;
-  phased_a.reserve(num_sites);
-  std::vector<int> phased_b;
-  phased_b.reserve(num_sites);
-  int a_path_idx = 0;
-  int b_path_idx = 0;
-  for (int i = 0; i < num_sites; i++) {
-    if (a_path_idx < best_path_a.size() - 1 && i >= std::get<0>(best_path_a[a_path_idx + 1])) {
-      a_path_idx++;
-    }
-    if (b_path_idx < best_path_b.size() - 1 && i >= std::get<0>(best_path_b[b_path_idx + 1])) {
-      b_path_idx++;
-    }
-    // first check if there's no need to phase
-    if (unphased_genotypes[i] == 0) {
-      phased_a.push_back(0);
-      phased_b.push_back(0);
-    }
-    else if (unphased_genotypes[i] == 2) {
-      phased_a.push_back(1);
-      phased_b.push_back(1);
-    }
-    else if (unphased_genotypes[i] == 1) {
-      // cout << "phasing " << i << " ";
-      double a_gt = 0;
-      const std::vector<int>& a_nearest_neighbours = std::get<1>(best_path_a[a_path_idx]);
-      for (auto a_nn : a_nearest_neighbours) {
-        a_gt += (double) panel[ID_map[a_nn]][i]->genotype / a_nearest_neighbours.size();
-      }
-      // cout << "done a gt ";
-      double b_gt = 0;
-      const std::vector<int>& b_nearest_neighbours = std::get<1>(best_path_b[b_path_idx]);
-      for (auto b_nn : b_nearest_neighbours) {
-        b_gt += (double) panel[ID_map[b_nn]][i]->genotype / b_nearest_neighbours.size();
-      }
-      // cout << "done b gt " << endl;
-      // int a_nn = std::get<1>(best_path_a[a_path_idx])[0];
-      // int a_gt = (int)panel[ID_map[a_nn]][i]->genotype;
-      // int b_nn = std::get<1>(best_path_b[b_path_idx])[0];
-      // int b_gt = (int)panel[ID_map[b_nn]][i]->genotype;
-      // if we do need to phase, first check we get phasing for free
-      if (a_gt > b_gt) {
-        // cout << "phasing a" << endl;
-        phased_a.push_back(1);
-        phased_b.push_back(0);
-      }
-      else if (b_gt > a_gt) {
-        // cout << "phasing b" << endl;
-        phased_a.push_back(0);
-        phased_b.push_back(1);
-      }
-      else {
-        // cout << "actual phasing ";
-        // otherwise, prefer the haplotype coming from the longer segment
-        int a_seg_start = std::get<0>(best_path_a[a_path_idx]);
-        int a_seg_end = (a_path_idx == best_path_a.size() - 1)
-                            ? num_sites - 1
-                            : std::get<0>(best_path_a[a_path_idx + 1]);
-        // cout << "done segstartsends a ";
-        int b_seg_start = std::get<0>(best_path_b[b_path_idx]);
-        int b_seg_end = (b_path_idx == best_path_b.size() - 1)
-                            ? num_sites - 1
-                            : std::get<0>(best_path_b[b_path_idx + 1]);
-        // cout << "done segstartsends b ";
-        // if  {
-        //   a_seg_end = num_sites;
-        // } else {
-        //   a_seg_end = std::get<0>(best_path_a[a_path_idx + 1]);
-        // }
-        // int b_seg_end;
-        // if (b_path_idx == best_path_b.size() - 1) {
-        //   b_seg_end = num_sites;
-        // } else {
-        //   b_seg_end = std::get<0>(best_path_b[b_path_idx + 1]);
-        // }
-        if (genetic_positions[a_seg_end] - genetic_positions[a_seg_start] >=
-            genetic_positions[b_seg_end] - genetic_positions[b_seg_start]) {
-          // cout << "phasing a" << endl;
-          int a_round = (a_gt >= 0.5) ? 1 : 0;
-          phased_a.push_back(a_round);
-          phased_b.push_back(1 - a_round);
-        }
-        else {
-          // cout << "phasing a" << endl;
-          int b_round = (b_gt >= 0.5) ? 1 : 0;
-          phased_a.push_back(1 - b_round);
-          phased_b.push_back(b_round);
-        }
-      }
-    }
-    else {
-      cerr << "unphased genotypes need to be 0,1,2" << endl;
-      exit(1);
-    }
-  }
-  return {phased_a, phased_b};
 }
 
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>

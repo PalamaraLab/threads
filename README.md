@@ -30,16 +30,17 @@ pip install .
 
 To make sure it works you need
 - genotypes in pgen format
-- genetic map with 4 columns: Chromosome, SNP_id, cM, bp and one row for each marker in the pgen
+- list of variants in bim or pvar format (with the same prefix as the pgen)
+- genetic map with 4 columns: Chromosome, SNP, cM, bp
 - demography file, interpreted as haploid, with two columns: generation, effective population size
 ```
 # Run the inference
 threads infer \
     --pgen path/to/input.pgen \
     --map_gz path/to/genetic_map.gz \
-    --mutation_rate 1.65e-8 \
+    --mutation_rate 1.4e-8 \
     --demography path/to/demography \
-    --modality [array|wgs] \
+    --modality [wgs|array] \
     --out path/to/output.threads
     --region 123-456789 (optional)
     --num_threads 8 (optional)

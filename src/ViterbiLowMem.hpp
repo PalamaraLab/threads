@@ -52,8 +52,6 @@ private:
                                   TracebackNode* state);
 
 public:
-  // double mu;
-  // double mu_c;
   int target_id;
   int best_match = -1;
   double best_score;
@@ -63,7 +61,7 @@ public:
   std::vector<double> sample_scores;
   std::unordered_map<int, TracebackNode*> current_tracebacks;
 
-  ViterbiState(int _target_id, std::vector<int> _sample_ids); //, double _mu, double _mu_c);
+  ViterbiState(int _target_id, std::vector<int> _sample_ids);
 
   void process_site(const std::vector<int>& genotype, double rho, double rho_c, double _mu,
                     double _mu_c);

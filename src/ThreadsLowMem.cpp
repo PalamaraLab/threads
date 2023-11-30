@@ -188,7 +188,12 @@ void ThreadsLowMem::process_site_hets(const std::vector<int>& genotype) {
       }
       segment_indices.at(target_id) = current_seg_idx;
       int sample = path.sample_ids.at(current_seg_idx);
-      if (genotype.at(sample) != genotype.at(target_id)) {
+      // For now, we do not count unphased variants as a part of this,
+      // so we verify at least one of the het-pair is a "1",
+      // (i.e., "-7") is treated as "0".
+      // This is a bit lazy, but should be ok in most cases
+      if (genotype.at(sample) != genotype.at(target_id) &&
+          (genotype.at(sample) == 1 || genotype.at(target_id) == 1)) {
         path.het_sites.push_back(het_sites_processed);
       }
     }
@@ -265,7 +270,7 @@ void ThreadsLowMem::date_segments() {
         for (int j = 0; j < breakpoints.size(); j++) {
           int breakpoint_start = breakpoints[j];
           int breakpoint_end = (j == breakpoints.size() - 1) ? segment_end : breakpoints[j + 1];
-          // there are off-by-one errors here on the last segment (but who cares?)
+          // there may be off-by-one errors here on the last segment (but who cares?)
           double bp_size =
               physical_positions.at(breakpoint_end) - physical_positions.at(breakpoint_start);
           double cm_size =

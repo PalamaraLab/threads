@@ -144,22 +144,15 @@ Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vect
   return genotype_cache;
 }
 
-// ATTENZIONE this makes a copy when returned through the python interface!!!! 2x memory!!!!
-// (still, seems more efficient than eigen seq version)
-// TODO: rewrite this yet one more time with memcpy and Eigen::MatrixXi.data() instead of
-// vectors/std::copy Eigen::MatrixXi&
+// ATTENZIONE this makes a copy when returned through the python interface
 std::vector<std::vector<bool>>& TGEN::query2(const int bp_from, const int bp_to,
                                              const std::vector<int>& samples) {
-  // clear_cache();
   genotypes.clear();
 
   // Find number of expected sites
   int start_pos = *std::lower_bound(positions.begin(), positions.end(), bp_from);
   int end_pos = *std::upper_bound(positions.begin(), positions.end(), bp_to);
   int idx_offset = pos_idx_map[start_pos];
-  // cout << "interval [" << start_pos << ", " << end_pos << ")\n";
-  // cout << "initializing a matrix of size (" << samples.size() << ", " << pos_idx_map[end_pos] -
-  // idx_offset << ")\n";
 
   int n_samples = samples.size();
   int n_sites = pos_idx_map[end_pos] - idx_offset;
@@ -194,24 +187,17 @@ std::vector<std::vector<bool>>& TGEN::query2(const int bp_from, const int bp_to,
           int seg_start_idx = pos_idx_map[segment.lower()];
           int seg_end_idx = pos_idx_map[segment.upper()];
           if (segment.target == 0) {
-            // auto copy_range = Eigen::seq(seg_start_idx, seg_end_idx - 1);
             // We've reached the root of the tree and copy from the "reference" genome
             std::copy(reference_genome_vec.begin() + seg_start_idx,
                       reference_genome_vec.begin() + seg_end_idx,
                       current_gt.begin() + seg_start_idx - idx_offset);
           }
           else {
-            // cout << "copying from " << segment.target << ":" <<
-            // cached_genotypes_map[segment.target]; cout << " on " << seg_start_idx - idx_offset <<
-            // " to " << seg_end_idx - idx_offset - 1 << "... " << endl;
             std::vector<bool>& target_gt = genotypes.at(cached_genotypes_map[segment.target]);
             std::copy(target_gt.begin() + seg_start_idx - idx_offset,
                       target_gt.begin() + seg_end_idx - idx_offset,
                       current_gt.begin() + seg_start_idx - idx_offset);
             // We've found a cached genotype to copy from
-            // genotype_cache(i, insert_range) =
-            //     genotype_cache(cached_genotypes_map[segment.target], insert_range);//.eval();
-            //     //WARNING need .eval() here (or do we? I don't think we do)
           }
           // We then flip all the het sites
           // then we can also delay the .eval() until the end, right?
