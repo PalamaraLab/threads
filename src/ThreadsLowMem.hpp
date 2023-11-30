@@ -47,9 +47,6 @@ public:
   std::vector<double> cm_boundaries;
   bool sparse;
 
-  // ThreadsLowMem(int _n, const std::vector<double>& _physical_positions,
-  //               const std::vector<double>& _genetic_positions, std::vector<double> ne,
-  //               std::vector<double> ne_times, double _mutation_rate);
   ThreadsLowMem(const std::vector<int> _target_ids, const std::vector<double>& _physical_positions,
                 const std::vector<double>& _genetic_positions, std::vector<double> ne,
                 std::vector<double> ne_times, double _mutation_rate, bool _sparse);
@@ -59,9 +56,6 @@ public:
   // 1. process all sites for the PBWT (done by the Matcher)
 
   // 2a. initialize hmms
-  // void initialize_viterbi(const std::vector<MatchGroup>& new_match_groups);
-  // void initialize_viterbi(const std::vector<std::unordered_set<int>>& new_match_groups, const
-  // std::vector<double>& cm_positions);
   void initialize_viterbi(std::vector<std::vector<std::unordered_set<int>>>& match_ids,
                           const std::vector<double>& cm_positions);
   // 2b. process all sites for the hmms
@@ -76,8 +70,8 @@ public:
   // 3b. date all segments
   void date_segments();
 
-  // 4. save output
-  void serialize(std::string output_path);
+  // 4. save output (done on Python side)
+  // void serialize(std::string output_path);
 
   int count_branches();
 

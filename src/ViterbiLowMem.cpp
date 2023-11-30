@@ -99,9 +99,8 @@ ViterbiPath::dump_data_in_range(int start, int end) {
       out_starts, out_ids, out_heights);
 }
 
-ViterbiState::ViterbiState(int _target_id,
-                           std::vector<int> _sample_ids) //, double _mu, double _mu_c)
-    : target_id(_target_id), sample_ids(_sample_ids) {   //, mu(_mu), mu_c(_mu_c) {
+ViterbiState::ViterbiState(int _target_id, std::vector<int> _sample_ids)
+    : target_id(_target_id), sample_ids(_sample_ids) {
   // init current_tracebacks
   if (sample_ids.size() == 0) {
     throw std::runtime_error("found no samples for ViterbiState object for sample " +
@@ -116,6 +115,7 @@ ViterbiState::ViterbiState(int _target_id,
   best_match = sample_ids.at(0);
 }
 
+// Something where -9 is "missing" and -7 is "unphased"
 void ViterbiState::process_site(const std::vector<int>& genotype, double rho, double rho_c,
                                 double mu, double mu_c) {
   int current_site = sites_processed; // + 1;
@@ -128,10 +128,17 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
   TracebackNode* prev_best = current_tracebacks.at(best_match);
   for (int sample_id : sample_ids) {
     int allele = genotype.at(sample_id);
-    double copy_penalty = (allele == observed_allele) ? mu_c : mu;
+    double copy_penalty;
+    // "-7" encodes unphased heterozygotes, because why not
+    if (allele == -7 || observed_allele == -7) {
+      copy_penalty = (mu_c + mu) / 2.;
+    }
+    else {
+      copy_penalty = (allele == observed_allele) ? mu_c : mu;
+    }
     if (!current_tracebacks.count(sample_id)) {
-      // If we've just added new sites (this will happen vary rarely), recombine from previous best
-      // state
+      // If we've just added new sites (this will happen vary rarely),
+      // recombine from previous best state
       new_score = best_score + copy_penalty + rho;
       size_t key = coord_id_key(current_site, sample_id);
       traceback_states.emplace(key, TracebackNode(sample_id, current_site, prev_best, new_score));
@@ -167,14 +174,11 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
 void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
   std::vector<int> new_samples_vec(new_sample_ids.begin(), new_sample_ids.end());
   if (!new_sample_ids.count(best_match)) {
-    // cout << "warning!! best current match not in new samples for target " << target_id << endl;
     new_samples_vec.push_back(best_match);
   }
   for (int sample_id : sample_ids) {
     // clean up branches we definitely won't use
     if (!new_sample_ids.count(sample_id) && sample_id != best_match) {
-      // size_t key = coord_id_key(current_tracebacks.at(sample_id)->site, sample_id);
-      // traceback_states.erase(key);
       current_tracebacks.erase(sample_id);
     }
   }
@@ -184,10 +188,8 @@ void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
 void ViterbiState::prune() {
   // is there a way to do this without doing it twice?
   std::unordered_map<size_t, TracebackNode> tmp_traceback_states;
-  // cout << "tmp prune for " << target_id << endl;
 
   for (int sample_id : sample_ids) {
-    // cout << sample_id << " ";
     TracebackNode* state = current_tracebacks.at(sample_id);
     TracebackNode* new_state = recursive_insert(tmp_traceback_states, state);
     current_tracebacks[sample_id] = new_state;
@@ -226,15 +228,11 @@ ViterbiPath ViterbiState::traceback() {
   path.score = best_score;
   TracebackNode* state = current_tracebacks.at(best_match);
   while (state != nullptr) {
-    // cout << "tracking back state with match ";
-    // cout << state->sample_id << " and seg start ";
-    // cout << state->site << endl;
     int match_id = state->sample_id;
     int seg_start = state->site;
     path.append(seg_start, match_id);
     state = state->previous;
   }
-  // cout << "done, reversing\n";
   path.reverse();
   return path;
 }

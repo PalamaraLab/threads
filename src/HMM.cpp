@@ -74,9 +74,8 @@ void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_
 }
 
 // PSMC to get breakpoints
+// This is a very inefficient implementation
 std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
-  // Stole this from https://en.wikipedia.org/wiki/Viterbi_algorithm hehehe
-
   // Viterbi
   // Initialize
   int L = observations.size();

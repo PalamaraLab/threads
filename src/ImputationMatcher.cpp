@@ -37,7 +37,6 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
 
   int query_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];
-  // for (double cm : genetic_positions) {
   for (int i = 0; i < genetic_positions.size(); i++) {
     double cm = genetic_positions.at(i);
     if (cm > gen_pos_offset + query_interval_size * query_site_idx) {
@@ -58,13 +57,9 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
 
   sorting.reserve(num_samples);
   next_sorting.reserve(num_samples);
-  // divergence_values.reserve(num_samples);
-  // next_divergence_values.reserve(num_samples);
   for (int i = 0; i < num_samples; i++) {
     sorting.push_back(i);
     next_sorting.push_back(i);
-    // divergence.push_back(0);
-    // next_divergence.push_back(0);
   }
 
   ref_sorting.reserve(num_reference);
@@ -141,7 +136,6 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
 
     for (auto& sorting_twople : target_sort) {
       // get L-sized neighbourhood per target sample around target_sort[target_id] in ref_sorting
-      // ...
       int target_id = sorting_twople.first;
       int sorting_idx = sorting_twople.second;
       int insert_start;
@@ -181,7 +175,6 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
     }
   }
   sorting = next_sorting;
-  // divergence = next_divergence;
   sites_processed++;
 }
 
