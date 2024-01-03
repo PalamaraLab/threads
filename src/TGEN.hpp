@@ -17,7 +17,7 @@ public:
       : _first(other._first), _past(other._past), het_sites(other.het_sites), target(other.target) {
   }
   TgenSegment(int lo, int up) : _first(lo), _past(up), target(std::numeric_limits<int>::max()) {
-  } //, het_sites(_hets), target(_target) {}
+  }
   TgenSegment(int lo, int up, std::vector<int> _hets, int _target)
       : _first(lo), _past(up), het_sites(_hets), target(_target) {
   }
@@ -39,7 +39,6 @@ public:
     for (int i : seg.het_sites) {
       os << i << " ";
     }
-    // os << " and " << seg.het_sites.size() << " het sites.";
     return os;
   }
 

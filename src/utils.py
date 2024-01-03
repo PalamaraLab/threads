@@ -84,14 +84,21 @@ def interpolate_map(map_gz, pgen):
 def get_map_from_bim(pgen, rho):
     pvar = pgen.replace("pgen", "pvar")
     bim = pgen.replace("pgen", "bim")
+    cm_out = None
+    physical_positions = None
     if os.path.isfile(bim):
         physical_positions = np.array(pd.read_table(bim, delim_whitespace=True, header=None, comment='#')[3]).astype(int)
-        return rho * 100 * physical_positions, physical_positions
+        cm_out = rho * 100 * physical_positions
     elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(bim, delim_whitespace=True, header=None, comment='#')[0]).astype(int)
-        return rho * 100 * physical_positions, physical_positions
+        physical_positions = np.array(pd.read_table(pvar, delim_whitespace=True, header=None, comment='#')[1]).astype(int)
+        cm_out = rho * 100 * physical_positions
     else:
         raise RuntimeError(f"Can't find {bim} or {pvar}")
+
+    for i in range(1, len(cm_out)):
+        if cm_out[i] <= cm_out[i-1]:
+            cm_out[i] = cm_out[i-1] + 1e-5
+    return cm_out, physical_positions
 
 def parse_demography(demography):
     d = pd.read_table(demography, delim_whitespace=True, header=None)

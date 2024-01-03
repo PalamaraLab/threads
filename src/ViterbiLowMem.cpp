@@ -115,12 +115,10 @@ ViterbiState::ViterbiState(int _target_id, std::vector<int> _sample_ids)
   best_match = sample_ids.at(0);
 }
 
-// Something where -9 is "missing" and -7 is "unphased"
+// -9 is "missing" (not implemented yet) and -7 is "unphased"
 void ViterbiState::process_site(const std::vector<int>& genotype, double rho, double rho_c,
                                 double mu, double mu_c) {
-  int current_site = sites_processed; // + 1;
-  // be smart here! use rho_c + best_state_copy_penalty! most often this will be enough, will save a
-  // lot of trouble
+  int current_site = sites_processed;
   double best_new_score = best_score + std::max(rho, rho_c) + std::max(mu, mu_c);
   int best_new_match = best_match;
   double new_score;
@@ -154,7 +152,6 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
       }
       else {
         // If we recombine, add a new branch
-        // D-R-Y!
         new_score = best_score + copy_penalty + rho;
         size_t key = coord_id_key(current_site, sample_id);
         traceback_states.emplace(key, TracebackNode(sample_id, current_site, prev_best, new_score));
@@ -186,7 +183,6 @@ void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
 }
 
 void ViterbiState::prune() {
-  // is there a way to do this without doing it twice?
   std::unordered_map<size_t, TracebackNode> tmp_traceback_states;
 
   for (int sample_id : sample_ids) {
@@ -196,7 +192,6 @@ void ViterbiState::prune() {
   }
 
   traceback_states.clear();
-  // cout << "real prune... ";
   for (int sample_id : sample_ids) {
     TracebackNode* state = current_tracebacks.at(sample_id);
     TracebackNode* new_state = recursive_insert(traceback_states, state);

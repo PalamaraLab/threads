@@ -8,7 +8,6 @@ using std::cout;
 using std::endl;
 using std::ostream;
 
-// todo: eigenify if we want to use this
 HMM::HMM(Demography demography, std::vector<double> bp_sizes, std::vector<double> cm_sizes,
          double mutation_rate, int K)
     : num_states(K) {
@@ -61,6 +60,7 @@ void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_
     het_score.push_back(std::vector<double>());
     for (int k = 0; k < num_states; k++) {
       double t = expected_times[k];
+      // TODO: use mean-bp sizes here as in the main algorithm
       const double l = 2. * mutation_rate * bp_sizes[i] * t;
       const double trans = std::log1p(-std::exp(-l));
 
@@ -73,8 +73,9 @@ void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_
   }
 }
 
-// PSMC to get breakpoints
-// This is a very inefficient implementation
+// PSMC-like algorithm to get breakpoints
+// (This is an inefficient quadratic implementation, consider
+// longer burn-in and linear-time computation for future versions.)
 std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
   // Viterbi
   // Initialize

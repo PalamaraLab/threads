@@ -12,11 +12,11 @@ using std::cerr;
 using std::cout;
 using std::endl;
 
-// for a given interval, this contains all the matches for all the samples
+// For a given interval, this contains all the matches for all the samples
 MatchGroup::MatchGroup(int _num_samples, double _cm_position)
     : num_samples(_num_samples), cm_position(_cm_position) {
   for (int i = 0; i < num_samples; i++) {
-    match_candidates_counts.push_back(std::unordered_map<int, int>()); // could also be a multiset?
+    match_candidates_counts.push_back(std::unordered_map<int, int>());
   }
 }
 
@@ -34,7 +34,7 @@ MatchGroup::MatchGroup(const std::vector<int>& target_ids,
 
 void MatchGroup::filter_matches(int min_matches) {
   // First set the candidates for this group
-  // Changes on 28/09/23: added the "<10000"-clause
+  // For sequences of high index, we lower the number of sequences used to save time and memory
   for (int i = 0; i < num_samples; i++) {
     match_candidates[i] = {};
     if (i < 100) {
@@ -64,7 +64,7 @@ void MatchGroup::filter_matches(int min_matches) {
         }
       }
     }
-    // special case if nothing was found below threshold (can happen)
+    // Special case if nothing was found below threshold (unlikely, but can happen)
     if (match_candidates.at(i).size() == 0) {
       int tmp_min_matches = min_matches;
       while (match_candidates.at(i).size() == 0 && tmp_min_matches > 0) {
@@ -82,7 +82,6 @@ void MatchGroup::filter_matches(int min_matches) {
   top_four_maps.reserve(num_samples);
   for (int i = 0; i < num_samples; i++) {
     top_four_maps.emplace_back(std::min(4, (int) match_candidates.at(i).size()));
-    // top_four_maps.resize();
     std::partial_sort_copy(match_candidates_counts.at(i).begin(),
                            match_candidates_counts.at(i).end(), top_four_maps.at(i).begin(),
                            top_four_maps.at(i).end(),
@@ -95,7 +94,6 @@ void MatchGroup::filter_matches(int min_matches) {
 
 void MatchGroup::insert_tops_from(MatchGroup& other) {
   for (int i = 1; i < num_samples; i++) {
-    // cout << "tops " << i << endl;
     for (auto p : other.top_four_maps.at(i)) {
       match_candidates.at(i).insert(p.first);
     }
@@ -130,10 +128,10 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
     }
   }
 
+  // Initialize query sites and match group sites
   int query_site_idx = 1;
   int match_group_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];
-  // for (double cm : genetic_positions) {
   match_group_sites = {0};
   for (int i = 0; i < genetic_positions.size(); i++) {
     double cm = genetic_positions.at(i);
@@ -185,10 +183,13 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
 }
 
 void Matcher::process_site(const std::vector<int>& genotype) {
+  // Pass genotypes for a single site through the matcher
+
   if (sites_processed >= num_sites) {
     throw std::runtime_error("all sites have already been processed");
   }
 
+  // Get allele count
   int allele_count = 0;
   for (int g : genotype) {
     if (g == 1) {
@@ -201,6 +202,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
     throw std::runtime_error("invalid genotype vector size");
   }
 
+  // PBWT step
   for (int i = 0; i < num_samples; i++) {
     if (genotype.at(sorting.at(i)) == 1) {
       next_sorting[num_samples - allele_count + counter1] = sorting.at(i);
@@ -217,25 +219,26 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   }
   sorting = next_sorting;
 
-
-  // do the threading-neighbour queries
+  // Threading-neighbour queries
   if (match_group_idx < match_group_sites.size() - 1 &&
       sites_processed >= match_group_sites.at(match_group_idx + 1)) {
-    // this check is awkward, rewrite
     match_group_idx++;
     match_groups.at(match_group_idx - 1).filter_matches(min_matches);
   }
 
+  // If we've reached a query site, query
   if (next_query_site_idx < query_sites.size() &&
       sites_processed == query_sites.at(next_query_site_idx)) {
-    // do argsort(next_sorting)
+    // Get the arg-sort of the sorting
     for (int i = 0; i < num_samples; i++) {
       permutation[sorting.at(i)] = i;
     }
     next_query_site_idx++;
 
+    // Initialize the red-black tree
     std::set<int> threaded = {permutation.at(0)};
 
+    // Insert sequences and query in order
     for (int i = 1; i < num_samples; i++) {
       std::vector<int> matches;
       int allele = genotype.at(i);
@@ -243,7 +246,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
       auto iter = threaded.insert(permutation.at(i));
       auto iter_up = iter.first;
       auto iter_down = iter.first;
-      // check if genotypes are identical, just to be sure
+      // Check if genotypes are identical, just to be sure
       while (matches.size() < L && (iter_down != threaded.begin() || iter_up != threaded.end())) {
         if (iter_down != threaded.begin()) {
           iter_down--;
@@ -256,24 +259,9 @@ void Matcher::process_site(const std::vector<int>& genotype) {
           }
         }
       }
-
-      for (int m : matches) {
-        std::unordered_map<int, int>& mmmap =
-            match_groups.at(match_group_idx).match_candidates_counts.at(i);
-        if (m >= i) {
-          throw std::runtime_error("illegal match candidate " + std::to_string(m) +
-                                   ", wth is going on");
-        }
-        if (!mmmap.count(m)) {
-          mmmap[m] = 1;
-        }
-        else {
-          mmmap[m]++;
-        }
-      }
     }
 
-    // special case for last query
+    // Special case for last query
     if (next_query_site_idx == query_sites.size()) {
       match_groups.at(match_group_sites.size() - 1).filter_matches(min_matches);
     }
@@ -281,8 +269,8 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   sites_processed++;
 }
 
+// Propagate top 4 matches from left and right match groups
 void Matcher::propagate_adjacent_matches() {
-
   for (int i = 1; i < match_groups.size(); i++) {
     MatchGroup& group = match_groups.at(i);
     MatchGroup& prev = match_groups.at(i - 1);

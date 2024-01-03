@@ -2,6 +2,7 @@
 #include <iostream>
 using std::ostream;
 
+// This class is a wrapper for simple coalescence time queries under a piecewise-constant demography
 class Demography {
 public:
   // These are in generations
