@@ -51,7 +51,7 @@ public:
                 const std::vector<double>& _genetic_positions, std::vector<double> ne,
                 std::vector<double> ne_times, double _mutation_rate, bool _sparse);
 
-  // HOW THIS ALGORITHM WORKS
+  // Algorithm outline
 
   // 1. process all sites for the PBWT (done by the Matcher)
 
@@ -71,7 +71,6 @@ public:
   void date_segments();
 
   // 4. save output (done on Python side)
-  // void serialize(std::string output_path);
 
   int count_branches();
 

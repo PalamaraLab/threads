@@ -14,6 +14,7 @@ struct ImputationSegment {
   std::vector<double> ages;
 };
 
+// This class contains everything for Threads-fastLS
 class Threads {
 
 private:

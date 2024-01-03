@@ -57,7 +57,7 @@ double Demography::std_to_gen(const double t) {
 }
 
 /**
- * @brief Expected length of branch number N
+ * @brief Compute the expected length of the N-th branch
  *
  * @param N
  * @return double

@@ -13,11 +13,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-// #include <boost/iostreams/filtering_stream.hpp>
-// #include <boost/iostreams/filter/gzip.hpp>
-// #include <boost/foreach.hpp>
-// #include <boost/lexical_cast.hpp>
-// #include <boost/tokenizer.hpp>
 
 using std::cerr;
 using std::cout;
@@ -42,9 +37,6 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
     cerr << "Need at least 3 sites, found " << physical_positions.size() << endl;
     exit(1);
   }
-  // else {
-  //   cout << "Found " << physical_positions.size() << " sites.\n";
-  // }
   if (mutation_rate <= 0) {
     cerr << "Need a strictly positive mutation rate.\n";
     exit(1);
@@ -356,28 +348,23 @@ void Threads::print_sorting() {
 }
 
 /**
- * @brief Run Li-Stephens on input haplotype *without* inserting into the dynamic panel.
- *        See also Algorithm 4 of Lunter (2018), Bioinformatics.
- *
- * @param genotype
- * @return std::vector<std::tuple<int, int>> a pair containing path segments (start_pos, id)
+ * Run Li-Stephens on input haplotype *without* inserting into the dynamic panel.
+ * See also Algorithm 4 of Lunter (2018), Bioinformatics.
+ * For imputation we use the IMPUTE/Beagle mutation penalties
  */
 std::pair<TracebackState*, Node*> Threads::fastLS(const std::vector<bool>& genotype,
                                                   bool imputation) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
   std::vector<double> mu_c;
-  std::tie(mu, mu_c) = imputation ? mutation_penalties_impute5()
-                                  : mutation_penalties(); // mutation_penalties_impute5();
+  std::tie(mu, mu_c) = imputation ? mutation_penalties_impute5() : mutation_penalties();
 
   // NB these still rely on padding around sites (like mutations), rather than distance between
   // them
   std::vector<double> rho;
   std::vector<double> rho_c;
-  // std::tie(rho, rho_c) = recombination_penalties_correct();
   if (imputation) {
     std::tie(rho, rho_c) = recombination_penalties_correct();
-    // std::tie(rho, rho_c) = recombination_penalties();
   }
   else if (sparse_sites) {
     std::tie(rho, rho_c) = recombination_penalties();
@@ -385,9 +372,6 @@ std::pair<TracebackState*, Node*> Threads::fastLS(const std::vector<bool>& genot
   else {
     std::tie(rho, rho_c) = recombination_penalties_correct();
   }
-  // std::tie(rho, rho_c) = // recombination_penalties_correct();
-  //     sparse_sites ? recombination_penalties() : recombination_penalties_correct();
-
   // traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
   traceback_states.emplace_back(std::make_unique<TracebackState>(0, nullptr, nullptr));
   std::vector<State> current_states;
@@ -472,9 +456,7 @@ std::pair<TracebackState*, Node*> Threads::fastLS(const std::vector<bool>& genot
       z = recombinant_score;
     }
 
-    // Need to consider how best to use this threshold, 100 might be too high... or too low?
-    // Not currently using, just adds overhead
-    // ...but may be useful in real data (?)
+    // Pruning is turned off by default
     if (n_prune >= 0 && i % 100 == 0 && new_states.size() >= n_prune) {
       int old_size = new_states.size();
       StateTree tree = StateTree(new_states);
@@ -501,14 +483,10 @@ std::pair<TracebackState*, Node*> Threads::fastLS(const std::vector<bool>& genot
 }
 
 /**
- * @brief Run Li-Stephens on input haplotype *without* inserting into the dynamic panel.
- *        See also Algorithm 4 of Lunter (2018), Bioinformatics.
- *
- * @param genotype
- * @return std::vector<std::tuple<int, int>> a pair containing path segments (start_pos, id)
- */
-// std::pair<std::vector<std::tuple<int, std::vector<int>>>, std::vector<std::tuple<int,
-// std::vector<int>>>>
+ * Run Li-Stephens on input diplotype *without* inserting into the dynamic panel.
+ * See also Algorithm 4 of Lunter (2018), Bioinformatics.
+ * Warning: The code here is more verbose than it has to be
+ **/
 std::array<std::pair<TracebackState*, Node*>, 2>
 Threads::fastLS_diploid(const std::vector<int>& genotype) {
   // Get mutation/recombination penalties;
@@ -545,8 +523,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
 
   // Just like haploid, we iterate through sites
   for (int i = 0; i < num_sites; i++) {
-    // cout << endl;
-    // cout << "Site " << i << endl;
     int allele = genotype[i];
     int n_state_pairs = current_pairs.size();
     std::vector<StatePair> new_pairs;
@@ -608,7 +584,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
     std::unordered_map<size_t, bool> extmap_1;
 
     for (StatePair& p : current_pairs) {
-      // cout << "computing local min for " << p << endl;
       size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
       size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
       double z_pair;
@@ -698,10 +673,8 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
     }
 
     // START OF MAIN EXTENSION LOOP
-    // cout << "going into loop with z=" << z << endl;
     std::unordered_map<size_t, double> new_local_min;
     for (StatePair& p : current_pairs) {
-      // cout << "processing " << p << endl;
       bool extended = false;
       size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
       size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
@@ -714,20 +687,14 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
       extensible_a1 = extmap_1.at(key_a);
       extensible_b0 = extmap_0.at(key_b);
       extensible_b1 = extmap_1.at(key_b);
-      // std::tie(extensible_a0, extensible_b0) = pair_extensible_by(p, 0, i);
-      // std::tie(extensible_a1, extensible_b1) = pair_extensible_by(p, 1, i);
 
       // First case: we extend both sequences.
       double case1_cost = p.score + 2 * extension_cost;
       std::vector<Node*> added_1a;
       std::vector<Node*> added_1b;
       if (case1_cost <= std::min({z_a + rho_delta, z_b + rho_delta, z + 2 * rho_delta})) {
-        // extend both
-        // cout << "case 1" << endl;
         if (allele == 0) {
           if (extensible_a0 && extensible_b0) {
-            // extend by 0,0!
-            // cout << "extend 0,0 with score " << case1_cost << endl;
             a_next = extend_node(p.below_a, 0, i);
             b_next = extend_node(p.below_b, 0, i);
             new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
@@ -738,8 +705,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
         }
         else if (allele == 1) {
           if (extensible_a0 && extensible_b1) {
-            // extend by 0,1!
-            // cout << "extend 0,1 with score " << case1_cost << endl;
             a_next = extend_node(p.below_a, 0, i);
             b_next = extend_node(p.below_b, 1, i);
             new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
@@ -748,8 +713,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
             extended = true;
           }
           if (extensible_a1 && extensible_b0) {
-            // extend by 1,0!
-            // cout << "extend 1,0 with score " << case1_cost << endl;
             a_next = extend_node(p.below_a, 1, i);
             b_next = extend_node(p.below_b, 0, i);
             new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
@@ -760,8 +723,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
         }
         else {
           if (extensible_a1 && extensible_b1) {
-            // extend by 1,1!
-            // cout << "extend 1,1 with score " << case1_cost << endl;
             a_next = extend_node(p.below_a, 1, i);
             b_next = extend_node(p.below_b, 1, i);
             new_pairs.emplace_back(a_next, b_next, case1_cost, p.traceback_a, p.traceback_b);
@@ -777,7 +738,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           local_min[key_b] = std::min(z_b, case1_cost);
           for (auto a1 : added_1a) {
             size_t new_key_a = pair_key(a1->above->sample_ID, p.traceback_a->site);
-            // cout << "adding new_key_a " << new_key_a << endl;
             if (new_local_min.count(new_key_a)) {
               new_local_min[new_key_a] = std::min(new_local_min.at(new_key_a), case1_cost);
             }
@@ -787,7 +747,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           }
           for (auto b1 : added_1b) {
             size_t new_key_b = pair_key(b1->above->sample_ID, p.traceback_b->site);
-            // cout << "adding new_key_b " << new_key_b << endl;
             if (new_local_min.count(new_key_b)) {
               new_local_min[new_key_b] = std::min(new_local_min.at(new_key_b), case1_cost);
             }
@@ -804,12 +763,8 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
       std::vector<Node*> added_2a;
       std::vector<Node*> added_2b;
       if (case2_cost <= std::min({z_a + rho_delta, z_b + rho_delta, z + 2 * rho_delta})) {
-        // extend one, mutate one
-        // cout << "case 2" << endl;
         if (allele == 0 || allele == 2) {
           if (extensible_a0 && extensible_b1) {
-            // extend by 0,1!
-            // cout << "extend 0,1 with score " << case2_cost << endl;
             Node* a_next = extend_node(p.below_a, 0, i);
             Node* b_next = extend_node(p.below_b, 1, i);
             new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
@@ -818,8 +773,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
             extended = true;
           }
           if (extensible_a1 && extensible_b0) {
-            // extend by 1,0!
-            // cout << "extend 1,0 with score " << case2_cost << endl;
             Node* a_next = extend_node(p.below_a, 1, i);
             Node* b_next = extend_node(p.below_b, 0, i);
             new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
@@ -829,10 +782,7 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           }
         }
         else {
-          // allele = 1
           if (extensible_a0 && extensible_b0) {
-            // extend by 0,0!
-            // cout << "extend 0,0 with score " << case2_cost << endl;
             Node* a_next = extend_node(p.below_a, 0, i);
             Node* b_next = extend_node(p.below_b, 0, i);
             new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
@@ -841,8 +791,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
             extended = true;
           }
           if (extensible_a1 && extensible_b1) {
-            // extend by 1,1!
-            // cout << "extend 1,1 with score " << case2_cost << endl;
             Node* a_next = extend_node(p.below_a, 1, i);
             Node* b_next = extend_node(p.below_b, 1, i);
             new_pairs.emplace_back(a_next, b_next, case2_cost, p.traceback_a, p.traceback_b);
@@ -858,7 +806,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           local_min[key_b] = std::min(local_min.at(key_b), case2_cost);
           for (auto a2 : added_2a) {
             size_t new_key_a = pair_key(a2->above->sample_ID, p.traceback_a->site);
-            // cout << "adding new_key_a " << new_key_a << endl;
             if (new_local_min.count(new_key_a)) {
               new_local_min[new_key_a] = std::min(new_local_min.at(new_key_a), case2_cost);
             }
@@ -868,7 +815,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           }
           for (auto b2 : added_2b) {
             size_t new_key_b = pair_key(b2->above->sample_ID, p.traceback_b->site);
-            // cout << "adding new_key_b " << new_key_b << endl;
             if (new_local_min.count(new_key_b)) {
               new_local_min[new_key_b] = std::min(new_local_min.at(new_key_b), case2_cost);
             }
@@ -885,12 +831,8 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
       std::vector<Node*> added_3a;
       std::vector<Node*> added_3b;
       if (case3_cost <= std::min({z_a + rho_delta, z_b + rho_delta, z + 2 * rho_delta})) {
-        // extend both
-        // cout << "case 3" << endl;
         if (allele == 0) {
           if (extensible_a1 && extensible_b1) {
-            // extend by 1,1!
-            // cout << "extend 1,1 with " << case3_cost << endl;
             Node* a_next = extend_node(p.below_a, 1, i);
             Node* b_next = extend_node(p.below_b, 1, i);
             new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
@@ -901,8 +843,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
         }
         else if (allele == 1) {
           if (extensible_a0 && extensible_b1) {
-            // extend by 0,1!
-            // cout << "extend 0,1 with " << case3_cost << endl;
             Node* a_next = extend_node(p.below_a, 0, i);
             Node* b_next = extend_node(p.below_b, 1, i);
             new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
@@ -911,8 +851,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
             extended = true;
           }
           if (extensible_a1 && extensible_b0) {
-            // extend by 1,0!
-            // cout << "extend 1,0 with " << case3_cost << endl;
             Node* a_next = extend_node(p.below_a, 1, i);
             Node* b_next = extend_node(p.below_b, 0, i);
             new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
@@ -923,8 +861,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
         }
         else {
           if (extensible_a0 && extensible_b0) {
-            // extend by 0,0!
-            // cout << "extend 0,0 with " << case3_cost << endl;
             Node* a_next = extend_node(p.below_a, 0, i);
             Node* b_next = extend_node(p.below_b, 0, i);
             new_pairs.emplace_back(a_next, b_next, case3_cost, p.traceback_a, p.traceback_b);
@@ -940,7 +876,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           local_min[key_b] = std::min(local_min.at(key_b), case3_cost);
           for (auto a3 : added_3a) {
             size_t new_key_a = pair_key(a3->above->sample_ID, p.traceback_a->site);
-            // cout << "adding new_key_a " << new_key_a << endl;
             if (new_local_min.count(new_key_a)) {
               new_local_min[new_key_a] = std::min(new_local_min.at(new_key_a), case3_cost);
             }
@@ -950,7 +885,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           }
           for (auto b3 : added_3b) {
             size_t new_key_b = pair_key(b3->above->sample_ID, p.traceback_b->site);
-            // cout << "adding new_key_b " << new_key_b << endl;
             if (new_local_min.count(new_key_b)) {
               new_local_min[new_key_b] = std::min(new_local_min.at(new_key_b), case3_cost);
             }
@@ -961,7 +895,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
           extended = false;
         }
       }
-      // cout << "done, z=" << z << endl;
     }
     // END OF EXTENSION LOOP
 
@@ -971,20 +904,12 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
     }
 
     // SINGLE RECOMBINATION EVENTS
-    // this will add a lot of states
-    // cout << "have " << new_pairs.size() << " states after main loop" << endl;
     std::unordered_set<size_t> already_recombined;
     std::vector<StatePair> rec_pairs;
-    // cout << "newminmap" << endl;
-    // for (auto& it : new_local_min) {
-    //   cout << it.first << ": " << it.second << endl;
-    // }
+
     for (StatePair& p : new_pairs) {
-      // cout << "doing single-rec for " << p << endl;
       size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
       size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
-      // cout << "key_a: " << key_a << endl;
-      // cout << "key_b: " << key_b << endl;
       double recombinant_score = p.score - rho_c[i] + rho[i];
       if (!already_recombined.count(key_a) &&
           std::abs(new_local_min.at(key_a) - p.score) < 0.0001) {
@@ -1005,7 +930,6 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
                                traceback_states.back().get(), p.traceback_b);
       }
     }
-    // cout << "have " << new_pairs.size() << " states after single_recomb loop" << endl;
 
     // DOUBLE RECOMBINATION EVENT
     best_pair =
@@ -1047,106 +971,8 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
       *(std::min_element(current_pairs.begin(), current_pairs.end(),
                          [](const auto& p1, const auto& p2) { return p1.score < p2.score; }));
 
-  // cout << "Best path-pair ending at " << min_pair << endl;
-
   return {std::pair<TracebackState*, Node*>(min_pair.traceback_a, min_pair.below_a->above),
           std::pair<TracebackState*, Node*>(min_pair.traceback_b, min_pair.below_b->above)};
-  // // Traceback loop
-  // // TODO: DRY (also for haploid)
-  // std::vector<std::tuple<int, std::vector<int>>> best_path_a;
-  // TracebackState* traceback_a = min_pair.traceback_a;
-  // Node* match = min_pair.below_a->above;
-  // while (traceback_a != nullptr) {
-  //   int n_matches = 1;
-  //   int segment_start = traceback_a->site;
-  //   int match_id = match->sample_ID;
-  //   std::vector<int> div_states = {match_id};
-  //   Node* div_node = match;
-  //   // We also keep track of the min_id, this is useful for genotype parsing
-  //   int min_id = match_id;
-  //   // Find all samples that match on the segment
-  //   while (div_node->above != nullptr && div_node->divergence <= segment_start) {
-  //     div_node = div_node->above;
-  //     // this is a bit awkward
-  //     if (div_node->sample_ID == -1) {
-  //       break;
-  //     }
-  //     div_states.push_back(div_node->sample_ID);
-  //     n_matches += 1;
-  //     if (div_node->sample_ID < min_id) {
-  //       min_id = div_node->sample_ID;
-  //     }
-  //   }
-  //   std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
-  //   std::vector<int> sampled_states;
-  //   sampled_states.reserve(L + 1);
-  //   // Sample L threading targets
-  //   if (div_states.size() < L) {
-  //     for (int i = 0; i < L; i++) {
-  //       sampled_states.push_back(div_states[distrib(rng)]);
-  //     }
-  //   }
-  //   else {
-  //     std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), L,
-  //     rng);
-  //   }
-  //   // add the min-state as well
-  //   sampled_states.push_back(min_id);
-
-  //   best_path_a.emplace_back(segment_start, sampled_states);
-  //   match = traceback_a->best_prev_node;
-  //   traceback_a = traceback_a->prev;
-  // }
-  // std::reverse(best_path_a.begin(), best_path_a.end());
-
-  // std::vector<std::tuple<int, std::vector<int>>> best_path_b;
-  // TracebackState* traceback_b = min_pair.traceback_b;
-  // match = min_pair.below_b->above;
-  // while (traceback_b != nullptr) {
-  //   int n_matches = 1;
-  //   int segment_start = traceback_b->site;
-  //   int match_id = match->sample_ID;
-  //   std::vector<int> div_states = {match_id};
-  //   Node* div_node = match;
-  //   // We also keep track of the min_id, this is useful for genotype parsing
-  //   int min_id = match_id;
-  //   // Find all samples that match on the segment
-  //   while (div_node->above != nullptr && div_node->divergence <= segment_start) {
-  //     div_node = div_node->above;
-  //     // this is a bit awkward
-  //     if (div_node->sample_ID == -1) {
-  //       break;
-  //     }
-  //     div_states.push_back(div_node->sample_ID);
-  //     n_matches += 1;
-  //     if (div_node->sample_ID < min_id) {
-  //       min_id = div_node->sample_ID;
-  //     }
-  //   }
-  //   std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
-  //   std::vector<int> sampled_states;
-  //   sampled_states.reserve(L + 1);
-  //   // Sample L threading targets
-  //   if (div_states.size() < L) {
-  //     for (int i = 0; i < L; i++) {
-  //       sampled_states.push_back(div_states[distrib(rng)]);
-  //     }
-  //   }
-  //   else {
-  //     std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), L,
-  //     rng);
-  //   }
-  //   // add the min-state as well
-  //   sampled_states.push_back(min_id);
-
-  //   best_path_b.emplace_back(segment_start, sampled_states);
-  //   match = traceback_b->best_prev_node;
-  //   traceback_b = traceback_b->prev;
-  // }
-  // std::reverse(best_path_b.begin(), best_path_b.end());
-
-  // std::pair<std::vector<std::tuple<int, std::vector<int>>>, std::vector<std::tuple<int,
-  // std::vector<int>>>> path_pair(best_path_a, best_path_b); return path_pair;
 }
 
 /**
@@ -1155,11 +981,7 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
  */
 std::vector<std::tuple<int, std::vector<int>>> Threads::traceback(TracebackState* tb, Node* match,
                                                                   bool return_all) {
-  // TracebackState* tb = traceback_match_pair.first;
-  // Node* match = traceback_match_pair.second;
   std::vector<std::tuple<int, std::vector<int>>> best_path;
-  // TracebackState* tb = min_state.tb;
-  // Node* match = min_state.below->above;
   while (tb != nullptr) {
     int n_matches = 1;
     int segment_start = tb->site;
@@ -1187,17 +1009,9 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::traceback(TracebackState
     }
     else {
       std::uniform_int_distribution<> distrib(0, div_states.size() - 1);
-      // NB can replace this with array
       sampled_states.reserve(2);
-      // Sample L threading targets
-      // if (div_states.size() < L) {
-      //   for (int i = 0; i < L; i++) {
-      //     sampled_states.push_back(div_states[distrib(rng)]);
-      //   }
-      // }
-      // else {
       std::sample(div_states.begin(), div_states.end(), std::back_inserter(sampled_states), 1, rng);
-      // add the min-state as well
+      // Add the min-state as well
       sampled_states.push_back(min_id);
     }
 
@@ -1222,13 +1036,8 @@ Threads::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node
   while (tb != nullptr) {
     int n_matches = 1;
     int segment_start = tb->site;
-    // int segment_end;
-    // if (imputation_path.size() == 0) {
     int segment_end = prev_end;
     prev_end = segment_start;
-    // } else {
-    //   segment_end = imputation_path.back().first;
-    // }
     int match_id = match->sample_ID;
     std::vector<int> div_states = {match_id};
     Node* div_node = match;
@@ -1284,8 +1093,6 @@ Threads::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node
     std::vector<int> sample_ids;
     std::vector<int> segment_ends;
     for (int j = idx.size() - 1; j >= std::max(0, (int) (idx.size() - L)); j--) {
-      // segment_starts.push_back(overlaps[idx[j]].first);
-      // segment_ends.push_back(overlaps[idx[j]].second);
       segment_starts.push_back(segment_start);
       segment_ends.push_back(segment_end);
       sample_ids.push_back(div_states[idx[j]]);
@@ -1322,8 +1129,6 @@ bool Threads::extensible_by(State& s, const Node* t_next, const bool g, const in
   }
   else if (genotype_interval_match(
                s.below->above->sample_ID, next_above_candidate, s.traceback->site, i)) {
-    // We had a trick here with divergence values but it was.. wrong?
-    // In the dPBWT, that would be O(N)
     return true;
   }
   return false;
@@ -1339,27 +1144,6 @@ std::pair<bool, bool> Threads::pair_extensible_by(StatePair& p, const bool g, co
   return std::pair<bool, bool>(extensible_a, extensible_b);
 }
 
-// /**
-//  * @brief This relies on panel size, mutation rate and physical map
-//  *
-//  * @return double
-//  */
-// std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_old() {
-//   std::vector<double> mu(num_sites);
-//   std::vector<double> mu_c(num_sites);
-
-//   // The expected branch length
-//   const double t = demography.expected_branch_length(num_samples + 1);
-
-//   for (int i = 0; i < num_sites; i++) {
-//     // l is in bp units
-//     double k = 2. * mutation_rate * bp_sizes[i] * t;
-//     mu_c[i] = k;
-//     mu[i] = -std::log1p(-std::exp(-k));
-//   }
-//   return std::tuple(mu, mu_c);
-// }
-
 std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
@@ -1372,7 +1156,6 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties
 
   for (int i = 0; i < num_sites; i++) {
     // l is in bp units
-    // double k = 2. * mutation_rate * bp_sizes[i] * t;
     double k = 2. * mutation_rate * mean_bp_size * t;
     mu_c[i] = k;
     mu[i] = -std::log1p(-std::exp(-k));
@@ -1380,6 +1163,11 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties
   return std::tuple(mu, mu_c);
 }
 
+/**
+ * @brief This gives the IMPUTE5 (and Beagle) recombination penalties
+ *
+ * @return tuple of penalty vectors
+ */
 std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_impute5() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
@@ -1394,9 +1182,9 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties
 }
 
 /**
- * @brief This relies on panel size and the recombination map
+ * @brief This gives the *sparse* recombination penalties
  *
- * @return double
+ * @return tuple of penalty vectors
  */
 std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_penalties() {
   // Recall: 1cM means the expected average number of intervening
@@ -1406,9 +1194,6 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_pena
 
   // The expected branch length
   const double t = demography.expected_branch_length(num_samples + 1);
-  // double t = num_samples == 1 ? demography.std_to_gen(1. / double(num_samples)) :
-  // demography.std_to_gen(2. / double(num_samples)) ;
-
   for (int i = 0; i < num_sites; i++) {
     // l is in cM units
     const double k = 2. * 0.01 * cm_sizes[i] * t;
@@ -1420,9 +1205,9 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_pena
 }
 
 /**
- * @brief This relies on panel size and the recombination map
+ * @brief This gives the correct, dense, recombination penalties
  *
- * @return double
+ * @return tuple of penalty vectors
  */
 std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_penalties_correct() {
   // Recall: 1cM means the expected average number of intervening
@@ -1457,23 +1242,10 @@ double Threads::date_segment(const int num_het_sites, const int start, const int
     cerr << "Can't date a segment with length <= 0\n";
     exit(1);
   }
-  // this check should become unnecessary
-  // if (ID_map.find(id1) == ID_map.end()) {
-  //   cerr << "date_segment bad id1 " << id1 << endl;
-  //   exit(1);
-  // }
-
-  // if (ID_map.find(id2) == ID_map.end()) {
-  //   cerr << "date_segment bad id2 " << id2 << endl;
-  //   exit(1);
-  // }
   double m = (double) num_het_sites;
   double bp_size = 0;
   double cm_size = 0;
   for (int i = start; i < end; i++) {
-    // if (panel[ID_map.at(id1)][i]->genotype != panel[ID_map.at(id2)][i]->genotype) {
-    //   m++;
-    // }
     bp_size += bp_sizes[i];
     cm_size += cm_sizes[i];
   }
@@ -1481,72 +1253,9 @@ double Threads::date_segment(const int num_het_sites, const int start, const int
   double rho = 2. * 0.01 * cm_size;
   if (sparse_sites) {
     return Threads::date_segment_sparse(num_het_sites, cm_size, demography);
-    // // HERE WE ONLY USE THE SEGMENT LENGTH
-    // // if (m > 15) {
-    // //   // cout << "Warning: very many heterozygous sites, defaulting to const-demography
-    // //   method.\n"; double gamma = 1. / demography.expected_time; return 2. / (gamma + rho);
-    // // }
-    // double numerator = 0;
-    // double denominator = 0;
-    // int K = demography.times.size();
-    // for (int k = 0; k < K; k++) {
-    //   double T1 = demography.times[k];
-    //   double gamma_k = 1. / demography.sizes[k];
-    //   double lambda_k = gamma_k + rho;
-    //   double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
-
-    //   if (k < K - 1) {
-    //     double T2 = demography.times[k + 1];
-    //     numerator +=
-    //         coal_fac * (2. / std::pow(lambda_k, 3)) *
-    //         (boost::math::gamma_q(3, lambda_k * T1) - boost::math::gamma_q(3, lambda_k * T2));
-    //     denominator +=
-    //         coal_fac * (1. / std::pow(lambda_k, 2)) *
-    //         (boost::math::gamma_q(2, lambda_k * T1) - boost::math::gamma_q(2, lambda_k * T2));
-    //   }
-    //   else {
-    //     numerator +=
-    //         coal_fac * (2. / std::pow(lambda_k, 3)) * boost::math::gamma_q(3, lambda_k * T1);
-    //     denominator +=
-    //         coal_fac * (1. / std::pow(lambda_k, 2)) * boost::math::gamma_q(2, lambda_k * T1);
-    //   }
-    // }
-    // return numerator / denominator;
   }
   else {
     return Threads::date_segment(m, cm_size, bp_size, mutation_rate, demography);
-    // if (m > 15) {
-    //   // cout << "Warning: very many heterozygous sites, defaulting to const-demography
-    //   method.\n"; double gamma = 1. / demography.expected_time; return (m + 2) / (gamma + rho +
-    //   mu);
-    // }
-    // double numerator = 0;
-    // double denominator = 0;
-    // int K = demography.times.size();
-    // for (int k = 0; k < K; k++) {
-    //   double T1 = demography.times[k];
-    //   double gamma_k = 1. / demography.sizes[k];
-    //   double lambda_k = gamma_k + rho + mu;
-    //   double coal_fac = gamma_k * std::exp(T1 * gamma_k - demography.std_times[k]);
-    //   double data_fac = std::pow(mu / lambda_k, m);
-
-    //   if (k < K - 1) {
-    //     double T2 = demography.times[k + 1];
-    //     numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
-    //                  (boost::math::gamma_q(m + 3, lambda_k * T1) -
-    //                   boost::math::gamma_q(m + 3, lambda_k * T2));
-    //     denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
-    //                    (boost::math::gamma_q(m + 2, lambda_k * T1) -
-    //                     boost::math::gamma_q(m + 2, lambda_k * T2));
-    //   }
-    //   else {
-    //     numerator += coal_fac * data_fac * ((m + 2) / std::pow(lambda_k, 3)) *
-    //                  boost::math::gamma_q(m + 3, lambda_k * T1);
-    //     denominator += coal_fac * data_fac * (1. / std::pow(lambda_k, 2)) *
-    //                    boost::math::gamma_q(m + 2, lambda_k * T1);
-    //   }
-    // }
-    // return numerator / denominator;
   }
 }
 
@@ -1704,7 +1413,6 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
       segment_ages.push_back(date_segment(num_het_sites, segment_start, segment_end));
     }
   }
-  // todo: not this twice
   std::vector<int> het_sites = het_sites_from_thread(new_sample_ID, bp_starts, target_IDs);
   return remove_burn_in(bp_starts, target_IDs, segment_ages, het_sites);
 }
@@ -1816,8 +1524,7 @@ Threads::remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int
  * @param id2
  * @param start inclusive!
  * @param end exclusive!
- * @return true
- * @return false
+ * @return bool whether sequences match on the interval
  */
 bool Threads::genotype_interval_match(const int id1, const int id2, const int start,
                                       const int end) {
@@ -1836,7 +1543,7 @@ bool Threads::genotype_interval_match(const int id1, const int id2, const int st
 }
 
 /**
- * assuming input genotypes match sample_id on [segment_start, segment_end), how much can we extend
+ * Assuming input genotypes match sample_id on [segment_start, segment_end), how much can we extend
  * the region in either direction with out hitting a mismatch
  */
 std::pair<int, int> Threads::overflow_region(const std::vector<bool>& genotypes,
@@ -1866,7 +1573,7 @@ std::pair<int, int> Threads::overflow_region(const std::vector<bool>& genotypes,
 }
 
 /**
- *
+ * Fetch het-hom status for id1 and id2 in the region specified by site indices
  */
 std::vector<bool> Threads::fetch_het_hom_sites(const int id1, const int id2, const int start,
                                                const int end) {
@@ -1888,7 +1595,7 @@ std::vector<bool> Threads::fetch_het_hom_sites(const int id1, const int id2, con
   return het_hom_sites;
 }
 
-// This function... does... what exactly?
+// Given threading instructions, find all heterozygous sites
 std::vector<int> Threads::het_sites_from_thread(const int focal_ID,
                                                 const std::vector<int> bp_starts,
                                                 const std::vector<std::vector<int>> target_IDs) {

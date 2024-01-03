@@ -50,33 +50,30 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
       genetic_positions.at(i + 1) = genetic_positions.at(i) + 0.0000001;
     }
   }
-  // repeat last element
-  // cout << physical_positions.back() << " " << physical_positions[0] << " " << num_sites - 1 <<
-  // endl;
-  mean_bp_size = (double) (physical_positions.back() - physical_positions[0]) / (num_sites - 1);
-  // bp_sizes = std::vector<double>(physical_positions.size(), mean_bp_size);
 
-  // expected_branch_lengths.reserve(num_samples);
-  // for (int i = 0; i < num_samples; i++) {
+  // Mean interval size in base-pairs
+  mean_bp_size = (double) (physical_positions.back() - physical_positions[0]) / (num_sites - 1);
   for (int target_id : target_ids) {
-    segment_indices[target_id] = 0; //.push_back(0);
+    segment_indices[target_id] = 0;
     expected_branch_lengths[target_id] = demography.expected_branch_length(target_id + 1);
   }
+
+  // Site counters
   hmm_sites_processed = 0;
   het_sites_processed = 0;
-  // 0.5 here...???
-  // mutation_rate = 1.65e-8;
   std::tie(bp_boundaries, bp_sizes) = Threads::site_sizes(physical_positions);
 
   for (int i = 0; i < genetic_positions.size(); i++) {
     if (i == genetic_positions.size() - 1) {
-      cm_sizes.push_back(0.0000001); // hack .. for now
+      // TO allow for closely spaced markers
+      cm_sizes.push_back(0.0000001);
     }
     else {
       cm_sizes.push_back(genetic_positions.at(i + 1) - genetic_positions.at(i));
     }
   }
 
+  // Initialize the psmc-like segment-breaking algorithm
   int min_target_id = *(std::min_element(target_ids.begin(), target_ids.end()));
   if (min_target_id < n_hmm_samples) {
     psmc = HMM(demography, bp_sizes, cm_sizes, mutation_rate, 64);
@@ -84,25 +81,21 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
   else {
     psmc = HMM();
   }
-  // std::tie(cm_boundaries, cm_sizes) = Threads::site_sizes(genetic_positions);
 }
 
-// void ThreadsLowMem::initialize_viterbi(std::vector<MatchGroup>& new_match_groups) {
+// Initialize Threads-Viterbi instances using IDs and genetic positions for each match group
 void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_set<int>>>& match_ids,
                                        const std::vector<double>& cm_positions) {
   if (match_ids.size() != cm_positions.size() || match_ids.size() < 1) {
-    throw std::runtime_error("!!");
+    throw std::runtime_error("Match-data is missing or does not have same shape as genetic map");
   }
   match_groups.reserve(match_ids.size());
   for (int i = 0; i < match_ids.size(); i++) {
     match_groups.emplace_back(target_ids, match_ids.at(i), cm_positions.at(i));
   }
 
-  // match_groups = new_match_groups;
-  // cout << "init viterbi with " << match_groups.size() << "match_groups" << endl;
   match_group_idx = 0;
   hmm_sites_processed = 0;
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
@@ -113,6 +106,7 @@ void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_se
   }
 }
 
+// Pass genotypes for a single site through the intialized Threads-Viterbi instances
 void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
   bool group_change = false;
 
@@ -121,13 +115,9 @@ void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
           match_groups.at(match_group_idx + 1).cm_position) {
     match_group_idx++;
     group_change = true;
-    // cout << "switching match group at cM " << match_groups.at(match_group_idx).cm_position <<
-    // endl;
   }
   double k = 2. * 0.01 * cm_sizes.at(hmm_sites_processed);
   double l = 2. * mutation_rate * bp_sizes.at(hmm_sites_processed);
-  // double l = 2. * mutation_rate * mean_bp_size;
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
@@ -137,15 +127,12 @@ void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
           match_groups.at(match_group_idx).match_candidates.at(target_id));
     }
 
-    // cout << "branchlenghts" << endl;
     double t = expected_branch_lengths.at(target_id);
     double rho_c = k * t;
     double rho = sparse ? -std::log1p(-std::exp(-(k * t)))
                         : -(std::log1p(-std::exp(-(k * t))) - std::log(target_id));
-    //  -(std::log1p(-std::exp(-k)) - std::log(num_samples));
     double mu_c = l * t;
     double mu = -std::log1p(-std::exp(-(l * t)));
-    // cout << rho_c << " " << rho << " " << mu_c << " " << mu << endl;
     hmms.at(target_id).process_site(genotype, rho, rho_c, mu, mu_c);
   }
   hmm_sites_processed++;
@@ -153,8 +140,6 @@ void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
 }
 
 void ThreadsLowMem::traceback() {
-  // paths.reserve(num_samples);
-  // paths.push_back(ViterbiPath(0));
   for (int target_id : target_ids) {
     if (target_id == 0) {
       paths.emplace(target_id, ViterbiPath(0));
@@ -164,15 +149,11 @@ void ThreadsLowMem::traceback() {
       paths.emplace(target_id, hmms.at(target_id).traceback());
     }
   }
-  // for (int i = 1; i < num_samples; i++) {
-  //   // cout << "tracing back " << i << endl;
-  // }
   hmms.clear();
 }
 
 void ThreadsLowMem::process_site_hets(const std::vector<int>& genotype) {
 
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       if (genotype.at(0) == 1) {
@@ -191,7 +172,7 @@ void ThreadsLowMem::process_site_hets(const std::vector<int>& genotype) {
       // For now, we do not count unphased variants as a part of this,
       // so we verify at least one of the het-pair is a "1",
       // (i.e., "-7") is treated as "0".
-      // This is a bit lazy, but should be ok in most cases
+      // More work is needed to verify inclusion of unphased variants helps at all
       if (genotype.at(sample) != genotype.at(target_id) &&
           (genotype.at(sample) == 1 || genotype.at(target_id) == 1)) {
         path.het_sites.push_back(het_sites_processed);

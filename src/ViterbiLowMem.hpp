@@ -46,7 +46,6 @@ private:
   inline size_t coord_id_key(int i, int j) {
     return (size_t) i << 32 | (unsigned int) j;
   }
-  // don't think we need unique_ptr any more here
   std::unordered_map<size_t, TracebackNode> traceback_states;
   TracebackNode* recursive_insert(std::unordered_map<size_t, TracebackNode>& state_map,
                                   TracebackNode* state);

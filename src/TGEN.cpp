@@ -30,7 +30,7 @@ TGEN::TGEN(std::vector<int> _positions, std::vector<std::vector<int>> _bp_starts
   }
 
   interval_sets.reserve(bp_starts.size());
-  // Initialize interval maps for each sample
+  // Initialize interval maps for each sample. This can get too slow
   for (int i = 0; i < bp_starts.size(); i++) {
     SegmentSet iset;
     int n_segs = bp_starts[i].size();
@@ -40,11 +40,10 @@ TGEN::TGEN(std::vector<int> _positions, std::vector<std::vector<int>> _bp_starts
     int pos_idx = 0;
     std::vector<int> seg_hets;
     for (int j = 0; j < n_segs; j++) {
-      // TODO same for positions as for het_sites (is this the best way? seems error-prone)
       int seg_start = bp_starts[i][j];
       int seg_end = j == n_segs - 1 ? positions.back() : bp_starts[i][j + 1];
 
-      // TODO: do I really need to do binary search every thyme?
+      // Binary search through positions to get segment boundaries
       int seg_start_pos = *std::lower_bound(positions.begin(), positions.end(), seg_start);
       int seg_end_pos = j == n_segs - 1 ? positions.back()
                                         : *std::lower_bound(positions.begin(), positions.end(),
@@ -64,6 +63,7 @@ TGEN::TGEN(std::vector<int> _positions, std::vector<std::vector<int>> _bp_starts
   cached_genotypes_map[0] = -1;
 }
 
+// Eigen-based query
 Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
   clear_cache();
 
@@ -71,9 +71,6 @@ Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vect
   int start_pos = *std::lower_bound(positions.begin(), positions.end(), bp_from);
   int end_pos = *std::upper_bound(positions.begin(), positions.end(), bp_to);
   int idx_offset = pos_idx_map[start_pos];
-  // cout << "interval [" << start_pos << ", " << end_pos << ")\n";
-  // cout << "initializing a matrix of size (" << samples.size() << ", " << pos_idx_map[end_pos] -
-  // idx_offset << ")\n";
   genotype_cache.resize(samples.size(), pos_idx_map[end_pos] - idx_offset);
 
   TgenSegment range(start_pos, end_pos);
@@ -109,19 +106,13 @@ Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vect
           if (segment.target == 0) {
             auto copy_range = Eigen::seq(seg_start_idx, seg_end_idx - 1);
             // We've reached the root of the tree and copy from the "reference" genome
-            genotype_cache(i, insert_range) = reference_genome(
-                copy_range); //.eval(); //WARNING need .eval() here (or do we? I don't think we do)
+            genotype_cache(i, insert_range) = reference_genome(copy_range);
           }
           else {
             // We've found a cached genotype to copy from
-            // cout << "copying from " << segment.target << ":" <<
-            // cached_genotypes_map[segment.target]; cout << " on " << seg_start_idx - idx_offset <<
-            // " to " << seg_end_idx - idx_offset - 1 << endl;
 
             genotype_cache(i, insert_range) =
-                genotype_cache(cached_genotypes_map[segment.target],
-                               insert_range); //.eval(); //WARNING need .eval() here (or do we? I
-                                              // don't think we do)
+                genotype_cache(cached_genotypes_map[segment.target], insert_range);
           }
 
           // We then flip all the het sites
@@ -144,7 +135,8 @@ Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vect
   return genotype_cache;
 }
 
-// ATTENZIONE this makes a copy when returned through the python interface
+// std::vector-based query
+// Warning: This makes a copy when returned through the python interface
 std::vector<std::vector<bool>>& TGEN::query2(const int bp_from, const int bp_to,
                                              const std::vector<int>& samples) {
   genotypes.clear();

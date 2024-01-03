@@ -17,6 +17,10 @@ private:
   std::vector<int> ref_sorting;
 
 public:
+  // This is a version of the Threads haplotype matching algorithm
+  // adapted to be used for imputation.
+  // TODO: include a second pass through data here to get divergence values and not do that using
+  // Threads-fastLS
   int L;
   std::vector<int> query_sites;
   int num_samples;

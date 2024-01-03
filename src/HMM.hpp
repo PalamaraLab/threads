@@ -8,6 +8,7 @@
 
 using std::ostream;
 
+// This class contains the PSMC-like algorithm used to break up segments for small-N inference
 class HMM {
 public:
   // HMM data
