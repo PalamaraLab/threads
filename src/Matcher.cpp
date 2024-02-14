@@ -261,6 +261,21 @@ void Matcher::process_site(const std::vector<int>& genotype) {
       }
     }
 
+    for (int m : matches) {
+      std::unordered_map<int, int>& mmmap =
+          match_groups.at(match_group_idx).match_candidates_counts.at(i);
+      if (m >= i) {
+        throw std::runtime_error("Illegal match candidate " + std::to_string(m) +
+                                 ", something is very wrong");
+      }
+      if (!mmmap.count(m)) {
+        mmmap[m] = 1;
+      }
+      else {
+        mmmap[m]++;
+      }
+    }
+
     // Special case for last query
     if (next_query_site_idx == query_sites.size()) {
       match_groups.at(match_group_sites.size() - 1).filter_matches(min_matches);
