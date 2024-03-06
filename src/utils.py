@@ -54,9 +54,9 @@ def interpolate_map(map_gz, pgen):
     Reading in map file (format has columns [chrom, SNP, cM-pos, bp])
     """
     if (map_gz[:-3] == ".gz") :
-        maps = pd.read_table(map_gz, header=None, compression='gzip')
+        maps = pd.read_table(map_gz, header=None, compression='gzip', delim_whitespace=True)
     else:
-        maps = pd.read_table(map_gz, header=None)
+        maps = pd.read_table(map_gz, header=None, delim_whitespace=True)
     cm_pos_map = maps[2].values.astype(np.float64)
     phys_pos_map = maps[3].values.astype(np.float64)
     pvar = pgen.replace("pgen", "pvar")
@@ -66,7 +66,7 @@ def interpolate_map(map_gz, pgen):
     if os.path.isfile(bim):
         physical_positions = np.array(pd.read_table(bim, delim_whitespace=True, header=None, comment='#')[3]).astype(np.float64)
     elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(bim, delim_whitespace=True, header=None, comment='#')[0]).astype(np.float64)
+        physical_positions = np.array(pd.read_table(pvar, delim_whitespace=True, header=None, comment='#')[1]).astype(np.float64)
     else:
         raise RuntimeError(f"Can't find {bim} or {pvar}")
 
