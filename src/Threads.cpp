@@ -45,18 +45,18 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
   num_samples = 0;
 
   // Check maps are strictly increasing
-  for (int i = 0; i < num_sites - 1; i++) {
-    if (physical_positions[i + 1] <= physical_positions[i]) {
-      cerr << "Physical positions must be strictly increasing, found ";
-      cerr << physical_positions[i + 1] << " after " << physical_positions[i] << endl;
-      exit(1);
-    }
-    if (genetic_positions[i + 1] <= genetic_positions[i]) {
-      cerr << "Genetic coordinates must be strictly increasing, found ";
-      cerr << genetic_positions[i + 1] << " after " << genetic_positions[i] << endl;
-      exit(1);
-    }
-  }
+  // for (int i = 0; i < num_sites - 1; i++) {
+  //   if (physical_positions[i + 1] <= physical_positions[i]) {
+  //     cerr << "Physical positions must be strictly increasing, found ";
+  //     cerr << physical_positions[i + 1] << " after " << physical_positions[i] << endl;
+  //     exit(1);
+  //   }
+  //   if (genetic_positions[i + 1] <= genetic_positions[i]) {
+  //     cerr << "Genetic coordinates must be strictly increasing, found ";
+  //     cerr << genetic_positions[i + 1] << " after " << genetic_positions[i] << endl;
+  //     exit(1);
+  //   }
+  // }
 
   // Initialize map burn-in
   threading_start = physical_positions.front() + burn_in_left;
@@ -1196,7 +1196,10 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_pena
   const double t = demography.expected_branch_length(num_samples + 1);
   for (int i = 0; i < num_sites; i++) {
     // l is in cM units
-    const double k = 2. * 0.01 * cm_sizes[i] * t;
+    double k = 2. * 0.01 * cm_sizes[i] * t;
+    if (k == 0) {
+      k = 0.000001;
+    }
     rho_c[i] = k;
     // This is for the binary mutation model, to use {a, c, g, t} we add log(3)
     rho[i] = -std::log1p(-std::exp(-k));
@@ -1220,7 +1223,10 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_pena
 
   for (int i = 0; i < num_sites; i++) {
     // l is in cM units
-    const double k = 2. * 0.01 * cm_sizes[i] * t;
+    double k = 2. * 0.01 * cm_sizes[i] * t;
+    if (k == 0) {
+      k = 0.000001;
+    }
     rho_c[i] = k;
     rho[i] = -(std::log1p(-std::exp(-k)) - std::log(num_samples));
   }
