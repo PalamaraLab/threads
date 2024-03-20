@@ -1,6 +1,6 @@
-Installation (rescomp only):
+# Installation (rescomp only):
 
-Load everything we'll need (some of these won't be necessary but I haven't checked which ones) 
+Load everything we'll need
 ```
 module load GCC/11.3.0
 module load CMake/3.23.1-GCCcore-11.3.0
@@ -12,6 +12,8 @@ module load Eigen/3.4.0-GCCcore-11.3.0
 module load pybind11/2.9.2-GCCcore-11.3.0
 ```
 
+NB: Eigen is only used for functionality in TGEN.cpp. We can consider releasing without TGEN to have fewer dependencies.
+
 Fire up and activate a new venv:
 ```
 python -m venv venv
@@ -21,33 +23,48 @@ pip install --upgrade pip setuptools wheel
 pip install cmake ninja
 ```
 
-Then do the same for threads:
+Then install Threads:
 ```
 git clone https://github.com/PalamaraLab/TDPBWT.git
 cd TDPBWT
 pip install .
 ```
 
-To make sure it works you need
+# Usage
+## ARG inference
+
+You will need
 - genotypes in pgen format
 - list of variants in bim or pvar format (with the same prefix as the pgen)
 - genetic map with 4 columns: Chromosome, SNP, cM, bp
-- demography file, interpreted as haploid, with two columns: generation, effective population size
+- demography file with two columns: generations in the past, effective population size in haploids
 ```
 # Run the inference
 threads infer \
     --pgen path/to/input.pgen \
     --map_gz path/to/genetic_map.gz \
-    --mutation_rate 1.4e-8 \
     --demography path/to/demography \
-    --modality [wgs|array] \
-    --out path/to/output.threads
-    --region 123-456789 (optional)
-    --num_threads 8 (optional)
-
-# Convert to .argn and/or .tsz
-threads convert \
-    --threads snp_data.threads \
-    --argn snp_data.argn \
-    --tsz snp_data.tsz
+    --out path/to/output.threads \
+    --modality [wgs|array] (default: wgs) \
+    --mutation_rate (default: 1.4e-8) \
+    --region 1234-56789 (default: whole region, end-inclusive) \
+    --num_threads 8 (default: 1)
 ```
+This will write a `.threads` file to `path/to/output.threads`.
+
+## ARG conversion
+`.threads` files can be converted to `.argn` and `.tsz` using
+```
+threads convert \
+    --threads arg.threads \
+    --argn arg.argn
+```
+and 
+```
+threads convert \
+    --threads arg.threads \
+    --tsz arg.tsz
+```
+
+## Phasing/imputation/variant mapping
+These functions are in an experimental phase and will be released later.
