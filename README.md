@@ -38,19 +38,42 @@ You will need
 - list of variants in bim or pvar format (with the same prefix as the pgen)
 - genetic map with 4 columns: Chromosome, SNP, cM, bp
 - demography file with two columns: generations in the past, effective population size in haploids
+
+Minimal usage:
 ```
-# Run the inference
+threads infer \
+    --pgen path/to/input.pgen \
+    --map_gz path/to/genetic_map.gz \
+    --demography path/to/demography \
+    --out path/to/output.threads
+```
+This will write a `.threads` file to `path/to/output.threads`.
+
+`threads infer` accepts more options:
+```
 threads infer \
     --pgen path/to/input.pgen \
     --map_gz path/to/genetic_map.gz \
     --demography path/to/demography \
     --out path/to/output.threads \
     --modality [wgs|array] (default: wgs) \
+    --query_interval (default: 0.01) \
+    --match_group_interval (default: 0.5) \
+    --max_sample_batch_size (default: None) \
     --mutation_rate (default: 1.4e-8) \
     --region 1234-56789 (default: whole region, end-inclusive) \
     --num_threads 8 (default: 1)
 ```
-This will write a `.threads` file to `path/to/output.threads`.
+
+`--modality array` can be set for inference from arrays. 
+
+`--query_interval` and `--match_group_interval` can be raised to save memory for inference over long genomic regions, this will have little impact on accuracy, especially for sparse variants. 
+
+The HMM mutation rate can be set with `--mutation_rate`. This defaults to a realistic human rate of `1.4e-8` per site per generation.
+
+Specifying a `--region start-end` means the output ARG is truncated to those base-pair coordinates (end-inclusive). The whole input set will still be used for inference.
+
+Parallelism can be enabled by specifying `--num_threads`
 
 ## ARG conversion
 `.threads` files can be converted to `.argn` and `.tsz` using

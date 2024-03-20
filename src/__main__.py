@@ -384,7 +384,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 @click.option("--mutation_rate", required=True, type=float)
 @click.option("--num_threads", type=int, default=1)
 @click.option("--region", help="Of format 123-345, end-exclusive") 
-@click.option("--max_sample_batch_size", help="Of format 123-345, end-exclusive", default=None, type=int) 
+@click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
 def infer(command, pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     assert command == "infer"
