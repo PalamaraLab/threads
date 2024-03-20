@@ -545,6 +545,8 @@ def phase(scaffold, argn, ts, unphased, out):
     """
     Use an imputed arg to phase. Other input follows same shape as in SHAPEIT5-rare
     """
+    logging.info("Starting Threads-phase.")
+    logging.info("WARNING: Threads-phase is experimental functionality.")
     start_time = time.time()
     unphased_vcf = VCF(unphased)
     scaffold_vcf = VCF(scaffold)
