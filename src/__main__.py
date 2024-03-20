@@ -20,6 +20,7 @@ import pandas as pd
 
 from threads import Threads, ThreadsLowMem, Matcher, ViterbiPath
 from .utils import decompress_threads, interpolate_map, parse_demography, get_map_from_bim
+from .mapping_utils import map_region
 from datetime import datetime
 # from pandas_plink import read_plink1_bin
 # import xarray as xr
@@ -645,9 +646,84 @@ def convert(mode, threads, argn, tsz, max_n, verify):
     logging.info(f"Done, in {time.time() - start_time} seconds")
     goodbye()
 
+
+@click.command()
+@click.argument("mode", type=click.Choice(["files", "infer", "convert", "map"]))
+@click.option("--argn", help="Path to .argn file with results")
+@click.option("--out", help="Where to save results")
+@click.option("--maf", type=float, default=0.02, help="Don't map stuff with MAF above this")
+@click.option("--input", type=str, help="Path to bcf/vcf with genotypes to map. Most have AC/AN fields")
+@click.option("--region", type=str, help="Of format chr:start-end (both inclusive)")
+@click.option("--threads", type=int, help="Of format chr:start-end (both inclusive)", default=1)
+def map_mutations_to_arg(argn, out, maf, input, region, threads):
+    logging.info("Starting Threads-map with parameters")
+    logging.info(f"argn:    {argn}")
+    logging.info(f"out:     {out}")
+    logging.info(f"maf:     {maf}")
+    logging.info(f"input:   {input}")
+    logging.info(f"region:  {region}")
+    logging.info(f"threads: {threads}")
+    logging.info("WARNING: Threads-map is experimental.")
+    start_time = time.time()
+
+    actual_num_threads = min(len(os.sched_getaffinity(0)), threads)
+    logging.info(f"Requested {threads} threads, found {actual_num_threads}.")
+
+    return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = None, None, None, None
+    if actual_num_threads == 1:
+        return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = map_region(argn, input, region, maf)
+    else:
+        logging.info("Parsing VCF")
+        vcf = VCF(input)
+        positions = [record.POS for record in vcf(region)]
+        assert len(vcf.seqnames) == 1
+        contig = vcf.seqnames[0]
+
+        # split into subregions
+        split_positions = split_list(positions, actual_num_threads)
+        subregions = [f"{contig}:{pos[0]}-{pos[-1]}" for pos in split_positions]
+        ray.init()
+        map_region_remote = ray.remote(map_region)
+        results = ray.get([map_region_remote.remote(
+            argn, input, subregion, maf
+        ) for subregion in subregions])
+        ray.shutdown()
+        return_strings = []
+        n_attempted, n_parsimoniously_mapped, n_relate_mapped = 0, 0, 0
+        for rets, natt, npars, nrel in results:
+            return_strings += rets
+            n_attempted += natt
+            n_parsimoniously_mapped += npars
+            n_relate_mapped += nrel
+
+    n_mapped = n_relate_mapped + n_parsimoniously_mapped
+    n_unsuccessful = n_attempted - n_mapped
+
+    logging.info(f"Attempted to map {n_attempted} variants.")
+    logging.info(f"{n_parsimoniously_mapped} ({100 * n_parsimoniously_mapped / n_attempted:.3f}%) had MAC≤4 and mapped trivially.")
+    logging.info(f"{n_relate_mapped} ({100 * n_relate_mapped / n_attempted:.3f}%) MAC>4 variants mapped.")
+    logging.info(f"{n_unsuccessful} ({100 * n_unsuccessful / n_attempted:.3f}%) variants did not map.")
+    logging.info(f"Writing mutation mappings to {out}")
+    logging.info(f"Done in (s): {time.time()-start_time:.3f}")
+    goodbye()
+
+    # Output has columns 
+    # variant_id: string
+    # pos: int (base-pairs)
+    # flipped: bool
+    # mapping_string of the following format:
+    #   If uniquely mapped, a string "-1,edge_lower,edge_upper"
+    #   If multiply mapped, strings "leaf_1...leaf_k1,edge1_lower,edge1_upper;...;leaf_1...leafkN,edgeN_lower,edgeN_upper"
+    #       telling us the range (in generations) of each edge and the leaves it subtends (-1 if all carriers)
+    with open(out, "w") as outfile:
+        for string in return_strings:
+            outfile.write(string)
+    logging.info(f"Total runtime {time.time() - start_time:.2f}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Threads must be called with one of the threads functions: infer, convert, phase.")
+        print("Threads must be called with one of the threads functions: infer, convert, phase, map.")
         sys.exit()
     else:
         mode = sys.argv[1]
@@ -657,6 +733,8 @@ if __name__ == "__main__":
             convert()
         elif mode == "phase":
             phase()
+        elif mode == "map":
+            map_mutations_to_arg()
         elif mode == "-h" or mode == "--help":
             print("See documentation for each of the Threads functions: infer, convert, phase.")
         else:

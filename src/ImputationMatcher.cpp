@@ -26,14 +26,14 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
   sites_processed = 0;
 
   // Check maps are strictly increasing
-  for (int i = 0; i < num_sites - 1; i++) {
-    if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
-      std::string prompt = "Genetic coordinates must be strictly increasing, found ";
-      prompt += std::to_string(genetic_positions[i + 1]) + " after " +
-                std::to_string(genetic_positions[i]);
-      throw std::runtime_error(prompt);
-    }
-  }
+  // for (int i = 0; i < num_sites - 1; i++) {
+  //   if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
+  //     std::string prompt = "Genetic coordinates must be strictly increasing, found ";
+  //     prompt += std::to_string(genetic_positions[i + 1]) + " after " +
+  //               std::to_string(genetic_positions[i]);
+  //     throw std::runtime_error(prompt);
+  //   }
+  // }
 
   int query_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];
