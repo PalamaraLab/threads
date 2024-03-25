@@ -725,7 +725,7 @@ def map_mutations_to_arg(argn, out, maf, input, region, threads):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Threads must be called with one of the threads functions: infer, convert, phase, map.")
+        print("Threads must be called with one of the threads functions: infer, convert.")
         sys.exit()
     else:
         mode = sys.argv[1]
@@ -733,12 +733,12 @@ if __name__ == "__main__":
             infer()
         elif mode == "convert":
             convert()
-        elif mode == "phase":
-            phase()
-        elif mode == "map":
-            map_mutations_to_arg()
+        # elif mode == "phase":
+        #     phase()
+        # elif mode == "map":
+        #     map_mutations_to_arg()
         elif mode == "-h" or mode == "--help":
-            print("See documentation for each of the Threads functions: infer, convert, phase.")
+            print("See documentation for each of the Threads functions: infer, convert.")
         else:
             print(f"Unknown mode {mode}")
             sys.exit()
