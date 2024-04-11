@@ -81,7 +81,7 @@ target_include_directories(
 
 set_target_properties(threads_infer PROPERTIES PUBLIC_HEADER "${threads_infer_hdr}")
 
-target_link_libraries(threads_infer PRIVATE Boost::headers)
+target_link_libraries(threads_infer PRIVATE Boost::headers Boost::math)
 target_link_libraries(threads_infer PRIVATE project_warnings)
 target_link_libraries(threads_infer PUBLIC Eigen3::Eigen)
 
