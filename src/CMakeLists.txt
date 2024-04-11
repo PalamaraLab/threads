@@ -20,6 +20,7 @@ if(NOT Boost_FOUND)
             GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Boost)
+    set(Boost_VERSION "1.83")
 endif()
 message(STATUS "Found Boost ${Boost_VERSION}")
 
@@ -37,6 +38,7 @@ if(NOT Eigen3_FOUND)
             GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Eigen3)
+    set(Eigen3_VERSION "3.4")
 endif()
 message(STATUS "Found Eigen3 ${Eigen3_VERSION}")
 
