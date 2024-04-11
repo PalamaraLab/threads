@@ -111,7 +111,7 @@ with open('RELEASE_NOTES.md', encoding='utf-8') as f:
     release_notes = f.read()
 
 setup(
-    name='threads',
+    name='threads_infer',
     version='0.1',
     # author='PalamaraLab (https://palamaralab.github.io/)',
     url='https://github.com/PalamaraLab/TDPBWT/',
@@ -123,11 +123,11 @@ setup(
     #     ],
     # },
     description='Infer ARGs like you mean it.',
-    packages=['threads'],
+    packages=['threads_infer'],
     scripts=['./scripts/threads'],
     long_description='\n'.join([long_description, release_notes]),
     long_description_content_type='text/markdown',
-    ext_modules=[CMakeExtension('threads')],
+    ext_modules=[CMakeExtension('threads_infer')],
     cmdclass=dict(build_ext=CMakeBuild),
     zip_safe=False,
 )

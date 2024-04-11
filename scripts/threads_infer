@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+if [[ ! $@ ]]; then
+    python3 -m threads_infer -h
+else
+    python3 -m threads_infer $@
+fi
