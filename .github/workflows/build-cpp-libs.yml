@@ -1,0 +1,54 @@
+name: Build C++ libs
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+
+  build-libs:
+    name: Build C++ libs
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            build-type: Debug
+            system-deps: "sudo apt -y install libboost-dev libboost-math-dev libeigen3-dev"
+          - os: ubuntu-22.04
+            build-type: Release
+            system-deps: "sudo apt -y install libboost-dev libboost-math-dev libeigen3-dev"
+          - os: macos-14
+            build-type: Debug
+            system-deps: "brew install boost eigen"
+          - os: macos-14
+            build-type: Release
+            system-deps: "brew install boost eigen"
+
+    steps:
+
+      - name: checkout repo & submodules
+        uses: actions/checkout@v4
+
+      - name: install system packages
+        run: |
+          ${{ matrix.system-deps }}
+
+      - name: make build directory
+        run: |
+          mkdir ${{ matrix.build-type }}
+
+      - name: cmake configure
+        run: |
+          cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+        working-directory: ${{ matrix.build-type }}
+
+      - name: cmake build
+        run: |
+          cmake --build . --parallel
+        working-directory: ${{ matrix.build-type }}
