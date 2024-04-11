@@ -1,4 +1,4 @@
-from threads import Threads
+from threads_infer import Threads
 import numpy as np
 
 def test_trimmed_positions():
