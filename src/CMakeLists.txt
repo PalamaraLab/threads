@@ -1,20 +1,40 @@
 # This file is part of https://github.com/PalamaraLab/threads which is released under the GPL-3.0 license.
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
-# Find boost
-find_package(Boost REQUIRED)
+
+# Try to find Boost version 1.74 locally installed
+find_package(Boost 1.74 QUIET)
+
+if(NOT Boost_FOUND)
+    include(FetchContent)
+    message(STATUS "Suitable local version of Boost (>= 1.74) not found, fetching from repository...")
+
+    set(BOOST_INCLUDE_LIBRARIES math icl)
+    set(BOOST_ENABLE_CMAKE ON)
+
+    include(FetchContent)
+    FetchContent_Declare(
+            Boost
+            GIT_REPOSITORY https://github.com/boostorg/boost.git
+            GIT_TAG 564e2ac16907019696cdaba8a93e3588ec596062  # 1.83.0
+            GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(Boost)
+endif()
 message(STATUS "Found Boost ${Boost_VERSION}")
 
-# Try to find Eigen3 version 3.4 locally installed
-find_package(Eigen3 3.4 QUIET)  # Specify the minimum required version
 
-if(NOT Eigen3_FOUND)  # Check if a suitable version was not found
+# Try to find Eigen3 version 3.4 locally installed
+find_package(Eigen3 3.4 QUIET)
+
+if(NOT Eigen3_FOUND)
     include(FetchContent)
-    message(STATUS "Suitable local version of Eigen3 not found, fetching from repository...")
+    message(STATUS "Suitable local version of Eigen3 (>= 3.4) not found, fetching from repository...")
     FetchContent_Declare(
             Eigen3
             GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
             GIT_TAG        9df21dc8b4b576a7aa5c0094daa8d7e8b8be60f0  # 3.4 branch at 2024-03-15
+            GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Eigen3)
 endif()
