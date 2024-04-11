@@ -3,7 +3,22 @@
 
 # Find boost
 find_package(Boost REQUIRED)
-find_package(Eigen3 CONFIG REQUIRED)
+message(STATUS "Found Boost ${Boost_VERSION}")
+
+# Try to find Eigen3 version 3.4 locally installed
+find_package(Eigen3 3.4 QUIET)  # Specify the minimum required version
+
+if(NOT Eigen3_FOUND)  # Check if a suitable version was not found
+    include(FetchContent)
+    message(STATUS "Suitable local version of Eigen3 not found, fetching from repository...")
+    FetchContent_Declare(
+            Eigen3
+            GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+            GIT_TAG        9df21dc8b4b576a7aa5c0094daa8d7e8b8be60f0  # 3.4 branch at 2024-03-15
+    )
+    FetchContent_MakeAvailable(Eigen3)
+endif()
+message(STATUS "Found Eigen3 ${Eigen3_VERSION}")
 
 set(
         threads_infer_src
