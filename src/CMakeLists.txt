@@ -27,6 +27,7 @@ set(
         Threads.hpp
         HMM.hpp
         TGEN.hpp
+        TgenSegment.hpp
         ImputationMatcher.hpp
         Matcher.hpp
         ViterbiLowMem.hpp
