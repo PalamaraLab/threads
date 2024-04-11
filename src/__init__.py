@@ -1,1 +1,1 @@
-from threads_python_bindings import *
+from threads_infer_python_bindings import *

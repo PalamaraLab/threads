@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace py = pybind11;
-PYBIND11_MODULE(threads_python_bindings, m) {
+PYBIND11_MODULE(threads_infer_python_bindings, m) {
   py::class_<ImputationSegment>(m, "ImputationSegment")
       .def_readonly("seg_start", &ImputationSegment::seg_start)
       .def_readonly("ids", &ImputationSegment::ids)
