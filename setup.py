@@ -116,15 +116,14 @@ setup(
     # author='PalamaraLab (https://palamaralab.github.io/)',
     url='https://github.com/PalamaraLab/TDPBWT/',
     install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg_needle_lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
-    # extras_require={
-    #     'dev': [
-    #         'pytest',
-    #         'tszip>=0.2.1',
-    #     ],
-    # },
+    extras_require={
+        'dev': [
+            'pytest',
+        ],
+    },
     description='Infer ARGs like you mean it.',
     packages=['threads_infer'],
-    scripts=['./scripts/threads'],
+    scripts=['./scripts/threads_infer'],
     long_description='\n'.join([long_description, release_notes]),
     long_description_content_type='text/markdown',
     ext_modules=[CMakeExtension('threads_infer')],

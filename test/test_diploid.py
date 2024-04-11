@@ -1,4 +1,4 @@
-from threads import Threads
+from threads_infer import Threads
 import numpy as np
 
 
@@ -17,8 +17,6 @@ def test_diploid():
     t1.insert(G1[2])
     t1.insert(G1[3])
     path_a, path_b = t1.diploid_ls(G1[1] + G1[2])
-    import pdb
-    pdb.set_trace()
     assert len(path_a) == len(path_b) == 1
     assert path_a[0][1][0] == 1 and path_b[0][1][0] == 2 or path_a[0][1][0] == 2 and path_b[0][1][0] == 1
 

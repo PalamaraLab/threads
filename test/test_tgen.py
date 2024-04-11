@@ -1,5 +1,5 @@
 import numpy as np
-from threads import TGEN, Threads
+from threads_infer import TGEN, Threads
 
 def test_small_tgen():
     mu = 0.001
