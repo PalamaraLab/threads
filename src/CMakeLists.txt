@@ -2,8 +2,8 @@
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
 # Find boost
-find_package(Boost)# COMPONENTS iostreams REQUIRED)
-find_package(Eigen3)
+find_package(Boost REQUIRED)
+find_package(Eigen3 CONFIG REQUIRED)
 
 set(
         threads_src
@@ -43,10 +43,9 @@ target_include_directories(
 
 set_target_properties(threads PROPERTIES PUBLIC_HEADER "${threads_hdr}")
 
-target_link_libraries(threads PRIVATE Boost::headers)# Boost::iostreams)
+target_link_libraries(threads PRIVATE Boost::headers)
 target_link_libraries(threads PRIVATE project_warnings)
-
-# target_include_directories(threads PUBLIC ${Boost_INCLUDE_DIRS})
+target_link_libraries(threads PUBLIC Eigen3::Eigen)
 
 if (PYTHON_BINDINGS)
     set_target_properties(threads PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
