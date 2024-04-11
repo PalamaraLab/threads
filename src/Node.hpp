@@ -1,19 +1,22 @@
-#include <vector>
+
+#include <array>
 #include <iostream>
+
 using std::ostream;
 
 class Node {
 public:
   // Node data
-  int sample_ID, divergence;
+  int sample_ID;
+  int divergence;
   bool genotype;
 
   // Linked list pointers
-  Node* above;
-  Node* below;
+  Node* above = nullptr;
+  Node* below = nullptr;
 
   // "Next below to the right" for 0 and 1
-  Node* w[2];
+  std::array<Node*, 2> w = {nullptr, nullptr};
 
   // Constructors
   Node(int sample_ID, int divergence, bool genotype);
