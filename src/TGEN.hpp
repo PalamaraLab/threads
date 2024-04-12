@@ -1,3 +1,6 @@
+#ifndef THREADS_INFER_TGEN_HPP
+#define THREADS_INFER_TGEN_HPP
+
 #include <Eigen/Dense>
 #include <limits>
 #include <memory>
@@ -25,3 +28,5 @@ public:
 
   void clear_cache();
 };
+
+#endif // THREADS_INFER_TGEN_HPP

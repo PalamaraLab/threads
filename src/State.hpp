@@ -1,3 +1,6 @@
+#ifndef THREADS_INFER_STATE_HPP
+#define THREADS_INFER_STATE_HPP
+
 #include "Node.hpp"
 
 #include <vector>
@@ -64,3 +67,4 @@ public:
   std::vector<State> dump();
 };
 
+#endif // THREADS_INFER_STATE_HPP

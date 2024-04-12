@@ -1,3 +1,5 @@
+#ifndef THREADS_INFER_NODE_HPP
+#define THREADS_INFER_NODE_HPP
 
 #include <array>
 #include <iostream>
@@ -27,3 +29,5 @@ public:
   // Output
   friend ostream& operator<<(ostream& os, const Node& node);
 };
+
+#endif // THREADS_INFER_NODE_HPP

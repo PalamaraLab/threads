@@ -1,3 +1,6 @@
+#ifndef THREADS_INFER_DEMOGRAPHY_HPP
+#define THREADS_INFER_DEMOGRAPHY_HPP
+
 #include <vector>
 #include <iostream>
 using std::ostream;
@@ -24,3 +27,5 @@ public:
   // Output
   friend ostream& operator<<(ostream& os, const Demography& demography);
 };
+
+#endif // THREADS_INFER_DEMOGRAPHY_HPP

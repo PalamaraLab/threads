@@ -1,3 +1,6 @@
+#ifndef THREADS_INFER_VITERBI_LOW_MEM_HPP
+#define THREADS_INFER_VITERBI_LOW_MEM_HPP
+
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -69,3 +72,5 @@ public:
   void prune();
   ViterbiPath traceback();
 };
+
+#endif // THREADS_INFER_VITERBI_LOW_MEM_HPP

@@ -1,3 +1,6 @@
+#ifndef THREADS_INFER_TGEN_SEGMENT_HPP
+#define THREADS_INFER_TGEN_SEGMENT_HPP
+
 #include <algorithm>
 #include <iostream>
 #include <limits>
@@ -53,3 +56,5 @@ public:
 private:
   int _first, _past;
 };
+
+#endif // THREADS_INFER_TGEN_SEGMENT_HPP
