@@ -4,8 +4,7 @@
 #include <iostream>
 #include <limits>
 #include <vector>
-using std::cout;
-using std::endl;
+
 
 TracebackState::TracebackState(int _site, Node* _best_prev_node, TracebackState* _prev)
     : site(_site), best_prev_node(_best_prev_node), prev(_prev) {
@@ -19,7 +18,7 @@ bool State::genotype() {
   return this->below->above->genotype;
 }
 
-ostream& operator<<(ostream& os, State& state) {
+std::ostream& operator<<(std::ostream& os, State& state) {
   os << "State with nodes (" << state.below->sample_ID;
   os << ") and (" << state.below->above->sample_ID;
   os << ") with score " << state.score;
@@ -34,7 +33,7 @@ StatePair::StatePair(Node* _below_a, Node* _below_b, double _score, TracebackSta
       traceback_b(_traceback_b) {
 }
 
-ostream& operator<<(ostream& os, StatePair& pair) {
+std::ostream& operator<<(std::ostream& os, StatePair& pair) {
   os << "State-pair between a: nodes " << pair.below_a->sample_ID;
   os << ", " << pair.below_a->above->sample_ID;
   os << " and b: nodes " << pair.below_b->sample_ID;
