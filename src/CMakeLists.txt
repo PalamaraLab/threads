@@ -2,26 +2,8 @@
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
 
-# Try to find Boost version 1.74 locally installed
-find_package(Boost 1.74 QUIET)
-
-if(NOT Boost_FOUND)
-    include(FetchContent)
-    message(STATUS "Suitable local version of Boost (>= 1.74) not found, fetching from repository...")
-
-    set(BOOST_INCLUDE_LIBRARIES math icl)
-    set(BOOST_ENABLE_CMAKE ON)
-
-    include(FetchContent)
-    FetchContent_Declare(
-            Boost
-            GIT_REPOSITORY https://github.com/boostorg/boost.git
-            GIT_TAG 564e2ac16907019696cdaba8a93e3588ec596062  # 1.83.0
-            GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(Boost)
-    set(Boost_VERSION "1.83")
-endif()
+# Find Boost
+find_package(Boost REQUIRED)
 message(STATUS "Found Boost ${Boost_VERSION}")
 
 
@@ -81,7 +63,7 @@ target_include_directories(
 
 set_target_properties(threads_infer PROPERTIES PUBLIC_HEADER "${threads_infer_hdr}")
 
-target_link_libraries(threads_infer PRIVATE Boost::headers Boost::math)
+target_link_libraries(threads_infer PRIVATE Boost::headers)
 target_link_libraries(threads_infer PRIVATE project_warnings)
 target_link_libraries(threads_infer PUBLIC Eigen3::Eigen)
 
