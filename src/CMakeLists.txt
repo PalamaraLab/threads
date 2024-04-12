@@ -6,6 +6,15 @@
 find_package(Boost REQUIRED)
 message(STATUS "Found Boost ${Boost_VERSION}")
 
+# When using GCC C++17 and Boost ICL < 1.65, need to turn off new-ttp-matching.
+# See https://github.com/PalamaraLab/TDPBWT/issues/7
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if (Boost_FOUND AND Boost_VERSION VERSION_LESS "1.65.0")
+        message(STATUS "GCC is used with Boost version less than 1.65, disabling -fnew-ttp-matching.")
+        add_compile_options(-fno-new-ttp-matching)
+    endif()
+endif()
+
 
 # Try to find Eigen3 version 3.4 locally installed
 find_package(Eigen3 3.4 QUIET)
