@@ -8,9 +8,6 @@
 #include <unordered_set>
 #include <vector>
 
-using std::cerr;
-using std::cout;
-using std::endl;
 
 // For a given interval, this contains all the matches for all the samples
 MatchGroup::MatchGroup(int _num_samples, double _cm_position)
@@ -164,8 +161,8 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
     throw std::runtime_error(prompt);
   }
   match_group_idx = 0;
-  cout << "Will use " << query_sites.size() << " query sites and " << match_group_sites.size()
-       << " match_group_sites" << endl;
+  std::cout << "Will use " << query_sites.size() << " query sites and " << match_group_sites.size()
+       << " match_group_sites" << std::endl;
 
   match_groups.reserve(match_group_sites.size());
   for (int match_group_site : match_group_sites) {

@@ -4,7 +4,6 @@
 #include <array>
 #include <iostream>
 
-using std::ostream;
 
 class Node {
 public:
@@ -27,7 +26,7 @@ public:
   void insert_above(Node* node);
 
   // Output
-  friend ostream& operator<<(ostream& os, const Node& node);
+  friend std::ostream& operator<<(std::ostream& os, const Node& node);
 };
 
 #endif // THREADS_INFER_NODE_HPP
