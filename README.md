@@ -39,14 +39,19 @@ You will need
 - genetic map with 4 columns: Chromosome, SNP, cM, bp
 - demography file with two columns: generations in the past, effective population size in haploids
 
-Minimal usage:
+Minimal usage using the provided example data:
 ```
 threads infer \
-    --pgen path/to/input.pgen \
-    --map_gz path/to/genetic_map.gz \
-    --demography path/to/demography \
-    --out path/to/output.threads
+    --pgen example/example_data.pgen \
+    --map_gz example/example_data.map \
+    --demography example/Ne10000.demo \
+    --out example/example_data.threads
+
+threads convert \
+    --threads example/example_data.threads \
+    --argn example/example_data.argn
 ```
+
 This will write a `.threads` file to `path/to/output.threads`.
 
 `threads infer` accepts more options:
