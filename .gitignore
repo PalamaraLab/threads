@@ -5,3 +5,5 @@ pybind11
 venv
 *.egg-info
 */__pycache__
+example/example_data.threads
+example/example_data.argn
