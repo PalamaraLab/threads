@@ -311,17 +311,17 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 @click.command()
-@click.argument("command", type=click.Choice(["files", "infer", "convert", "impute"]))
-@click.option("--pgen", required=True)
-@click.option("--map_gz", default=None)
-@click.option("--recombination_rate", default=1.3e-8, type=float)
-@click.option("--demography", required=True)
-@click.option("--mode", required=True, type=click.Choice(['array', 'wgs']))
-@click.option("--query_interval", type=float, default=0.01, help="For the preliminary haplotype matching. Given in cM.")
-@click.option("--match_group_interval", type=float, default=0.5, help="For the preliminary haplotype matching. Given in cM.")
-@click.option("--mutation_rate", required=True, type=float)
-@click.option("--num_threads", type=int, default=1)
-@click.option("--region", help="Of format 123-345, end-exclusive") 
+@click.argument("command", type=click.Choice(["infer", "convert"]))
+@click.option("--pgen", required=True, help="Path to input genotypes in pgen format.")
+@click.option("--map_gz", default=None, help="Path to input genotype map with columns chromosome, snp, cM-position, bp-position.")
+@click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed.")
+@click.option("--demography", required=True, help="Path to input genotype.")
+@click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array).")
+@click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM.")
+@click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM.")
+@click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate.")
+@click.option("--num_threads", type=int, default=1, help="Number of computational threads to request.")
+@click.option("--region", help="Region of genome for which ARG is output. The full genotype is still used for inference.")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
 def infer(command, pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
@@ -546,7 +546,7 @@ def phase(scaffold, argn, ts, unphased, out):
     phased_writer.close()
 
 @click.command()
-@click.argument("mode", type=click.Choice(["files", "infer", "convert"]))
+@click.argument("mode", type=click.Choice(["infer", "convert"]))
 @click.option("--threads", required=True, help="Path to an input .threads file.")
 @click.option("--argn", default=None, help="Path to an output .argn file.")
 @click.option("--tsz", default=None, help="Path to an output .tsz file.")
@@ -589,7 +589,7 @@ def convert(mode, threads, argn, tsz, max_n, verify):
 
 
 @click.command()
-@click.argument("mode", type=click.Choice(["files", "infer", "convert", "map"]))
+@click.argument("mode", type=click.Choice(["infer", "convert", "map"]))
 @click.option("--argn", help="Path to .argn file with results")
 @click.option("--out", help="Where to save results")
 @click.option("--maf", type=float, default=0.02, help="Don't map stuff with MAF above this")
