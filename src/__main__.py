@@ -8,22 +8,16 @@ import click
 import logging
 import pgenlib
 import importlib
-from memory_profiler import profile
-import subprocess
 import arg_needle_lib
 
 os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
 import numpy as np
-import xarray as xr
-import pandas as pd
 
-from threads import Threads, ThreadsLowMem, Matcher, ViterbiPath
+from threads import ThreadsLowMem, Matcher, ViterbiPath
 from .utils import decompress_threads, interpolate_map, parse_demography, get_map_from_bim
 from .mapping_utils import map_region
 from datetime import datetime
-# from pandas_plink import read_plink1_bin
-# import xarray as xr
 from cyvcf2 import VCF, Writer
 
 def print_help_msg(command):
@@ -36,7 +30,7 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S')
 
 def goodbye():
-    # All credit to https://www.asciiart.eu/miscellaneous/dna
+    # Credit to a nameless contribution at https://www.asciiart.eu/miscellaneous/dna
     print(
     """
     `-:-.   ,-;"`-:-.   ,-;"`-:-.   ,-;"`-:-.   ,-;"
@@ -47,8 +41,11 @@ def goodbye():
     """
     )
 
+
 def phase_distance(arg, arg_pos, target, het_carriers, hom_carriers):
-    """This function only used for phasing. Compute 'phasing distance' as described in the paper."""
+    """
+    Compute 'phasing distance' as described in the thesis.
+    """
     if len(het_carriers) + 2 * len(hom_carriers) == 1:
         # negative so lower number (with longer pendant branch) wins
         return -arg.node(target).parent_edge_at(arg_pos).parent.height
@@ -58,6 +55,7 @@ def phase_distance(arg, arg_pos, target, het_carriers, hom_carriers):
     for hom in hom_carriers:
         phase_distance += arg.mrca(target, 2 * hom, arg_pos).height + arg.mrca(target, 2 * hom + 1, arg_pos).height
     return phase_distance
+
 
 def serialize_paths(paths, positions, out, start=None, end=None):
     """
@@ -148,66 +146,6 @@ def serialize_paths(paths, positions, out, start=None, end=None):
 
     f.close()
 
-# def serialize(out, threads, samples, positions, arg_range, L=1):
-#     num_threads = len(samples)
-#     num_sites = len(positions)
-
-#     thread_starts = []
-#     mut_starts = []
-#     thread_start = 0
-#     mut_start = 0
-#     all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
-#     for i, thread in enumerate(threads):
-#         bps, ids, ages, het_sites = thread
-#         all_bps += bps
-#         all_ids += ids
-#         all_ages += ages
-#         all_het_sites += het_sites
-#         thread_starts.append(thread_start)
-#         mut_starts.append(mut_start)
-#         thread_start += len(bps)
-#         mut_start += len(het_sites)
-#     num_stitches = len(all_bps)
-#     num_mutations = len(all_het_sites)
-
-#     assert len(all_bps) == len(all_ids) == len(all_ages)
-#     assert len(threads) == len(samples)
-
-#     f = h5py.File(out, "w")
-#     f.attrs['datetime_created'] = datetime.now().isoformat()
-
-#     compression_opts = 9
-#     dset_samples = f.create_dataset("samples", (num_threads, 3), dtype=int, compression='gzip',
-#                                     compression_opts=compression_opts)
-#     dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
-#                                  compression_opts=compression_opts)
-#     # First L columns are random samples for imputation
-#     dset_targets = f.create_dataset("thread_targets", (num_stitches, L + 2), dtype=int, compression='gzip',
-#                                     compression_opts=compression_opts)
-#     dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
-#                                  compression_opts=compression_opts)
-#     dset_het_s = f.create_dataset("het_sites", (num_mutations), dtype=int, compression='gzip',
-#                                   compression_opts=compression_opts)
-#     dset_range = f.create_dataset("arg_range", (2), dtype=np.double, compression='gzip',
-#                                   compression_opts=compression_opts)
-
-#     dset_samples[:, 0] = samples
-#     dset_samples[:, 1] = thread_starts
-#     dset_samples[:, 2] = mut_starts
-#     dset_pos[:] = positions
-
-#     for i in range(L + 1):
-#         dset_targets[:, i] = [ids[i] for ids in all_ids]
-
-#     dset_targets[:, L + 1] = all_bps
-
-#     dset_ages[:] = all_ages
-
-#     dset_het_s[:] = all_het_sites
-
-#     dset_range[:] = arg_range
-
-#     f.close()
 
 def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False):
     """
@@ -387,6 +325,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
 def infer(command, pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+    """Wrapper for the main ARG inference routine."""
     assert command == "infer"
     start_time = time.time()
     logging.info(f"Starting Threads-infer with the following parameters:")
@@ -543,7 +482,7 @@ def infer(command, pgen, map_gz, recombination_rate, demography, mutation_rate, 
 @click.option("--out", required=True, help="Path to phased output vcf")
 def phase(scaffold, argn, ts, unphased, out):
     """
-    Use an imputed arg to phase. Other input follows same shape as in SHAPEIT5-rare
+    Use an imputed arg to phase. Other input follows same shape as in SHAPEIT5-rare.
     """
     logging.info("Starting Threads-phase.")
     logging.info("WARNING: Threads-phase is experimental functionality.")
@@ -658,6 +597,9 @@ def convert(mode, threads, argn, tsz, max_n, verify):
 @click.option("--region", type=str, help="Of format chr:start-end (both inclusive)")
 @click.option("--threads", type=int, help="Of format chr:start-end (both inclusive)", default=1)
 def map_mutations_to_arg(argn, out, maf, input, region, threads):
+    """
+    Map mutations to an ARG using a method based on Speidel et al. (2019) and save output to a .mut file to inform imputation.
+    """
     logging.info("Starting Threads-map with parameters")
     logging.info(f"argn:    {argn}")
     logging.info(f"out:     {out}")
@@ -733,10 +675,6 @@ if __name__ == "__main__":
             infer()
         elif mode == "convert":
             convert()
-        # elif mode == "phase":
-        #     phase()
-        # elif mode == "map":
-        #     map_mutations_to_arg()
         elif mode == "-h" or mode == "--help":
             print("See documentation for each of the Threads functions: infer, convert.")
         else:
