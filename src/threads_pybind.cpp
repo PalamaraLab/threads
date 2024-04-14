@@ -1,6 +1,4 @@
-// #include "Matcher.hpp"
 #include "TGEN.hpp"
-// #include "Threads.hpp"
 #include "ImputationMatcher.hpp"
 #include "ThreadsLowMem.hpp"
 
@@ -16,26 +14,6 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def_readonly("ids", &ImputationSegment::ids)
       .def_readonly("weights", &ImputationSegment::weights)
       .def_readonly("ages", &ImputationSegment::ages);
-  py::class_<Node>(m, "Node")
-      .def_readonly("sample_ID", &Node::sample_ID)
-      .def_readonly("genotype", &Node::genotype)
-      .def_readonly("divergence", &Node::divergence);
-  py::class_<Demography>(m, "Demography")
-      .def_readonly("times", &Demography::times)
-      .def_readonly("sizes", &Demography::sizes)
-      .def("std_to_gen", &Demography::std_to_gen)
-      .def("expected_branch_length", &Demography::expected_branch_length);
-
-  py::class_<HMM>(m, "HMM")
-      .def_readonly("num_states", &HMM::num_states)
-      .def_readonly("expected_times", &HMM::expected_times)
-      .def_readonly("trellis", &HMM::trellis)
-      .def_readonly("pointers", &HMM::pointers)
-      .def_readonly("hom_score", &HMM::hom_score)
-      .def_readonly("het_score", &HMM::het_score)
-      .def_readonly("transition_score", &HMM::transition_score)
-      .def_readonly("non_transition_score", &HMM::non_transition_score)
-      .def("breakpoints", &HMM::breakpoints);
 
   py::class_<ThreadsLowMem>(m, "ThreadsLowMem")
       .def(py::init<std::vector<int>, std::vector<double>, std::vector<double>, std::vector<double>,
@@ -104,18 +82,10 @@ PYBIND11_MODULE(threads_python_bindings, m) {
       .def(py::init<int, int, const std::vector<double>&, double, int>(), "Initialize",
            py::arg("num_reference"), py::arg("num_target"), py::arg("genetic_positions"),
            py::arg("query_interval_size"), py::arg("L") = 8)
-      .def_readonly("query_sites", &ImputationMatcher::query_sites)
-      .def_readonly("genetic_positions", &ImputationMatcher::genetic_positions)
-      .def_readonly("query_interval_size", &ImputationMatcher::query_interval_size)
-      .def_readonly("num_samples", &ImputationMatcher::num_samples)
-      .def_readonly("num_reference", &ImputationMatcher::num_reference)
-      .def_readonly("num_target", &ImputationMatcher::num_target)
-      .def_readonly("num_sites", &ImputationMatcher::num_sites)
       .def("process_site", &ImputationMatcher::process_site)
-      .def("get_matches", &ImputationMatcher::get_matches)
-      .def("get_sorting", &ImputationMatcher::get_sorting);
+      .def("get_matches", &ImputationMatcher::get_matches);
 
-  py::class_<Threads>(m, "Threads")
+  py::class_<ThreadsFastLS>(m, "ThreadsFastLS")
       .def(py::init<std::vector<double>, std::vector<double>, double, double, bool, int, bool, int,
                     int>(),
            "Initialize", py::arg("physical_positions"), py::arg("genetic_positions"),
@@ -128,47 +98,14 @@ PYBIND11_MODULE(threads_python_bindings, m) {
            py::arg("mutation_rate"), py::arg("Ne_sizes"), py::arg("Ne_times"),
            py::arg("sparse_sites") = false, py::arg("n_prune") = -1, py::arg("use_hmm") = false,
            py::arg("burn_in_left") = 0, py::arg("burn_in_right") = 0)
-      .def_readonly("num_samples", &Threads::num_samples)
-      .def_readonly("num_sites", &Threads::num_sites)
-      .def_readonly("mutation_rate", &Threads::mutation_rate)
-      .def_readonly("bp_sizes", &Threads::bp_sizes)
-      .def_readonly("cm_sizes", &Threads::cm_sizes)
-      .def_readonly("mutation_rate", &Threads::mutation_rate)
-      .def_readonly("n_prune", &Threads::mutation_rate)
-      .def_readonly("ID_map", &Threads::ID_map)
-      .def_readonly("demography", &Threads::demography)
-      .def_readonly("hmm", &Threads::hmm)
-      .def_readonly("threading_start", &Threads::threading_start)
-      .def_readonly("threading_end", &Threads::threading_end)
-      .def(
-          "query_panel",
-          [](const Threads& threads, const int i, const int j) { return *(threads.panel[i][j]); },
-          "return panel entry at (i, j)")
-      .def("trimmed_positions", &Threads::trimmed_positions)
-      .def("delete_hmm", &Threads::delete_hmm)
-      .def("mutation_penalties", &Threads::mutation_penalties)
-      .def("mutation_penalties_impute5", &Threads::mutation_penalties_impute5)
-      .def("recombination_penalties", &Threads::recombination_penalties)
-      .def("recombination_penalties_correct", &Threads::recombination_penalties_correct)
-      .def("insert", py::overload_cast<const std::vector<bool>&>(&Threads::insert),
+      .def("insert", py::overload_cast<const std::vector<bool>&>(&ThreadsFastLS::insert),
            py::arg("genotypes"))
-      .def("insert", py::overload_cast<const int, const std::vector<bool>&>(&Threads::insert),
-           py::arg("ID"), py::arg("genotypes"))
-      .def("remove", &Threads::remove, py::arg("ID"))
-      .def("print_sorting", &Threads::print_sorting)
-      .def("threads_ls", &Threads::threads_ls)
-      .def("thread", py::overload_cast<const std::vector<bool>&>(&Threads::thread),
-           py::arg("genotypes"))
-      .def("thread", py::overload_cast<const int, const std::vector<bool>&>(&Threads::thread),
-           py::arg("new_sample_ID"), py::arg("genotypes"))
-      .def("impute", &Threads::impute)
-      .def("diploid_ls", &Threads::diploid_ls, py::arg("genotypes"));
+      .def("impute", &ThreadsFastLS::impute);
 
   py::class_<TGEN>(m, "TGEN")
       .def(py::init<std::vector<int>, std::vector<std::vector<int>>, std::vector<std::vector<int>>,
                     std::vector<std::vector<int>>>(),
            "Initialize", py::arg("positions"), py::arg("bp_starts"), py::arg("target_ids"),
            py::arg("het_sites"))
-      .def("query", &TGEN::query, py::return_value_policy::take_ownership)
-      .def("query2", &TGEN::query2, py::return_value_policy::take_ownership);
+      .def("query", &TGEN::query, py::return_value_policy::take_ownership);
 }

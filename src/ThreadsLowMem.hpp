@@ -1,5 +1,5 @@
 #include "Matcher.hpp"
-#include "Threads.hpp"
+#include "ThreadsFastLS.hpp"
 #include "ViterbiLowMem.hpp"
 #ifndef DEMOGRAPHY
 #define DEMOGRAPHY

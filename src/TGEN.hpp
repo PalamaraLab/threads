@@ -121,9 +121,9 @@ public:
   TGEN(std::vector<int> _positions, std::vector<std::vector<int>> _bp_starts,
        std::vector<std::vector<int>> _target_IDs, std::vector<std::vector<int>> _het_sites);
 
-  Eigen::MatrixXi& query(const int start_pos, const int end_pos, const std::vector<int>& samples);
-  std::vector<std::vector<bool>>& query2(const int start_pos, const int end_pos,
-                                         const std::vector<int>& samples);
+  std::vector<std::vector<bool>>& query(const int start_pos, const int end_pos, const std::vector<int>& samples);
 
+  // Deprecated Eigen version:
+  // Eigen::MatrixXi& query(const int start_pos, const int end_pos, const std::vector<int>& samples);
   void clear_cache();
 };
