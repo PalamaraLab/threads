@@ -117,8 +117,8 @@ public:
   }
 
   // Eigen-based query
-  Eigen::MatrixXi& query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
-    clear_cache();
+//  Eigen::MatrixXi& query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
+//    clear_cache();
 
 // Deprecated eigen-based query
 // Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
@@ -194,9 +194,9 @@ public:
 
 // std::vector-based query
 // Warning: This makes a copy when returned through the python interface
-std::vector<std::vector<bool>>& TGEN::query(const int bp_from, const int bp_to,
-                                             const std::vector<int>& samples) {
-  genotypes.clear();
+  std::vector<std::vector<bool>>& query(const int bp_from, const int bp_to,
+                                        const std::vector<int>& samples) {
+    genotypes.clear();
 
     // Find number of expected sites
     int start_pos = *std::lower_bound(positions.begin(), positions.end(), bp_from);
@@ -283,14 +283,9 @@ TGEN::TGEN(std::vector<int> _positions, std::vector<std::vector<int>> _bp_starts
 
 TGEN::~TGEN() = default;
 
-Eigen::MatrixXi& TGEN::query(const int start_pos, const int end_pos, const std::vector<int>& samples) {
+std::vector<std::vector<bool>>& TGEN::query(int start_pos, int end_pos, const std::vector<int>& samples) {
   // Forward the call to pimpl
   return pimpl->query(start_pos, end_pos, samples);
-}
-
-std::vector<std::vector<bool>>& TGEN::query2(const int start_pos, const int end_pos, const std::vector<int>& samples) {
-  // Forward the call to pimpl
-  return pimpl->query2(start_pos, end_pos, samples);
 }
 
 void TGEN::clear_cache() {
