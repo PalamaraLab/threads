@@ -22,10 +22,10 @@ public:
 
   ~TGEN(); // Define the destructor for proper deletion of pimpl
 
-  Eigen::MatrixXi& query(const int start_pos, const int end_pos, const std::vector<int>& samples);
-  std::vector<std::vector<bool>>& query2(const int start_pos, const int end_pos,
-                                         const std::vector<int>& samples);
+  std::vector<std::vector<bool>>& query(const int start_pos, const int end_pos, const std::vector<int>& samples);
 
+  // Deprecated Eigen version:
+  // Eigen::MatrixXi& query(const int start_pos, const int end_pos, const std::vector<int>& samples);
   void clear_cache();
 };
 

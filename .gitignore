@@ -193,3 +193,6 @@ cython_debug/
 .idea/
 
 cmake-build*/
+
+example/example_data.threads
+example/example_data.argn

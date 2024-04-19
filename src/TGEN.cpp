@@ -120,79 +120,83 @@ public:
   Eigen::MatrixXi& query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
     clear_cache();
 
-    // Find number of expected sites
-    int start_pos = *std::lower_bound(positions.begin(), positions.end(), bp_from);
-    int end_pos = *std::upper_bound(positions.begin(), positions.end(), bp_to);
-    int idx_offset = pos_idx_map[start_pos];
-    genotype_cache.resize(samples.size(), pos_idx_map[end_pos] - idx_offset);
+// Deprecated eigen-based query
+// Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
+//   clear_cache();
 
-    TgenSegment range(start_pos, end_pos);
+//   // Find number of expected sites
+//   int start_pos = *std::lower_bound(positions.begin(), positions.end(), bp_from);
+//   int end_pos = *std::upper_bound(positions.begin(), positions.end(), bp_to);
+//   int idx_offset = pos_idx_map[start_pos];
+//   genotype_cache.resize(samples.size(), pos_idx_map[end_pos] - idx_offset);
 
-    for (int i = 0; i < samples.size(); i++) {
-      cached_genotypes_map[samples[i]] = i;
-      if (samples[i] == 0) {
-        auto insert_range =
-            Eigen::seq(0, pos_idx_map[end_pos] - idx_offset - 1); // eigen seq is inclusive
-        auto copy_range = Eigen::seq(idx_offset, pos_idx_map[end_pos] - 1);
-        genotype_cache(i, insert_range) = reference_genome(
-            copy_range); //.eval(); //WARNING need .eval() here (or do we? I don't think we do)
-      }
-      else {
-        SegmentSet& segments(interval_sets[samples[i]]);
+//   TgenSegment range(start_pos, end_pos);
 
-        // Initialize the queue
-        std::queue<TgenSegment> seg_queue;
-        auto eqr = segments.equal_range(range);
-        for (SegmentSet::const_iterator iter = eqr.first; iter != eqr.second; iter++) {
-          seg_queue.push(*iter & range);
-        }
+//   for (int i = 0; i < samples.size(); i++) {
+//     cached_genotypes_map[samples[i]] = i;
+//     if (samples[i] == 0) {
+//       auto insert_range =
+//           Eigen::seq(0, pos_idx_map[end_pos] - idx_offset - 1); // eigen seq is inclusive
+//       auto copy_range = Eigen::seq(idx_offset, pos_idx_map[end_pos] - 1);
+//       genotype_cache(i, insert_range) = reference_genome(
+//           copy_range); //.eval(); //WARNING need .eval() here (or do we? I don't think we do)
+//     }
+//     else {
+//       SegmentSet& segments(interval_sets[samples[i]]);
 
-        // Process everything in the queue
-        while (!seg_queue.empty()) {
-          TgenSegment& segment = seg_queue.front();
-          if (cached_genotypes_map.find(segment.target) != cached_genotypes_map.end()) {
-            // We've reached somewhere along the tree where we can copy from
-            int seg_start_idx = pos_idx_map[segment.lower()];
-            int seg_end_idx = pos_idx_map[segment.upper()];
-            auto insert_range = Eigen::seq(
-                seg_start_idx - idx_offset, seg_end_idx - idx_offset - 1); // eigen seq is inclusive
-            if (segment.target == 0) {
-              auto copy_range = Eigen::seq(seg_start_idx, seg_end_idx - 1);
-              // We've reached the root of the tree and copy from the "reference" genome
-              genotype_cache(i, insert_range) = reference_genome(copy_range);
-            }
-            else {
-              // We've found a cached genotype to copy from
+//       // Initialize the queue
+//       std::queue<TgenSegment> seg_queue;
+//       auto eqr = segments.equal_range(range);
+//       for (SegmentSet::const_iterator iter = eqr.first; iter != eqr.second; iter++) {
+//         seg_queue.push(*iter & range);
+//       }
 
-              genotype_cache(i, insert_range) =
-                  genotype_cache(cached_genotypes_map[segment.target], insert_range);
-            }
+//       // Process everything in the queue
+//       while (!seg_queue.empty()) {
+//         TgenSegment& segment = seg_queue.front();
+//         if (cached_genotypes_map.find(segment.target) != cached_genotypes_map.end()) {
+//           // We've reached somewhere along the tree where we can copy from
+//           int seg_start_idx = pos_idx_map[segment.lower()];
+//           int seg_end_idx = pos_idx_map[segment.upper()];
+//           auto insert_range = Eigen::seq(
+//               seg_start_idx - idx_offset, seg_end_idx - idx_offset - 1); // eigen seq is inclusive
+//           if (segment.target == 0) {
+//             auto copy_range = Eigen::seq(seg_start_idx, seg_end_idx - 1);
+//             // We've reached the root of the tree and copy from the "reference" genome
+//             genotype_cache(i, insert_range) = reference_genome(copy_range);
+//           }
+//           else {
+//             // We've found a cached genotype to copy from
 
-            // We then flip all the het sites
-            for (int h : segment.het_sites) {
-              genotype_cache(i, pos_idx_map[h] - idx_offset) =
-                  1 - genotype_cache(i, pos_idx_map[h] - idx_offset);
-            }
-          }
-          else {
-            // We've not yet reached somewhere to copy from, so we keep traversing
-            auto new_eqr = interval_sets[segment.target].equal_range(segment);
-            for (SegmentSet::const_iterator iter = new_eqr.first; iter != new_eqr.second; iter++) {
-              seg_queue.push(*iter & segment);
-            }
-          }
-          seg_queue.pop();
-        }
-      }
-    }
-    return genotype_cache;
-  }
+//             genotype_cache(i, insert_range) =
+//                 genotype_cache(cached_genotypes_map[segment.target], insert_range);
+//           }
 
-  // std::vector-based query
-  // Warning: This makes a copy when returned through the python interface
-  std::vector<std::vector<bool>>& query2(const int bp_from, const int bp_to,
-                                         const std::vector<int>& samples) {
-    genotypes.clear();
+//           // We then flip all the het sites
+//           for (int h : segment.het_sites) {
+//             genotype_cache(i, pos_idx_map[h] - idx_offset) =
+//                 1 - genotype_cache(i, pos_idx_map[h] - idx_offset);
+//           }
+//         }
+//         else {
+//           // We've not yet reached somewhere to copy from, so we keep traversing
+//           auto new_eqr = interval_sets[segment.target].equal_range(segment);
+//           for (SegmentSet::const_iterator iter = new_eqr.first; iter != new_eqr.second; iter++) {
+//             seg_queue.push(*iter & segment);
+//           }
+//         }
+//         seg_queue.pop();
+//       }
+//     }
+//   }
+//   return genotype_cache;
+// }
+
+// std::vector-based query
+// Warning: This makes a copy when returned through the python interface
+std::vector<std::vector<bool>>& TGEN::query(const int bp_from, const int bp_to,
+                                             const std::vector<int>& samples) {
+  genotypes.clear();
 
     // Find number of expected sites
     int start_pos = *std::lower_bound(positions.begin(), positions.end(), bp_from);
