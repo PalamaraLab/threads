@@ -14,7 +14,7 @@ os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
 import numpy as np
 
-from threads import ThreadsLowMem, Matcher, ViterbiPath
+from threads_infer import ThreadsLowMem, Matcher, ViterbiPath
 from .utils import decompress_threads, interpolate_map, parse_demography, get_map_from_bim
 from .mapping_utils import map_region
 from datetime import datetime

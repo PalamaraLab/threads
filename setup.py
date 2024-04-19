@@ -123,7 +123,7 @@ setup(
     },
     description='Ultra-fast ARG inference',
     packages=['threads_infer'],
-    scripts=['./scripts/threads_infer'],
+    scripts=['./scripts/threads'],
     long_description='\n'.join([long_description, release_notes]),
     long_description_content_type='text/markdown',
     ext_modules=[CMakeExtension('threads_infer')],
