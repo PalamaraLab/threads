@@ -18,7 +18,7 @@ struct ImputationSegment {
 };
 
 // This class contains everything for Threads-fastLS
-class Threads {
+class ThreadsFastLS {
 
 private:
   // To access the linked lists in each column
@@ -73,13 +73,13 @@ public:
   std::vector<std::vector<std::unique_ptr<Node>>> panel;
 
   // Constructors and utils
-  Threads(std::vector<double> _physical_positions, std::vector<double> _genetic_positions,
+  ThreadsFastLS(std::vector<double> _physical_positions, std::vector<double> _genetic_positions,
           double _mutation_rate, double ne, bool _sparse_sites, int _n_prune, bool _use_hmm,
           int _burn_in_left, int _burn_in_right)
-      : Threads(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne},
+      : ThreadsFastLS(_physical_positions, _genetic_positions, _mutation_rate, std::vector<double>{ne},
                 std::vector<double>{0.0}, _sparse_sites, _n_prune, _use_hmm, _burn_in_left,
                 _burn_in_right){};
-  Threads(std::vector<double> _physical_positions, std::vector<double> _genetic_positions,
+  ThreadsFastLS(std::vector<double> _physical_positions, std::vector<double> _genetic_positions,
           double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times,
           bool _sparse_sites, int _n_prune, bool _use_hmm, int _burn_in_left, int _burn_in_right);
 

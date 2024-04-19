@@ -121,7 +121,7 @@ setup(
             'pytest',
         ],
     },
-    description='Infer ARGs like you mean it.',
+    description='Ultra-fast ARG inference',
     packages=['threads_infer'],
     scripts=['./scripts/threads_infer'],
     long_description='\n'.join([long_description, release_notes]),

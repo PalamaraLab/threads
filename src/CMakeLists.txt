@@ -38,7 +38,7 @@ set(
         Demography.cpp
         Node.cpp
         State.cpp
-        Threads.cpp
+        ThreadsFastLS.cpp
         HMM.cpp
         TGEN.cpp
         ImputationMatcher.cpp
@@ -52,7 +52,7 @@ set(
         Demography.hpp
         Node.hpp
         State.hpp
-        Threads.hpp
+        ThreadsFastLS.hpp
         HMM.hpp
         TGEN.hpp
         TgenSegment.hpp

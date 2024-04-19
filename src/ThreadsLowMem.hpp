@@ -2,7 +2,7 @@
 #define THREADS_INFER_THREADS_LOW_MEM_HPP
 
 #include "Matcher.hpp"
-#include "Threads.hpp"
+#include "ThreadsFastLS.hpp"
 #include "ViterbiLowMem.hpp"
 #include "Demography.hpp"
 #include <string>

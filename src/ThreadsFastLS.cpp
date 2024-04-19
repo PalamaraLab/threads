@@ -1,4 +1,4 @@
-#include "Threads.hpp"
+#include "ThreadsFastLS.hpp"
 #include <algorithm>
 #include <boost/math/special_functions/gamma.hpp>
 #include <cassert>
@@ -17,7 +17,7 @@
 
 int END_ALLELE = 0;
 
-Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _genetic_positions,
+ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions, std::vector<double> _genetic_positions,
                  double _mutation_rate, std::vector<double> ne, std::vector<double> ne_times,
                  bool _sparse_sites,
                  int _n_prune, // Threshold for pruning states in the tdpbwt algorithm
@@ -117,7 +117,7 @@ Threads::Threads(std::vector<double> _physical_positions, std::vector<double> _g
 }
 
 std::tuple<std::vector<double>, std::vector<double>>
-Threads::site_sizes(std::vector<double> positions) {
+ThreadsFastLS::site_sizes(std::vector<double> positions) {
   // Find mid-points between sites
   int M = positions.size();
   std::vector<double> pos_means(M - 1);
@@ -151,13 +151,13 @@ Threads::site_sizes(std::vector<double> positions) {
 /**
  *
  */
-std::vector<double> Threads::trimmed_positions() {
+std::vector<double> ThreadsFastLS::trimmed_positions() {
   std::vector<double> trim_pos = {physical_positions.cbegin() + trim_pos_start_idx,
                                   physical_positions.cbegin() + trim_pos_end_idx};
   return trim_pos;
 }
 
-void Threads::delete_hmm() {
+void ThreadsFastLS::delete_hmm() {
   if (use_hmm) {
     delete hmm;
     use_hmm = false;
@@ -172,7 +172,7 @@ void Threads::delete_hmm() {
  * @param i The site
  * @return Node* Pointer to node below the sequence being inserted at site i+1
  */
-Node* Threads::extend_node(Node* t, bool g, int i) {
+Node* ThreadsFastLS::extend_node(Node* t, bool g, int i) {
   Node* t_next;
   if (!g && t->w[g]->sample_ID == -1) {
     // Logic is that if we're at the bottom and have a "0" genotype we jump up to last
@@ -185,7 +185,7 @@ Node* Threads::extend_node(Node* t, bool g, int i) {
   return t_next;
 }
 
-void Threads::insert(const std::vector<bool>& genotype) {
+void ThreadsFastLS::insert(const std::vector<bool>& genotype) {
   insert(num_samples, genotype);
 }
 /**
@@ -193,7 +193,7 @@ void Threads::insert(const std::vector<bool>& genotype) {
  *
  * @param genotype
  */
-void Threads::insert(const int ID, const std::vector<bool>& genotype) {
+void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
 
   if (ID_map.find(ID) != ID_map.end()) {
     std::cerr << "ID " << ID << " is already in the panel.\n";
@@ -283,7 +283,7 @@ void Threads::insert(const int ID, const std::vector<bool>& genotype) {
  *
  * @param ID
  */
-void Threads::remove(int ID) {
+void ThreadsFastLS::remove(int ID) {
   Node* s = panel[ID_map.at(ID)][0].get();
   // The last sequence in the panel
   int last_ID = panel[num_samples - 1][0]->sample_ID;
@@ -331,7 +331,7 @@ void Threads::remove(int ID) {
  * @brief For debugging: print the sample-IDs of the arrayified panel.
  *
  */
-void Threads::print_sorting() {
+void ThreadsFastLS::print_sorting() {
   for (int j = 0; j < num_sites + 1; ++j) {
     Node* node = tops[j].get();
     while (node != nullptr) {
@@ -349,7 +349,7 @@ void Threads::print_sorting() {
  * See also Algorithm 4 of Lunter (2018), Bioinformatics.
  * For imputation we use the IMPUTE/Beagle mutation penalties
  */
-std::pair<TracebackState*, Node*> Threads::fastLS(const std::vector<bool>& genotype,
+std::pair<TracebackState*, Node*> ThreadsFastLS::fastLS(const std::vector<bool>& genotype,
                                                   bool imputation) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
@@ -485,7 +485,7 @@ std::pair<TracebackState*, Node*> Threads::fastLS(const std::vector<bool>& genot
  * Warning: The code here is more verbose than it has to be
  **/
 std::array<std::pair<TracebackState*, Node*>, 2>
-Threads::fastLS_diploid(const std::vector<int>& genotype) {
+ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
   // Get mutation/recombination penalties;
   std::vector<double> mu;
   std::vector<double> mu_c;
@@ -976,7 +976,7 @@ Threads::fastLS_diploid(const std::vector<int>& genotype) {
  * This is a basic traceback that samples a random haplotype per from all matches per segment and
  * also stores the lowest-numbered match (for compression)
  */
-std::vector<std::tuple<int, std::vector<int>>> Threads::traceback(TracebackState* tb, Node* match,
+std::vector<std::tuple<int, std::vector<int>>> ThreadsFastLS::traceback(TracebackState* tb, Node* match,
                                                                   bool return_all) {
   std::vector<std::tuple<int, std::vector<int>>> best_path;
   while (tb != nullptr) {
@@ -1027,7 +1027,7 @@ std::vector<std::tuple<int, std::vector<int>>> Threads::traceback(TracebackState
  * is a tuple (sample_IDs, starts, ends) all of equal length <= L
  */
 std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>>
-Threads::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int L) {
+ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int L) {
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> imputation_path;
   int prev_end = num_sites;
   while (tb != nullptr) {
@@ -1113,7 +1113,7 @@ Threads::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node
  * @return true
  * @return false
  */
-bool Threads::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
+bool ThreadsFastLS::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
   int next_above_candidate = t_next->above->sample_ID;
 
   if (next_above_candidate == -1 || g != panel[ID_map.at(next_above_candidate)][i]->genotype) {
@@ -1131,7 +1131,7 @@ bool Threads::extensible_by(State& s, const Node* t_next, const bool g, const in
   return false;
 }
 
-std::pair<bool, bool> Threads::pair_extensible_by(StatePair& p, const bool g, const int i) {
+std::pair<bool, bool> ThreadsFastLS::pair_extensible_by(StatePair& p, const bool g, const int i) {
   State tmp_a = State(p.below_a, 0., p.traceback_a);
   Node* t_next_a = extend_node(tmp_a.below, g, i);
   State tmp_b = State(p.below_b, 0., p.traceback_b);
@@ -1141,7 +1141,7 @@ std::pair<bool, bool> Threads::pair_extensible_by(StatePair& p, const bool g, co
   return std::pair<bool, bool>(extensible_a, extensible_b);
 }
 
-std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties() {
+std::tuple<std::vector<double>, std::vector<double>> ThreadsFastLS::mutation_penalties() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
 
@@ -1165,7 +1165,7 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties
  *
  * @return tuple of penalty vectors
  */
-std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties_impute5() {
+std::tuple<std::vector<double>, std::vector<double>> ThreadsFastLS::mutation_penalties_impute5() {
   std::vector<double> mu(num_sites);
   std::vector<double> mu_c(num_sites);
 
@@ -1183,7 +1183,7 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::mutation_penalties
  *
  * @return tuple of penalty vectors
  */
-std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_penalties() {
+std::tuple<std::vector<double>, std::vector<double>> ThreadsFastLS::recombination_penalties() {
   // Recall: 1cM means the expected average number of intervening
   // chromosomal crossovers in a single generation is 0.01
   std::vector<double> rho(num_sites);
@@ -1209,7 +1209,7 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_pena
  *
  * @return tuple of penalty vectors
  */
-std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_penalties_correct() {
+std::tuple<std::vector<double>, std::vector<double>> ThreadsFastLS::recombination_penalties_correct() {
   // Recall: 1cM means the expected average number of intervening
   // chromosomal crossovers in a single generation is 0.01
   std::vector<double> rho(num_sites);
@@ -1240,7 +1240,7 @@ std::tuple<std::vector<double>, std::vector<double>> Threads::recombination_pena
  * @param end exclusive
  * @return double
  */
-double Threads::date_segment(const int num_het_sites, const int start, const int end) {
+double ThreadsFastLS::date_segment(const int num_het_sites, const int start, const int end) {
   if (start > end) {
     std::cerr << "Can't date a segment with length <= 0\n";
     exit(1);
@@ -1255,14 +1255,14 @@ double Threads::date_segment(const int num_het_sites, const int start, const int
   double mu = 2. * mutation_rate * bp_size;
   double rho = 2. * 0.01 * cm_size;
   if (sparse_sites) {
-    return Threads::date_segment_sparse(num_het_sites, cm_size, demography);
+    return ThreadsFastLS::date_segment_sparse(num_het_sites, cm_size, demography);
   }
   else {
-    return Threads::date_segment(m, cm_size, bp_size, mutation_rate, demography);
+    return ThreadsFastLS::date_segment(m, cm_size, bp_size, mutation_rate, demography);
   }
 }
 
-double Threads::date_segment(int num_het_sites, double cm_size, double bp_size,
+double ThreadsFastLS::date_segment(int num_het_sites, double cm_size, double bp_size,
                              double mutation_rate, Demography& demography) {
   int m = num_het_sites;
   double mu = 2. * mutation_rate * bp_size;
@@ -1301,7 +1301,7 @@ double Threads::date_segment(int num_het_sites, double cm_size, double bp_size,
   return numerator / denominator;
 }
 
-double Threads::date_segment_sparse(int num_het_sites, double cm_size, Demography& demography) {
+double ThreadsFastLS::date_segment_sparse(int num_het_sites, double cm_size, Demography& demography) {
   int m = num_het_sites;
   double rho = 2. * 0.01 * cm_size;
   double numerator = 0;
@@ -1332,12 +1332,12 @@ double Threads::date_segment_sparse(int num_het_sites, double cm_size, Demograph
 }
 
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
-Threads::thread(const std::vector<bool>& genotype) {
+ThreadsFastLS::thread(const std::vector<bool>& genotype) {
   return thread(num_samples, genotype);
 }
 
 std::vector<std::tuple<int, std::vector<int>>>
-Threads::threads_ls(const std::vector<bool>& genotype) {
+ThreadsFastLS::threads_ls(const std::vector<bool>& genotype) {
   std::vector<std::tuple<int, std::vector<int>>> best_path;
   if (num_samples > 0) {
     TracebackState* tb;
@@ -1351,7 +1351,7 @@ Threads::threads_ls(const std::vector<bool>& genotype) {
 
 // todo: L is no longer required here
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
-Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
+ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // Compute LS path
   std::vector<std::tuple<int, std::vector<int>>> best_path;
   if (num_samples > 0) {
@@ -1420,7 +1420,7 @@ Threads::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   return remove_burn_in(bp_starts, target_IDs, segment_ages, het_sites);
 }
 
-std::vector<ImputationSegment> Threads::impute(std::vector<bool>& genotype, int L) {
+std::vector<ImputationSegment> ThreadsFastLS::impute(std::vector<bool>& genotype, int L) {
   // vector of sample_ids, seg_starts, seg_ends (buffered)
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> best_path;
   Node* match;
@@ -1464,7 +1464,7 @@ std::vector<ImputationSegment> Threads::impute(std::vector<bool>& genotype, int 
 }
 
 std::array<std::vector<std::tuple<int, std::vector<int>>>, 2>
-Threads::diploid_ls(std::vector<int> unphased_genotypes) {
+ThreadsFastLS::diploid_ls(std::vector<int> unphased_genotypes) {
   std::vector<std::tuple<int, std::vector<int>>> best_path_a;
   std::vector<std::tuple<int, std::vector<int>>> best_path_b;
 
@@ -1476,7 +1476,7 @@ Threads::diploid_ls(std::vector<int> unphased_genotypes) {
 }
 
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
-Threads::remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int>>& target_IDs,
+ThreadsFastLS::remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int>>& target_IDs,
                         std::vector<double>& segment_ages, std::vector<int>& het_sites) {
   int num_segments = bp_starts.size();
 
@@ -1529,7 +1529,7 @@ Threads::remove_burn_in(std::vector<int>& bp_starts, std::vector<std::vector<int
  * @param end exclusive!
  * @return bool whether sequences match on the interval
  */
-bool Threads::genotype_interval_match(const int id1, const int id2, const int start,
+bool ThreadsFastLS::genotype_interval_match(const int id1, const int id2, const int start,
                                       const int end) {
   if (id1 == id2) {
     return true;
@@ -1549,7 +1549,7 @@ bool Threads::genotype_interval_match(const int id1, const int id2, const int st
  * Assuming input genotypes match sample_id on [segment_start, segment_end), how much can we extend
  * the region in either direction with out hitting a mismatch
  */
-std::pair<int, int> Threads::overflow_region(const std::vector<bool>& genotypes,
+std::pair<int, int> ThreadsFastLS::overflow_region(const std::vector<bool>& genotypes,
                                              const int sample_id, const int segment_start,
                                              const int segment_end) {
   int overlap_start = segment_start;
@@ -1578,7 +1578,7 @@ std::pair<int, int> Threads::overflow_region(const std::vector<bool>& genotypes,
 /**
  * Fetch het-hom status for id1 and id2 in the region specified by site indices
  */
-std::vector<bool> Threads::fetch_het_hom_sites(const int id1, const int id2, const int start,
+std::vector<bool> ThreadsFastLS::fetch_het_hom_sites(const int id1, const int id2, const int start,
                                                const int end) {
   if (ID_map.find(id1) == ID_map.end()) {
     std::cerr << "fetch_het_hom_sites bad id1 " << id1 << std::endl;
@@ -1599,7 +1599,7 @@ std::vector<bool> Threads::fetch_het_hom_sites(const int id1, const int id2, con
 }
 
 // Given threading instructions, find all heterozygous sites
-std::vector<int> Threads::het_sites_from_thread(const int focal_ID,
+std::vector<int> ThreadsFastLS::het_sites_from_thread(const int focal_ID,
                                                 const std::vector<int> bp_starts,
                                                 const std::vector<std::vector<int>> target_IDs) {
   std::vector<int> het_sites;

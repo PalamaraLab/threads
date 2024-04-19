@@ -58,7 +58,7 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
   // Site counters
   hmm_sites_processed = 0;
   het_sites_processed = 0;
-  std::tie(bp_boundaries, bp_sizes) = Threads::site_sizes(physical_positions);
+  std::tie(bp_boundaries, bp_sizes) = ThreadsFastLS::site_sizes(physical_positions);
 
   for (int i = 0; i < genetic_positions.size(); i++) {
     if (i == genetic_positions.size() - 1) {
@@ -265,7 +265,7 @@ void ThreadsLowMem::date_segments() {
               break;
             }
           }
-          double height = Threads::date_segment(
+          double height = ThreadsFastLS::date_segment(
               breakpoint_hets.size(), cm_size, bp_size, mutation_rate, demography);
           new_path.append(breakpoint_start, sample_id, height, breakpoint_hets);
         }
@@ -275,7 +275,7 @@ void ThreadsLowMem::date_segments() {
         double bp_size = physical_positions.at(segment_end) - physical_positions.at(segment_start);
         double cm_size = genetic_positions.at(segment_end) - genetic_positions.at(segment_start);
         double height =
-            Threads::date_segment(segment_hets.size(), cm_size, bp_size, mutation_rate, demography);
+            ThreadsFastLS::date_segment(segment_hets.size(), cm_size, bp_size, mutation_rate, demography);
         new_path.append(segment_start, sample_id, height, segment_hets);
       }
     }
