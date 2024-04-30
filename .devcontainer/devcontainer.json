@@ -17,7 +17,11 @@
 				"ms-vscode.cpptools",
 				"ms-vscode.cpptools-extension-pack",
 				"vadimcn.vscode-lldb"
-			]
+			],
+			"settings": {
+				"python.languageServer": "Pylance",
+				"python.testing.pytestEnabled": true
+			}
 		}
 	}
 }

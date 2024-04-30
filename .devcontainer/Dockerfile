@@ -13,4 +13,9 @@ RUN apt-get install -y \
     pybind11-dev
 
 RUN pip install --upgrade pip setuptools wheel
+
+# Packages for local testing
+RUN pip install pytest h5py numpy
+
+# Packages for local build
 RUN pip install cmake ninja
