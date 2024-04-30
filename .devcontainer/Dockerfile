@@ -14,4 +14,3 @@ RUN apt-get install -y \
 
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install cmake ninja
-RUN pip install arg-needle-lib
