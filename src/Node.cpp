@@ -8,7 +8,7 @@ using std::ostream;
 
 Node::Node(int _sample_ID, int _divergence, bool _genotype)
     : sample_ID(_sample_ID), divergence(_divergence), genotype(_genotype), above(nullptr),
-      below(nullptr), w({nullptr, nullptr}) {
+      below(nullptr), w{nullptr, nullptr} {
 }
 
 void Node::insert_above(Node* node) {
