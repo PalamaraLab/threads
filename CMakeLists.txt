@@ -36,7 +36,7 @@ if (PYTHON_BINDINGS)
     FetchContent_Declare(
             pybind11
             GIT_REPOSITORY https://github.com/pybind/pybind11
-            GIT_TAG ffa346860b306c9bbfb341aed9c14c067751feb8 # Version 2.9.1
+            GIT_TAG aa304c9c7d725ffb9d10af08a3b34cb372307020 # Version 2.10.0
     )
     FetchContent_GetProperties(pybind11)
     if (NOT pybind11_POPULATED)
