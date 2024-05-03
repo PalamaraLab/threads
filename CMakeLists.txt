@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.16)
 message(STATUS "Using CMake version ${CMAKE_VERSION}")
 
-project(threads LANGUAGES CXX VERSION 0.1)
+project(threads_infer LANGUAGES CXX VERSION 0.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,7 +16,7 @@ include(cmake/ProjectSettings.cmake)
 # Link this 'library' to use the warnings specified in CompilerWarnings.cmake
 add_library(project_warnings INTERFACE)
 include(cmake/CompilerWarnings.cmake)
-set_project_warnings(project_warnings)
+#set_project_warnings(project_warnings)
 
 # Sanitiser options if supported by compiler
 include(cmake/Sanitisers.cmake)
@@ -36,7 +36,7 @@ if (PYTHON_BINDINGS)
     FetchContent_Declare(
             pybind11
             GIT_REPOSITORY https://github.com/pybind/pybind11
-            GIT_TAG ffa346860b306c9bbfb341aed9c14c067751feb8 # Version 2.9.1
+            GIT_TAG aa304c9c7d725ffb9d10af08a3b34cb372307020 # Version 2.10.0
     )
     FetchContent_GetProperties(pybind11)
     if (NOT pybind11_POPULATED)

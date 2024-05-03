@@ -111,17 +111,22 @@ with open('RELEASE_NOTES.md', encoding='utf-8') as f:
     release_notes = f.read()
 
 setup(
-    name='threads',
+    name='threads_infer',
     version='0.1',
     # author='PalamaraLab (https://palamaralab.github.io/)',
     url='https://github.com/PalamaraLab/TDPBWT/',
     install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg_needle_lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
+    extras_require={
+        'dev': [
+            'pytest',
+        ],
+    },
     description='Ultra-fast ARG inference',
-    packages=['threads'],
+    packages=['threads_infer'],
     scripts=['./scripts/threads'],
     long_description='\n'.join([long_description, release_notes]),
     long_description_content_type='text/markdown',
-    ext_modules=[CMakeExtension('threads')],
+    ext_modules=[CMakeExtension('threads_infer')],
     cmdclass=dict(build_ext=CMakeBuild),
     zip_safe=False,
 )

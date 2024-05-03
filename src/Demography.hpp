@@ -1,6 +1,8 @@
+#ifndef THREADS_INFER_DEMOGRAPHY_HPP
+#define THREADS_INFER_DEMOGRAPHY_HPP
+
 #include <vector>
 #include <iostream>
-using std::ostream;
 
 // This class is a wrapper for simple coalescence time queries under a piecewise-constant demography
 class Demography {
@@ -22,5 +24,7 @@ public:
   double expected_branch_length(const int N);
 
   // Output
-  friend ostream& operator<<(ostream& os, const Demography& demography);
+  friend std::ostream& operator<<(std::ostream& os, const Demography& demography);
 };
+
+#endif // THREADS_INFER_DEMOGRAPHY_HPP

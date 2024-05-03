@@ -8,9 +8,6 @@
 #include <unordered_set>
 #include <vector>
 
-using std::cerr;
-using std::cout;
-using std::endl;
 
 ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
                                      const std::vector<double>& _genetic_positions,

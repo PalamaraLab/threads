@@ -1,10 +1,10 @@
+#ifndef THREADS_INFER_THREADS_LOW_MEM_HPP
+#define THREADS_INFER_THREADS_LOW_MEM_HPP
+
 #include "Matcher.hpp"
 #include "ThreadsFastLS.hpp"
 #include "ViterbiLowMem.hpp"
-#ifndef DEMOGRAPHY
-#define DEMOGRAPHY
 #include "Demography.hpp"
-#endif
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -79,3 +79,5 @@ public:
              std::vector<std::vector<double>>, std::vector<std::vector<int>>>
   serialize_paths();
 };
+
+#endif // THREADS_INFER_THREADS_LOW_MEM_HPP
