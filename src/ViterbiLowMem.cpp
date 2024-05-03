@@ -7,9 +7,6 @@
 #include <unordered_set>
 #include <vector>
 
-using std::cerr;
-using std::cout;
-using std::endl;
 
 TracebackNode::TracebackNode(int _sample_id, int _site, TracebackNode* _previous, double _score)
     : sample_id(_sample_id), site(_site), previous(_previous), score(_score) {

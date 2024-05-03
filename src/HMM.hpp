@@ -1,12 +1,11 @@
 #ifndef DEMOGRAPHY
 #define DEMOGRAPHY
 #include "Demography.hpp"
-#endif DEMOGRAPHY
+#endif // DEMOGRAPHY
 
 #include <vector>
 #include <iostream>
 
-using std::ostream;
 
 // This class contains the PSMC-like algorithm used to break up segments for small-N inference
 class HMM {

@@ -1,3 +1,6 @@
+#ifndef THREADS_INFER_MATCHER_HPP
+#define THREADS_INFER_MATCHER_HPP
+
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -58,3 +61,5 @@ public:
   std::vector<int> get_sorting();
   std::vector<int> get_permutation();
 };
+
+#endif // THREADS_INFER_MATCHER_HPP
