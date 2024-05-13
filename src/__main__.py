@@ -309,9 +309,11 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     local_logger.info(f"Thread {thread_id}: HMMs done in (s) {end_time - start_time:.1f}")
     return seg_starts, match_ids, heights, hetsites
 
+@click.group()
+def main():
+    pass
 
-@click.command()
-@click.argument("command", type=click.Choice(["infer", "convert"]))
+@main.command()
 @click.option("--pgen", required=True, help="Path to input genotypes in pgen format.")
 @click.option("--map_gz", default=None, help="Path to input genotype map with columns chromosome, snp, cM-position, bp-position.")
 @click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed.")
@@ -324,9 +326,8 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 @click.option("--region", help="Region of genome for which ARG is output. The full genotype is still used for inference.")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
-def infer(command, pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
-    """Wrapper for the main ARG inference routine."""
-    assert command == "infer"
+def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+    """Infer an ARG from genotype data"""
     start_time = time.time()
     logging.info(f"Starting Threads-infer with the following parameters:")
     logging.info(f"  pgen:                  {pgen}")
@@ -545,14 +546,13 @@ def phase(scaffold, argn, ts, unphased, out):
     scaffold_vcf.close()
     phased_writer.close()
 
-@click.command()
-@click.argument("mode", type=click.Choice(["infer", "convert"]))
+@main.command()
 @click.option("--threads", required=True, help="Path to an input .threads file.")
 @click.option("--argn", default=None, help="Path to an output .argn file.")
 @click.option("--tsz", default=None, help="Path to an output .tsz file.")
 @click.option("--max_n", default=None, help="How many samples to thread.", type=int)
 @click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG.")
-def convert(mode, threads, argn, tsz, max_n, verify):
+def convert(threads, argn, tsz, max_n, verify):
     """
     Convert input .threads file into .threads or .argn file
     """
@@ -664,19 +664,5 @@ def map_mutations_to_arg(argn, out, maf, input, region, threads):
             outfile.write(string)
     logging.info(f"Total runtime {time.time() - start_time:.2f}")
 
-
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Threads must be called with one of the threads functions: infer, convert.")
-        sys.exit()
-    else:
-        mode = sys.argv[1]
-        if mode == "infer":
-            infer()
-        elif mode == "convert":
-            convert()
-        elif mode == "-h" or mode == "--help":
-            print("See documentation for each of the Threads functions: infer, convert.")
-        else:
-            print(f"Unknown mode {mode}")
-            sys.exit()
+    main()
