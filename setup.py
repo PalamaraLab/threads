@@ -26,7 +26,6 @@ class CMakeExtension(Extension):
 
 
 class CMakeBuild(build_ext):
-
     def build_extension(self, ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
 
@@ -97,10 +96,10 @@ class CMakeBuild(build_ext):
             os.makedirs(self.build_temp)
 
         subprocess.check_call(
-            ["cmake", ext.sourcedir] + cmake_args, cwd="build"#self.build_temp
+            ["cmake", ext.sourcedir] + cmake_args, cwd="build"
         )
         subprocess.check_call(
-            ["cmake", "--build", "."] + build_args, cwd="build"#self.build_temp
+            ["cmake", "--build", "."] + build_args, cwd="build"
         )
 
 
@@ -115,7 +114,7 @@ setup(
     version='0.1',
     # author='PalamaraLab (https://palamaralab.github.io/)',
     url='https://github.com/PalamaraLab/TDPBWT/',
-    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg_needle_lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
+    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg-needle-lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
     extras_require={
         'dev': [
             'pytest',
