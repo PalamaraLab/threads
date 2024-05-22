@@ -1,4 +1,4 @@
-# This file is part of https://github.com/PalamaraLab/arg_needle_lib which is released under the GPL-3.0 license.
+# This file is part of https://github.com/PalamaraLab/threads which is released under the GPL-3.0 license.
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
 cmake_minimum_required(VERSION 3.16)
@@ -16,6 +16,8 @@ include(cmake/ProjectSettings.cmake)
 # Link this 'library' to use the warnings specified in CompilerWarnings.cmake
 add_library(project_warnings INTERFACE)
 include(cmake/CompilerWarnings.cmake)
+
+# FIXME Uncomment to enable warnings
 #set_project_warnings(project_warnings)
 
 # Sanitiser options if supported by compiler
@@ -27,29 +29,26 @@ include(cmake/StaticAnalysers.cmake)
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" ON)
 
-# set(arg_needle_testdata_dir ${CMAKE_CURRENT_SOURCE_DIR}/testdata)
-# add_definitions(-DARG_NEEDLE_TESTDATA_DIR=\"${arg_needle_testdata_dir}\")
-
 option(PYTHON_BINDINGS "Whether to build the python bindings" ON)
-if (PYTHON_BINDINGS)
+if(PYTHON_BINDINGS)
     include(FetchContent)
     FetchContent_Declare(
-            pybind11
-            GIT_REPOSITORY https://github.com/pybind/pybind11
-            GIT_TAG aa304c9c7d725ffb9d10af08a3b34cb372307020 # Version 2.10.0
+        pybind11
+        GIT_REPOSITORY https://github.com/pybind/pybind11
+        GIT_TAG aa304c9c7d725ffb9d10af08a3b34cb372307020 # Version 2.10.0
     )
     FetchContent_GetProperties(pybind11)
-    if (NOT pybind11_POPULATED)
+    if(NOT pybind11_POPULATED)
         FetchContent_Populate(pybind11)
         add_subdirectory(${pybind11_SOURCE_DIR} ${pybind11_BINARY_DIR})
-    endif ()
-endif ()
+    endif()
+endif()
 
 add_subdirectory(src)
-# add_subdirectory(example)
 
-option(ENABLE_TESTING "Enable Test Builds" OFF)
+option(ENABLE_TESTING "Enable test builds" OFF)
 if(ENABLE_TESTING)
+    message(STATUS "Test builds enabled")
     enable_testing()
     add_subdirectory(test)
 endif()
