@@ -1,0 +1,39 @@
+name: "Tests on Ubuntu"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build-and-test:
+    name: Tests on Ubuntu
+    runs-on: ubuntu-22.04
+    if:  ${{ github.event_name == 'pull_request' || github.repository == 'PalamaraLab/threads' }}
+
+    steps:
+      - name: checkout repo & submodules
+        uses: actions/checkout@v2
+
+      - name: install system packages
+        run: |
+          sudo apt -y update
+          sudo apt -y install libboost-dev libeigen3-dev
+
+      - name: make build directory
+        run: mkdir build_dir
+
+      - name: cmake configure
+        run: cmake .. -DENABLE_TESTING=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        working-directory: build_dir
+
+      - name: cmake build
+        run: cmake --build . --parallel 2
+        working-directory: build_dir
+
+      - name: cmake test
+        run: ctest --no-tests=error -j2 --output-on-failure
+        working-directory: build_dir
