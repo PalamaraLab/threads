@@ -7,7 +7,6 @@
 #include <math.h>
 #include <memory>
 #include <numeric>
-#include <random>
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
@@ -110,10 +109,6 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions, std::vecto
   else {
     hmm = nullptr;
   }
-
-  // Initialize RNG
-  std::random_device rd;
-  rng = std::mt19937(rd());
 }
 
 std::tuple<std::vector<double>, std::vector<double>>
