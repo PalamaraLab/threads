@@ -38,7 +38,7 @@
             "request": "launch",
             "program": "/usr/bin/python3",
             "args": [
-                "-m", "threads_infer",
+                "-m", "threads_arg",
                 "infer",
                 "--pgen", "example/example_data.pgen",
                 "--map_gz", "example/example_data.map",
@@ -71,7 +71,7 @@
             "request": "launch",
             "program": "/usr/bin/python3",
             "args": [
-                "-m", "threads_infer",
+                "-m", "threads_arg",
                 "convert",
                 "--threads", "example/example_data.threads",
                 "--argn", "example/example_data.argn",

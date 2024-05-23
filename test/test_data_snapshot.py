@@ -8,7 +8,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent.parent
 
 
-def _run_threads_infer(in_pgen_filename: str, out_threads_file: Path):
+def _run_threads_arg(in_pgen_filename: str, out_threads_file: Path):
     """
     Generate .threads file from test data
     in_pgen_filename is relative to test data dir
@@ -16,7 +16,7 @@ def _run_threads_infer(in_pgen_filename: str, out_threads_file: Path):
     dir = BASE_DIR / "test" / "data"
     command = [
         "python3",
-        "-m", "threads_infer",
+        "-m", "threads_arg",
         "infer",
         "--pgen", str(dir / in_pgen_filename),
         "--map_gz", str(dir / "test_data.map"),
@@ -38,7 +38,7 @@ def _run_threads_convert(in_threads_file: Path, out_argn_file: Path):
     """
     command = [
         "python3",
-        "-m", "threads_infer",
+        "-m", "threads_arg",
         "convert",
         "--threads", str(in_threads_file),
         "--argn", str(out_argn_file),
@@ -85,7 +85,7 @@ def test_data_snapshot_regression():
     with tempfile.TemporaryDirectory() as tmpdir:
         # Regenerate threads infer output
         threads_path = Path(tmpdir) / "test_data_snapshot_regression.threads"
-        infer_result = _run_threads_infer("N250.pgen", threads_path)
+        infer_result = _run_threads_arg("N250.pgen", threads_path)
         assert infer_result.returncode == 0, f"threads infer did not run successfully: {infer_result.stderr}"
 
         # Compare against reference.threads data generated from examples dir
