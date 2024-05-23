@@ -110,7 +110,7 @@ with open('RELEASE_NOTES.md', encoding='utf-8') as f:
     release_notes = f.read()
 
 setup(
-    name='threads_arg',
+    name='threads-arg',
     version='0.1',
     author='Threads developers',
     url='https://github.com/PalamaraLab/threads/',
