@@ -1,7 +1,7 @@
-# This file is part of https://github.com/PalamaraLab/arg_needle_lib which is released under the GPL-3.0 license.
+# This file is part of https://github.com/PalamaraLab/threads which is released under the GPL-3.0 license.
 # See accompanying LICENSE and COPYING for copyright notice and full details.
 
-# Based on https://github.com/lefticus/cpp_starter_project
+# Based on https://github.com/cpp-best-practices/cmake_template
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)

@@ -1,0 +1,101 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) unit_tests",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/test/unit_tests",
+            "args": [],
+            "environment": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": false
+                }
+            ],
+            "preLaunchTask": "CMake: build"
+        },
+        {
+            "name": "(python) unit_tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [],
+            "preLaunchTask": "CMake: build"
+        },
+        {
+            "name": "(gdb) Launch infer example",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/usr/bin/python3",
+            "args": [
+                "-m", "threads_arg",
+                "infer",
+                "--pgen", "example/example_data.pgen",
+                "--map_gz", "example/example_data.map",
+                "--demography", "example/Ne10000.demo",
+                "--out", "example/example_data.threads"
+            ],
+            "environment": [
+                {
+                    "_comment": "Explicit import of generated .so in build folder",
+                    "name": "PYTHONPATH",
+                    "value": "${workspaceFolder}/build/src"
+                }
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": false
+                }
+            ],
+            "preLaunchTask": "CMake: build"
+        },
+        {
+            "name": "(gdb) Launch convert example",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/usr/bin/python3",
+            "args": [
+                "-m", "threads_arg",
+                "convert",
+                "--threads", "example/example_data.threads",
+                "--argn", "example/example_data.argn",
+                "--random-seed", "1234"
+            ],
+            "environment": [
+                {
+                    "_comment": "Explicit import of generated .so in build folder",
+                    "name": "PYTHONPATH",
+                    "value": "${workspaceFolder}/build/src"
+                }
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": false
+                }
+            ],
+            "preLaunchTask": "CMake: build"
+        }
+    ]
+}

@@ -1,3 +1,6 @@
+#ifndef THREADS_ARG_STATE_HPP
+#define THREADS_ARG_STATE_HPP
+
 #include "Node.hpp"
 
 #include <vector>
@@ -28,7 +31,7 @@ public:
 
   State(Node* _below, double _score, TracebackState* _traceback);
 
-  friend ostream& operator<<(ostream& os, State& state);
+  friend std::ostream& operator<<(std::ostream& os, State& state);
 };
 
 class StatePair {
@@ -45,7 +48,7 @@ public:
   StatePair(Node* _below_a, Node* _below_b, double _score, TracebackState* _traceback_a,
             TracebackState* _traceback_b);
 
-  friend ostream& operator<<(ostream& os, StatePair& state_pair);
+  friend std::ostream& operator<<(std::ostream& os, StatePair& state_pair);
 };
 
 class StateBranch {
@@ -64,3 +67,4 @@ public:
   std::vector<State> dump();
 };
 
+#endif // THREADS_ARG_STATE_HPP
