@@ -1,5 +1,5 @@
-#ifndef THREADS_INFER_DEMOGRAPHY_HPP
-#define THREADS_INFER_DEMOGRAPHY_HPP
+#ifndef THREADS_ARG_DEMOGRAPHY_HPP
+#define THREADS_ARG_DEMOGRAPHY_HPP
 
 #include <vector>
 #include <iostream>
@@ -27,4 +27,4 @@ public:
   friend std::ostream& operator<<(std::ostream& os, const Demography& demography);
 };
 
-#endif // THREADS_INFER_DEMOGRAPHY_HPP
+#endif // THREADS_ARG_DEMOGRAPHY_HPP
