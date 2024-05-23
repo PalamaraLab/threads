@@ -22,7 +22,7 @@ add_executable(unit_tests
 
 target_link_libraries(unit_tests
     PRIVATE
-        threads_arg
+        threads_infer
         Catch2::Catch2WithMain
 )
 

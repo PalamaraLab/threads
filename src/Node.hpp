@@ -1,5 +1,5 @@
-#ifndef THREADS_ARG_NODE_HPP
-#define THREADS_ARG_NODE_HPP
+#ifndef THREADS_INFER_NODE_HPP
+#define THREADS_INFER_NODE_HPP
 
 #include <array>
 #include <iostream>
@@ -29,4 +29,4 @@ public:
   friend std::ostream& operator<<(std::ostream& os, const Node& node);
 };
 
-#endif // THREADS_ARG_NODE_HPP
+#endif // THREADS_INFER_NODE_HPP

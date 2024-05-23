@@ -1,5 +1,5 @@
-#ifndef THREADS_ARG_TGEN_SEGMENT_HPP
-#define THREADS_ARG_TGEN_SEGMENT_HPP
+#ifndef THREADS_INFER_TGEN_SEGMENT_HPP
+#define THREADS_INFER_TGEN_SEGMENT_HPP
 
 #include <algorithm>
 #include <iostream>
@@ -57,4 +57,4 @@ private:
   int _first, _past;
 };
 
-#endif // THREADS_ARG_TGEN_SEGMENT_HPP
+#endif // THREADS_INFER_TGEN_SEGMENT_HPP
