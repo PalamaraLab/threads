@@ -1,27 +1,31 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/cpp
 {
-	"name": "TDPBWT",
+    "name": "TDPBWT",
 
-	"build": {
-		"dockerfile": "Dockerfile"
-	},
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
 
-	"customizations": {
-		"vscode":{
-			"extensions": [
-				"ms-python.debugpy",
-				"ms-python.python",
-				"ms-python.vscode-pylance",
-				"ms-vscode.cmake-tools",
-				"ms-vscode.cpptools",
-				"ms-vscode.cpptools-extension-pack",
-				"vadimcn.vscode-lldb"
-			],
-			"settings": {
-				"python.languageServer": "Pylance",
-				"python.testing.pytestEnabled": true
-			}
-		}
-	}
+    "customizations": {
+        "vscode":{
+            "extensions": [
+                "ms-python.debugpy",
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "ms-vscode.cmake-tools",
+                "ms-vscode.cpptools",
+                "ms-vscode.cpptools-extension-pack"
+            ],
+            "settings": {
+                "python.languageServer": "Pylance",
+                "python.testing.pytestEnabled": true
+            }
+        }
+    },
+
+    // Enable debugging in container
+    "capAdd": [
+        "SYS_PTRACE"
+    ]
 }

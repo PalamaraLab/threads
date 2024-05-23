@@ -147,7 +147,7 @@ def serialize_paths(paths, positions, out, start=None, end=None):
     f.close()
 
 
-def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False):
+def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False, random_seed=0):
     """
     Assemble threading instructions into an ARG
     """
@@ -160,6 +160,8 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False):
     arg = arg_needle_lib.ARG(0, arg_end - arg_start + 2, reserved_samples=N)
     arg.set_offset(int(arg_start))
 
+    rng = np.random.default_rng(seed=random_seed)
+
     # How this should work:
     for i, t in enumerate(threading_instructions[:N]):
         if i % 1000 == 0:
@@ -169,7 +171,8 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False):
             section_starts, thread_ids, thread_heights = t
             if len(thread_ids.shape) == 2:
                 thread_ids = thread_ids[:, 0]
-            thread_heights += thread_heights * np.random.normal(0.0, noise, len(thread_heights))
+            thread_heights += thread_heights * rng.normal(0.0, noise, len(thread_heights))
+            # FIXME review with Arni, clarify this comment and whether may relate to random seed
             # this is weird, should fix
             arg_starts = [s - arg.offset for s in section_starts]
             try:
@@ -551,17 +554,19 @@ def phase(scaffold, argn, ts, unphased, out):
 @click.option("--argn", default=None, help="Path to an output .argn file.")
 @click.option("--tsz", default=None, help="Path to an output .tsz file.")
 @click.option("--max_n", default=None, help="How many samples to thread.", type=int)
+@click.option("--random-seed", default=None, help="Seed for noise generation.", type=int)
 @click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG.")
-def convert(mode, threads, argn, tsz, max_n, verify):
+def convert(mode, threads, argn, tsz, max_n, random_seed, verify):
     """
     Convert input .threads file into .threads or .argn file
     """
     start_time = time.time()
     logging.info(f"Starting Threads-{mode} with the following parameters:")
-    logging.info(f"  threads: {threads}")
-    logging.info(f"  argn:    {argn}")
-    logging.info(f"  tsz:     {tsz}")
-    logging.info(f"  max_n:   {max_n}")
+    logging.info(f"  threads:     {threads}")
+    logging.info(f"  argn:        {argn}")
+    logging.info(f"  tsz:         {tsz}")
+    logging.info(f"  max_n:       {max_n}")
+    logging.info(f"  random_seed: {random_seed}")
 
     if argn is None and tsz is None:
         logging.info("Nothing to do, quitting.")
@@ -569,15 +574,15 @@ def convert(mode, threads, argn, tsz, max_n, verify):
     decompressed_threads = decompress_threads(threads)
     try:
         logging.info("Attempting to convert to arg format...")
-        arg = threads_to_arg(decompressed_threads, noise=0.0, max_n=max_n, verify=verify)
+        arg = threads_to_arg(decompressed_threads, noise=0.0, max_n=max_n, verify=verify, random_seed=random_seed)
     except:
         # arg_needle_lib does not allow polytomies
         logging.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
         try:
-            arg = threads_to_arg(decompressed_threads, noise=1e-5, max_n=max_n, verify=verify)
+            arg = threads_to_arg(decompressed_threads, noise=1e-5, max_n=max_n, verify=verify, random_seed=random_seed)
         except:# tskit.LibraryError:
             logging.info(f"Conflicting branches, retrying with noise=1e-3...")
-            arg = threads_to_arg(decompressed_threads, noise=1e-3, max_n=max_n, verify=verify)
+            arg = threads_to_arg(decompressed_threads, noise=1e-3, max_n=max_n, verify=verify, random_seed=random_seed)
     if argn is not None:
         logging.info(f"Writing to {argn}")
         arg_needle_lib.serialize_arg(arg, argn)
