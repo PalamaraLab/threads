@@ -1,5 +1,5 @@
-#ifndef THREADS_INFER_VITERBI_LOW_MEM_HPP
-#define THREADS_INFER_VITERBI_LOW_MEM_HPP
+#ifndef THREADS_ARG_VITERBI_LOW_MEM_HPP
+#define THREADS_ARG_VITERBI_LOW_MEM_HPP
 
 #include <memory>
 #include <unordered_map>
@@ -73,4 +73,4 @@ public:
   ViterbiPath traceback();
 };
 
-#endif // THREADS_INFER_VITERBI_LOW_MEM_HPP
+#endif // THREADS_ARG_VITERBI_LOW_MEM_HPP
