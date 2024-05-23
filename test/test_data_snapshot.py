@@ -16,7 +16,7 @@ def _run_threads_arg(in_pgen_filename: str, out_threads_file: Path):
     dir = BASE_DIR / "test" / "data"
     command = [
         "python3",
-        "-m", "threads-arg",
+        "-m", "threads_arg",
         "infer",
         "--pgen", str(dir / in_pgen_filename),
         "--map_gz", str(dir / "test_data.map"),
@@ -38,7 +38,7 @@ def _run_threads_convert(in_threads_file: Path, out_argn_file: Path):
     """
     command = [
         "python3",
-        "-m", "threads-arg",
+        "-m", "threads_arg",
         "convert",
         "--threads", str(in_threads_file),
         "--argn", str(out_argn_file),
