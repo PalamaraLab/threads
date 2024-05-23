@@ -32,7 +32,7 @@ endif()
 message(STATUS "Found Eigen3 ${Eigen3_VERSION}")
 
 # Threads static library
-set(threads_infer_src
+set(threads_arg_src
     Demography.cpp
     Node.cpp
     State.cpp
@@ -45,7 +45,7 @@ set(threads_infer_src
     ThreadsLowMem.cpp
 )
 
-set(threads_infer_hdr
+set(threads_arg_hdr
     Demography.hpp
     Node.hpp
     State.hpp
@@ -59,21 +59,21 @@ set(threads_infer_hdr
     ThreadsLowMem.hpp
 )
 
-add_library(threads_infer STATIC
-    ${threads_infer_src}
+add_library(threads_arg STATIC
+    ${threads_arg_src}
 )
 
-target_include_directories(threads_infer INTERFACE
+target_include_directories(threads_arg INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:>
 )
 
-set_target_properties(threads_infer
+set_target_properties(threads_arg
     PROPERTIES
-        PUBLIC_HEADER "${threads_infer_hdr}"
+        PUBLIC_HEADER "${threads_arg_hdr}"
 )
 
-target_link_libraries(threads_infer
+target_link_libraries(threads_arg
     PRIVATE
         Boost::headers
         project_warnings
@@ -83,18 +83,18 @@ target_link_libraries(threads_infer
 
 # Conditionally create python bindings
 if(PYTHON_BINDINGS)
-    set_target_properties(threads_infer
+    set_target_properties(threads_arg
         PROPERTIES
             POSITION_INDEPENDENT_CODE TRUE
     )
 
-    pybind11_add_module(threads_infer_python_bindings
-        threads_infer_pybind.cpp
+    pybind11_add_module(threads_arg_python_bindings
+        threads_arg_pybind.cpp
     )
 
-    target_link_libraries(threads_infer_python_bindings
+    target_link_libraries(threads_arg_python_bindings
         PRIVATE
-            threads_infer
+            threads_arg
             project_warnings
     )
 endif()

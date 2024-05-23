@@ -1,5 +1,5 @@
-#ifndef THREADS_INFER_THREADS_HPP
-#define THREADS_INFER_THREADS_HPP
+#ifndef THREADS_ARG_THREADS_HPP
+#define THREADS_ARG_THREADS_HPP
 
 #include "State.hpp"
 #include "HMM.hpp"
@@ -135,4 +135,4 @@ public:
   void print_sorting();
 };
 
-#endif // THREADS_INFER_THREADS_HPP
+#endif // THREADS_ARG_THREADS_HPP
