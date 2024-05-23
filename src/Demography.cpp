@@ -2,6 +2,7 @@
 #include <algorithm> // for std::sort
 #include <iostream>
 #include <math.h>
+#include <sstream>
 #include <stdexcept> // to throw errors
 #include <vector>
 
@@ -9,25 +10,26 @@
 Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
     : times(_times), sizes(_sizes), std_times(std::vector<double>()) {
   if (times.size() != sizes.size()) {
-    std::cerr << "Need times and sizes of equal length in demography\n";
-    exit(1);
+    throw std::runtime_error("Demography times and sizes must have equal length");
   }
-  std::vector<double> deltas;
+
   for (int i = 0; i < times.size(); i++) {
-    if (times[i] < 0 || sizes.size() <= 0) {
-      std::cerr << "Need non-negative times and strictly positive sizes.\n";
-      exit(1);
+    if (times[i] < 0 || sizes[i] <= 0) {
+      throw std::runtime_error("Demography expects non-negative times and strictly positive sizes");
     }
+
     if (i > 0 && times[i] <= times[i - 1]) {
-      std::cerr << "Demography times must be strictly increasing, found ";
-      std::cerr << times[i] << " after " << times[i - 1] << std::endl;
-      exit(1);
+      std::ostringstream oss;
+      oss << "Demography times must be strictly increasing. Found ";
+      oss << times[i] << " after " << times[i - 1] << " at index " << i;
+      throw std::runtime_error(oss.str());
     }
   }
 
   if (times[0] > 0) {
-    std::cerr << "Demography must start at time 0.0, found " << times[0] << std::endl;
-    exit(1);
+    std::ostringstream oss;
+    oss << "Demography must start at time 0.0, found " << times[0];
+    throw std::runtime_error(oss.str());
   }
 
   // Compute times in standard coalescent space
@@ -44,8 +46,7 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
 
 double Demography::std_to_gen(const double t) {
   if (t < 0) {
-    std::cerr << "Can only convert non-negative times to std.\n";
-    exit(1);
+    throw std::runtime_error("Demography can only convert non-negative times to std");
   }
   // Find the highest i s.t. std_times[i] <= t.
   int i =

@@ -1,0 +1,13 @@
+{
+    "python.testing.pytestArgs": [
+        "test"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "cmake.generator": "Ninja",
+    "cmake.configureOnOpen": false,
+    "cmake.configureSettings": {
+        //"ENABLE_TESTING": "ON",
+        //"WARNINGS_AS_ERRORS": "TRUE",
+    }
+}
