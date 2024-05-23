@@ -561,7 +561,7 @@ def convert(threads, argn, tsz, max_n, random_seed, verify):
     Convert input .threads file into .threads or .argn file
     """
     start_time = time.time()
-    logging.info(f"Starting Threads-{mode} with the following parameters:")
+    logging.info(f"Starting Threads-convert with the following parameters:")
     logging.info(f"  threads:     {threads}")
     logging.info(f"  argn:        {argn}")
     logging.info(f"  tsz:         {tsz}")
