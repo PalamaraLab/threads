@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.16)
 message(STATUS "Using CMake version ${CMAKE_VERSION}")
 
-project(threads_infer LANGUAGES CXX VERSION 0.1)
+project(threads_arg LANGUAGES CXX VERSION 0.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
