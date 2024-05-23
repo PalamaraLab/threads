@@ -1,3 +1,6 @@
+#ifndef THREADS_ARG_IMPUTATION_MATCHER_HPP
+#define THREADS_ARG_IMPUTATION_MATCHER_HPP
+
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -40,3 +43,5 @@ public:
 
   std::vector<int> get_sorting();
 };
+
+#endif // THREADS_ARG_IMPUTATION_MATCHER_HPP

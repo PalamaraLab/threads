@@ -8,9 +8,6 @@
 #include <unordered_set>
 #include <vector>
 
-using std::cerr;
-using std::cout;
-using std::endl;
 
 ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
                              const std::vector<double>& _physical_positions,

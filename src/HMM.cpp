@@ -3,10 +3,6 @@
 #include <iostream>
 #include <vector>
 
-using std::cerr;
-using std::cout;
-using std::endl;
-using std::ostream;
 
 HMM::HMM(Demography demography, std::vector<double> bp_sizes, std::vector<double> cm_sizes,
          double mutation_rate, int K)

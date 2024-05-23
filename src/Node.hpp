@@ -1,19 +1,23 @@
-#include <vector>
+#ifndef THREADS_ARG_NODE_HPP
+#define THREADS_ARG_NODE_HPP
+
+#include <array>
 #include <iostream>
-using std::ostream;
+
 
 class Node {
 public:
   // Node data
-  int sample_ID, divergence;
+  int sample_ID;
+  int divergence;
   bool genotype;
 
   // Linked list pointers
-  Node* above;
-  Node* below;
+  Node* above = nullptr;
+  Node* below = nullptr;
 
   // "Next below to the right" for 0 and 1
-  Node* w[2];
+  std::array<Node*, 2> w = {nullptr, nullptr};
 
   // Constructors
   Node(int sample_ID, int divergence, bool genotype);
@@ -22,5 +26,7 @@ public:
   void insert_above(Node* node);
 
   // Output
-  friend ostream& operator<<(ostream& os, const Node& node);
+  friend std::ostream& operator<<(std::ostream& os, const Node& node);
 };
+
+#endif // THREADS_ARG_NODE_HPP

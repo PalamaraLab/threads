@@ -1,3 +1,6 @@
+#ifndef THREADS_ARG_THREADS_HPP
+#define THREADS_ARG_THREADS_HPP
+
 #include "State.hpp"
 #include "HMM.hpp"
 
@@ -28,7 +31,8 @@ private:
   int trim_pos_start_idx;
   int trim_pos_end_idx;
 
-  std::mt19937 rng;
+  // FIXME review with Arni. Usage not hit in coverage, but if needed need to set via CLI.
+  std::mt19937 rng{1234};
 
   inline size_t pair_key(int i, int j) {
     return (size_t) i << 32 | (unsigned int) j;
@@ -130,3 +134,5 @@ public:
   // Debugging
   void print_sorting();
 };
+
+#endif // THREADS_ARG_THREADS_HPP
