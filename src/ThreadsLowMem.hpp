@@ -1,5 +1,5 @@
-#ifndef THREADS_ARG_THREADS_LOW_MEM_HPP
-#define THREADS_ARG_THREADS_LOW_MEM_HPP
+#ifndef THREADS_INFER_THREADS_LOW_MEM_HPP
+#define THREADS_INFER_THREADS_LOW_MEM_HPP
 
 #include "Matcher.hpp"
 #include "ThreadsFastLS.hpp"
@@ -80,4 +80,4 @@ public:
   serialize_paths();
 };
 
-#endif // THREADS_ARG_THREADS_LOW_MEM_HPP
+#endif // THREADS_INFER_THREADS_LOW_MEM_HPP

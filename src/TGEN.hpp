@@ -1,5 +1,5 @@
-#ifndef THREADS_ARG_TGEN_HPP
-#define THREADS_ARG_TGEN_HPP
+#ifndef THREADS_INFER_TGEN_HPP
+#define THREADS_INFER_TGEN_HPP
 
 #include <Eigen/Dense>
 #include <limits>
@@ -29,4 +29,4 @@ public:
   void clear_cache();
 };
 
-#endif // THREADS_ARG_TGEN_HPP
+#endif // THREADS_INFER_TGEN_HPP
