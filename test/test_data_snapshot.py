@@ -1,61 +1,17 @@
 import numpy as np
 import h5py
-import subprocess
 import tempfile
 
 from pathlib import Path
 
+from threads_arg.__main__ import threads_infer, threads_convert
+
 BASE_DIR = Path(__file__).parent.parent
-
-
-def _run_threads_arg(in_pgen_filename: str, out_threads_file: Path):
-    """
-    Generate .threads file from test data
-    in_pgen_filename is relative to test data dir
-    """
-    dir = BASE_DIR / "test" / "data"
-    command = [
-        "python3",
-        "-m", "threads_arg",
-        "infer",
-        "--pgen", str(dir / in_pgen_filename),
-        "--map_gz", str(dir / "test_data.map"),
-        "--demography", str(dir / "Ne10000.demo"),
-        "--out", str(out_threads_file),
-    ]
-
-    return subprocess.run(
-        command,
-        cwd=BASE_DIR,
-        capture_output=True,
-        text=True
-    )
-
-
-def _run_threads_convert(in_threads_file: Path, out_argn_file: Path):
-    """
-    Convert .threads file to argn
-    """
-    command = [
-        "python3",
-        "-m", "threads_arg",
-        "convert",
-        "--threads", str(in_threads_file),
-        "--argn", str(out_argn_file),
-        "--random-seed", "1234"
-    ]
-
-    return subprocess.run(
-        command,
-        cwd=BASE_DIR,
-        capture_output=True,
-        text=True
-    )
 
 
 def _check_hdf_files_match(generated: Path, expected: Path):
     """
-    Check that contents of generated hdf file matche those of expected file
+    Check that contents of generated hdf file matches those of expected file
     """
     assert generated.is_file()
     assert expected.is_file()
@@ -85,16 +41,37 @@ def test_data_snapshot_regression():
     with tempfile.TemporaryDirectory() as tmpdir:
         # Regenerate threads infer output
         threads_path = Path(tmpdir) / "test_data_snapshot_regression.threads"
-        infer_result = _run_threads_arg("N250.pgen", threads_path)
-        assert infer_result.returncode == 0, f"threads infer did not run successfully: {infer_result.stderr}"
+        test_data_dir = BASE_DIR / "test" / "data"
+        threads_infer(
+            pgen=str(test_data_dir / "N250.pgen"),
+            map_gz=str(test_data_dir / "test_data.map"),
+            recombination_rate=1.3e-8,
+            demography=str(test_data_dir / "Ne10000.demo"),
+            mutation_rate=1.4e-8,
+            query_interval=0.01,
+            match_group_interval=0.5,
+            mode="wgs",
+            num_threads=1,
+            region=None,
+            max_sample_batch_size=None,
+            out=str(threads_path)
+        )
 
-        # Compare against reference.threads data generated from examples dir
+        # Compare against expected snapshot of threads data
         threads_expected_path = BASE_DIR / "test" / "data" / "expected_N250.threads"
         _check_hdf_files_match(threads_path, threads_expected_path)
 
         # Convert generated output
         argn_path = Path(tmpdir) / "test_data_snapshot_regression.argn"
-        convert_result = _run_threads_convert(threads_path, argn_path)
-        assert convert_result.returncode == 0, f"threads convert did not run successfully: {infer_result.stderr}"
+        threads_convert(
+            threads=str(threads_path),
+            argn=str(argn_path),
+            tsz=None,
+            max_n=None,
+            random_seed=1234,
+            verify=False
+        )
+
+        # Compare against expected snapshot of argn data
         convert_expected_path = BASE_DIR / "test" / "data" / "expected_N250.argn"
         _check_hdf_files_match(argn_path, convert_expected_path)

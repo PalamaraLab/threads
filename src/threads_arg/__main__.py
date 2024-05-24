@@ -20,14 +20,12 @@ from .mapping_utils import map_region
 from datetime import datetime
 from cyvcf2 import VCF, Writer
 
-def print_help_msg(command):
-    with click.Context(command) as ctx:
-        click.echo(command.get_help(ctx))
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
     level=logging.INFO,
     datefmt='%Y-%m-%d %H:%M:%S')
+
 
 def goodbye():
     # Credit to a nameless contribution at https://www.asciiart.eu/miscellaneous/dna
@@ -172,8 +170,9 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False, random_seed
             if len(thread_ids.shape) == 2:
                 thread_ids = thread_ids[:, 0]
             thread_heights += thread_heights * rng.normal(0.0, noise, len(thread_heights))
-            # FIXME review with Arni, clarify this comment and whether may relate to random seed
-            # this is weird, should fix
+
+            # arg will throw exception if there is a collision in heights. In this instance,
+            # the caller will increase the amount of noise to offset further and try again.
             arg_starts = [s - arg.offset for s in section_starts]
             try:
                 if arg_starts[-1] >= arg.end:
@@ -330,6 +329,11 @@ def main():
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
 def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+    threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
+
+
+# Implementation is separated from Click entrypoint for use in tests
+def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logging.info(f"Starting Threads-infer with the following parameters:")
@@ -557,6 +561,11 @@ def phase(scaffold, argn, ts, unphased, out):
 @click.option("--random-seed", default=None, help="Seed for noise generation.", type=int)
 @click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG.")
 def convert(threads, argn, tsz, max_n, random_seed, verify):
+    threads_convert(threads, argn, tsz, max_n, random_seed, verify)
+
+
+# Implementation is separated from Click entrypoint for use in tests
+def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
     """
     Convert input .threads file into .threads or .argn file
     """
