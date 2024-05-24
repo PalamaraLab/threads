@@ -1017,12 +1017,12 @@ std::vector<std::tuple<int, std::vector<int>>> ThreadsFastLS::traceback(Tracebac
 }
 
 /**
- * Similar to normal traceback, but picks the up-to L best matches and stores their overlap with the
+ * Similar to normal traceback, but picks the up-to neighborhood_size best matches and stores their overlap with the
  * input sequence returns a list of a tuple of lists :-P I.e., a list of segments, and each segment
- * is a tuple (sample_IDs, starts, ends) all of equal length <= L
+ * is a tuple (sample_IDs, starts, ends) all of equal length <= neighborhood_size
  */
 std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>>
-ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int L) {
+ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int neighborhood_size) {
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> imputation_path;
   int prev_end = num_sites;
   while (tb != nullptr) {
@@ -1084,7 +1084,7 @@ ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb
     std::vector<int> segment_starts;
     std::vector<int> sample_ids;
     std::vector<int> segment_ends;
-    for (int j = idx.size() - 1; j >= std::max(0, (int) (idx.size() - L)); j--) {
+    for (int j = idx.size() - 1; j >= std::max(0, (int) (idx.size() - neighborhood_size)); j--) {
       segment_starts.push_back(segment_start);
       segment_ends.push_back(segment_end);
       sample_ids.push_back(div_states[idx[j]]);
@@ -1344,7 +1344,6 @@ ThreadsFastLS::threads_ls(const std::vector<bool>& genotype) {
   return best_path;
 }
 
-// todo: L is no longer required here
 std::tuple<std::vector<int>, std::vector<std::vector<int>>, std::vector<double>, std::vector<int>>
 ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype) {
   // Compute LS path
@@ -1415,13 +1414,13 @@ ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype
   return remove_burn_in(bp_starts, target_IDs, segment_ages, het_sites);
 }
 
-std::vector<ImputationSegment> ThreadsFastLS::impute(std::vector<bool>& genotype, int L) {
+std::vector<ImputationSegment> ThreadsFastLS::impute(std::vector<bool>& genotype, int neighborhood_size) {
   // vector of sample_ids, seg_starts, seg_ends (buffered)
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> best_path;
   Node* match;
   TracebackState* traceback;
   std::tie(traceback, match) = fastLS(genotype);
-  best_path = traceback_impute(genotype, traceback, match, L);
+  best_path = traceback_impute(genotype, traceback, match, neighborhood_size);
   traceback_states.clear();
 
   std::vector<double> seg_ages;

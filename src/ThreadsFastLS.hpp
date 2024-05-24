@@ -111,13 +111,13 @@ public:
                  std::vector<double>& segment_ages, std::vector<int>& het_sites);
   std::vector<std::tuple<int, std::vector<int>>> threads_ls(const std::vector<bool>& genotype);
 
-  std::vector<ImputationSegment> impute(std::vector<bool>& genotype, int L);
+  std::vector<ImputationSegment> impute(std::vector<bool>& genotype, int neighborhood_size);
   std::pair<TracebackState*, Node*> fastLS(const std::vector<bool>& genotype,
                                            bool imputation = false);
   std::vector<std::tuple<int, std::vector<int>>> traceback(TracebackState* tb, Node* match,
                                                            bool return_all = false);
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>>
-  traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int L);
+  traceback_impute(std::vector<bool>& genotypes, TracebackState* tb, Node* match, int neighborhood_size);
   std::array<std::pair<TracebackState*, Node*>, 2> fastLS_diploid(const std::vector<int>& genotype);
   std::array<std::vector<std::tuple<int, std::vector<int>>>, 2>
   diploid_ls(std::vector<int> unphased_genotypes);

@@ -75,7 +75,7 @@ void MatchGroup::filter_matches(int min_matches) {
     }
   }
 
-  // Then determine top 4 candidates for neighbouring groups
+  // Then determine top 4 candidates for neighboring groups
   top_four_maps.reserve(num_samples);
   for (int i = 0; i < num_samples; i++) {
     top_four_maps.emplace_back(std::min(4, (int) match_candidates.at(i).size()));
@@ -104,10 +104,10 @@ void MatchGroup::clear() {
 }
 
 Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _query_interval_size,
-                 double _match_group_interval_size, int _L, int _min_matches)
+                 double _match_group_interval_size, int _neighborhood_size, int _min_matches)
     : num_samples(_n), genetic_positions(_genetic_positions),
       query_interval_size(_query_interval_size),
-      match_group_interval_size(_match_group_interval_size), L(_L), min_matches(_min_matches) {
+      match_group_interval_size(_match_group_interval_size), neighborhood_size(_neighborhood_size), min_matches(_min_matches) {
   if (genetic_positions.size() <= 2) {
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(genetic_positions.size()));
@@ -216,7 +216,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   }
   sorting = next_sorting;
 
-  // Threading-neighbour queries
+  // Threading-neighbor queries
   if (match_group_idx < match_group_sites.size() - 1 &&
       sites_processed >= match_group_sites.at(match_group_idx + 1)) {
     match_group_idx++;
@@ -239,17 +239,17 @@ void Matcher::process_site(const std::vector<int>& genotype) {
     for (int i = 1; i < num_samples; i++) {
       std::vector<int> matches;
       int allele = genotype.at(i);
-      matches.reserve(L);
+      matches.reserve(neighborhood_size);
       auto iter = threaded.insert(permutation.at(i));
       auto iter_up = iter.first;
       auto iter_down = iter.first;
       // Check if genotypes are identical, just to be sure
-      while (matches.size() < L && (iter_down != threaded.begin() || iter_up != threaded.end())) {
+      while (matches.size() < neighborhood_size && (iter_down != threaded.begin() || iter_up != threaded.end())) {
         if (iter_down != threaded.begin()) {
           iter_down--;
           matches.push_back(sorting.at(*iter_down));
         }
-        if (matches.size() < L && iter_up != threaded.end()) {
+        if (matches.size() < neighborhood_size && iter_up != threaded.end()) {
           iter_up++;
           if (iter_up != threaded.end()) {
             matches.push_back(sorting.at(*iter_up));

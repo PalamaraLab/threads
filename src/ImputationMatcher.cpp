@@ -11,9 +11,9 @@
 
 ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
                                      const std::vector<double>& _genetic_positions,
-                                     double _query_interval_size, int _L)
+                                     double _query_interval_size, int _neighborhood_size)
     : num_reference(_n_ref), num_target(_n_target), genetic_positions(_genetic_positions),
-      query_interval_size(_query_interval_size), L(_L) {
+      query_interval_size(_query_interval_size), neighborhood_size(_neighborhood_size) {
   if (genetic_positions.size() <= 2) {
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(genetic_positions.size()));
@@ -132,7 +132,7 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
     }
 
     for (auto& sorting_twople : target_sort) {
-      // get L-sized neighbourhood per target sample around target_sort[target_id] in ref_sorting
+      // get neighborhood-sized per target sample around target_sort[target_id] in ref_sorting
       int target_id = sorting_twople.first;
       int sorting_idx = sorting_twople.second;
       int insert_start;
