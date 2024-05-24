@@ -9,8 +9,8 @@
 class ImputationMatcher {
 
 private:
-  int sites_processed;
-  int next_query_site_idx;
+  int sites_processed = 0;
+  int next_query_site_idx = 0;
 
   // pbwt quantities
   std::vector<int> sorting;
@@ -24,15 +24,15 @@ public:
   // adapted to be used for imputation.
   // TODO: include a second pass through data here to get divergence values and not do that using
   // Threads-fastLS
-  int L;
+  int L = 0;
   std::vector<int> query_sites;
-  int num_samples;
-  int num_reference;
-  int num_target;
-  int num_sites;
-  double query_interval_size;
+  int num_samples = 0;
+  int num_reference = 0;
+  int num_target = 0;
+  int num_sites = 0;
+  double query_interval_size = 0.0;
   std::unordered_map<int, std::unordered_set<int>> match_sets;
-  int neighborhood_size;
+  int neighborhood_size = 0;
   std::vector<double> genetic_positions;
   ImputationMatcher(int _n_ref, int _n_target, const std::vector<double>& _genetic_positions,
                     double _query_interval_size, int _L);

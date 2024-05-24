@@ -14,7 +14,7 @@ public:
   // Normalised coalescence times
   std::vector<double> std_times;
   // Expected pairwise coalescent time
-  double expected_time;
+  double expected_time = 0.0;
 
   Demography(std::vector<double> _times, std::vector<double> _sizes);
 

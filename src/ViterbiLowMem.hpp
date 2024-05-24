@@ -13,10 +13,10 @@ private:
   }
 
 public:
-  int sample_id;
-  int site;
-  double score;
-  TracebackNode* previous;
+  int sample_id = 0;
+  int site = 0;
+  double score = 0.0;
+  TracebackNode* previous = nullptr;
   TracebackNode(int _sample_id, int _site, TracebackNode* _previous, double _score);
   size_t key();
 };
@@ -24,8 +24,8 @@ public:
 class ViterbiPath {
 private:
 public:
-  double score;
-  int target_id;
+  double score = 0.0;
+  int target_id = 0;
   std::vector<int> bp_starts;
   std::vector<int> segment_starts;
   std::vector<int> sample_ids;
@@ -54,11 +54,11 @@ private:
                                   TracebackNode* state);
 
 public:
-  int target_id;
+  int target_id = 0;
   int best_match = -1;
-  double best_score;
+  double best_score = 0.0;
   int sites_processed = 0;
-  double mutation_penalty;
+  double mutation_penalty = 0.0;
   std::vector<int> sample_ids;
   std::vector<double> sample_scores;
   std::unordered_map<int, TracebackNode*> current_tracebacks;

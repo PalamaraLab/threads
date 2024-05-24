@@ -8,11 +8,10 @@
 
 class TracebackState {
 public:
-  int site;
+  int site = 0;
   // ID to trace back through to last traceback state
-  // int best_prev_ID;
-  Node* best_prev_node;
-  TracebackState* prev;
+  Node* best_prev_node = nullptr;
+  TracebackState* prev = nullptr;
 
   TracebackState(int _site, Node* _best_prev_node, TracebackState* _prev);
 };
@@ -21,11 +20,11 @@ class State {
 public:
   // Nothing here can be const because we want to use std::sort later on
   // Panel entry directly below
-  Node* below;
+  Node* below = nullptr;
   // Score of the current state
-  double score;
+  double score = 0.0;
   // Pointer to last recombinant state
-  TracebackState* traceback;
+  TracebackState* traceback = nullptr;
   // Shorthand for this.below->site
   bool genotype();
 
@@ -37,13 +36,13 @@ public:
 class StatePair {
 public:
   // Panel entry directly below
-  Node* below_a;
-  Node* below_b;
+  Node* below_a = nullptr;
+  Node* below_b = nullptr;
   // Score of the current state
-  double score;
+  double score = 0.0;
   // Pointer to last recombinant state
-  TracebackState* traceback_a;
-  TracebackState* traceback_b;
+  TracebackState* traceback_a = nullptr;
+  TracebackState* traceback_b = nullptr;
 
   StatePair(Node* _below_a, Node* _below_b, double _score, TracebackState* _traceback_a,
             TracebackState* _traceback_b);

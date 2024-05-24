@@ -24,10 +24,10 @@ public:
 class Matcher {
 
 private:
-  int min_matches;
-  int sites_processed;
-  int next_query_site_idx;
-  int match_group_idx;
+  int min_matches = 0;
+  int sites_processed = 0;
+  int next_query_site_idx = 0;
+  int match_group_idx = 0;
   int min_match_length = 1;
   std::vector<MatchGroup> match_groups;
   std::vector<int> sorting;
@@ -35,16 +35,15 @@ private:
   std::vector<int> permutation;
 
 public:
-  int L;
+  int L = 0;
   std::vector<int> query_sites;
   std::vector<int> match_group_sites;
-  int num_samples;
-  int num_sites;
-  double query_interval_size;
+  int num_samples = 0;
+  int num_sites = 0;
+  double query_interval_size = 0.0;
   // matches in these groups are considered together in the hmm
-  double match_group_interval_size;
-  // neighbourhood size
-  int neighborhood_size;
+  double match_group_interval_size = 0.0;
+  int neighborhood_size = 0;
   std::vector<double> genetic_positions;
   Matcher(int _n, const std::vector<double>& _genetic_positions, double _query_interval_size,
           double _match_group_interval_size, int _L, int _min_matches);
