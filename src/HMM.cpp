@@ -75,9 +75,9 @@ void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_
 std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
   // Viterbi
   // Initialize
-  int L = observations.size();
-  std::vector<unsigned short> z(L);
-  int end = start + L;
+  int neighborhood_size = observations.size();
+  std::vector<unsigned short> z(neighborhood_size);
+  int end = start + neighborhood_size;
   for (int i = 0; i < num_states; i++) {
     double score = observations[0] ? het_score[start][i] : hom_score[start][i];
     trellis[start][i] = score;
@@ -86,7 +86,7 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
   // Main routine
   double score;
   unsigned short running_argmax;
-  for (int j = 1; j < L; j++) {
+  for (int j = 1; j < neighborhood_size; j++) {
     for (int i = 0; i < num_states; i++) {
       double running_max = 0;
       for (int k = 0; k < num_states; k++) {
@@ -107,10 +107,10 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
   }
 
   // Get best path
-  double running_max = trellis[start + L - 1][0];
+  double running_max = trellis[start + neighborhood_size - 1][0];
   unsigned short argmax = 0;
   for (int k = 1; k < num_states; k++) {
-    double s = trellis[start + L - 1][k];
+    double s = trellis[start + neighborhood_size - 1][k];
     if (s > running_max) {
       running_max = s;
       argmax = k;
@@ -118,15 +118,15 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
   }
 
   // Traceback
-  z[L - 1] = argmax;
-  for (int j = L - 1; j >= 1; j--) {
+  z[neighborhood_size - 1] = argmax;
+  for (int j = neighborhood_size - 1; j >= 1; j--) {
     z[j - 1] = pointers[j + start][z[j]];
   }
 
   // Break it up
   std::vector<int> breakpoints;
   breakpoints.push_back(0 + start);
-  for (int j = 1; j < L; j++) {
+  for (int j = 1; j < neighborhood_size; j++) {
     if (z[j - 1] != z[j]) {
       breakpoints.push_back(j + start);
     }

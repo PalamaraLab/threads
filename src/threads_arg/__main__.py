@@ -394,13 +394,13 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, q
     # There are four params here to mess with:
     #   - query interval
     #   - match group size
-    #   - neighbourhood size (L)
+    #   - neighborhood size
     #   - min_matches
     # Keep min_matches low for small sample sizes, can be 2 up to ~1,000 but then > 3
     # Smaller numbers run faster and consume less memory
     MIN_MATCHES = 4
-    L = 4
-    matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], query_interval, match_group_interval, L, MIN_MATCHES)
+    neighborhood_size = 4
+    matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
 
     # Matching step
     for b in range(n_batches):

@@ -63,7 +63,7 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
   py::class_<Matcher>(m, "Matcher")
       .def(py::init<int, std::vector<double>, double, double, int, int>(), "Initialize",
            py::arg("num_samples"), py::arg("genetic_positions"), py::arg("query_interval_size"),
-           py::arg("match_group_interval_size"), py::arg("L") = 4, py::arg("min_matches") = 4)
+           py::arg("match_group_interval_size"), py::arg("neighborhood_size") = 4, py::arg("min_matches") = 4)
       .def_readonly("query_sites", &Matcher::query_sites)
       .def_readonly("genetic_positions", &Matcher::genetic_positions)
       .def_readonly("query_interval_size", &Matcher::query_interval_size)
@@ -81,7 +81,7 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
   py::class_<ImputationMatcher>(m, "ImputationMatcher")
       .def(py::init<int, int, const std::vector<double>&, double, int>(), "Initialize",
            py::arg("num_reference"), py::arg("num_target"), py::arg("genetic_positions"),
-           py::arg("query_interval_size"), py::arg("L") = 8)
+           py::arg("query_interval_size"), py::arg("neighborhood_size") = 8)
       .def("process_site", &ImputationMatcher::process_site)
       .def("get_matches", &ImputationMatcher::get_matches);
 

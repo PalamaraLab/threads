@@ -35,7 +35,7 @@ private:
   std::vector<int> permutation;
 
 public:
-  int L = 0;
+  int neighborhood_size = 0;
   std::vector<int> query_sites;
   std::vector<int> match_group_sites;
   int num_samples = 0;
@@ -43,10 +43,9 @@ public:
   double query_interval_size = 0.0;
   // matches in these groups are considered together in the hmm
   double match_group_interval_size = 0.0;
-  int neighborhood_size = 0;
   std::vector<double> genetic_positions;
   Matcher(int _n, const std::vector<double>& _genetic_positions, double _query_interval_size,
-          double _match_group_interval_size, int _L, int _min_matches);
+          double _match_group_interval_size, int _neighborhood_size, int _min_matches);
 
   // Do all the work
   void process_site(const std::vector<int>& genotype);

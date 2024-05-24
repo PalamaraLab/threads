@@ -24,7 +24,7 @@ public:
   // adapted to be used for imputation.
   // TODO: include a second pass through data here to get divergence values and not do that using
   // Threads-fastLS
-  int L = 0;
+  int neighborhood_size = 0;
   std::vector<int> query_sites;
   int num_samples = 0;
   int num_reference = 0;
@@ -32,10 +32,9 @@ public:
   int num_sites = 0;
   double query_interval_size = 0.0;
   std::unordered_map<int, std::unordered_set<int>> match_sets;
-  int neighborhood_size = 0;
   std::vector<double> genetic_positions;
   ImputationMatcher(int _n_ref, int _n_target, const std::vector<double>& _genetic_positions,
-                    double _query_interval_size, int _L);
+                    double _query_interval_size, int _neighborhood_size);
 
   // Do all the work
   void process_site(const std::vector<int>& genotype);
