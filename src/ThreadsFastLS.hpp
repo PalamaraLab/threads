@@ -10,7 +10,7 @@
 #include <vector>
 
 struct ImputationSegment {
-  int seg_start;
+  int seg_start = 0;
   std::vector<int> ids;
   // these are at the *start* of the segment
   std::vector<double> weights;
@@ -28,10 +28,10 @@ private:
   std::vector<std::unique_ptr<TracebackState>> traceback_states;
 
   // Burn-in quantities
-  int trim_pos_start_idx;
-  int trim_pos_end_idx;
+  int trim_pos_start_idx = 0;
+  int trim_pos_end_idx = 0;
 
-  // FIXME review with Arni. Usage not hit in coverage, but if needed need to set via CLI.
+  // TODO set random seed at runtime (ticket #20)
   std::mt19937 rng{1234};
 
   inline size_t pair_key(int i, int j) {

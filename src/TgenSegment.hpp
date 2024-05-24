@@ -21,7 +21,7 @@ public:
   }
 
   std::vector<int> het_sites;
-  int target;
+  int target = std::numeric_limits<int>::max();
 
   [[nodiscard]] int lower() const {
     return _first;
@@ -54,7 +54,8 @@ public:
   }
 
 private:
-  int _first, _past;
+  int _first = 0;
+  int _past = 0;
 };
 
 #endif // THREADS_ARG_TGEN_SEGMENT_HPP

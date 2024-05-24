@@ -8,9 +8,9 @@
 class Node {
 public:
   // Node data
-  int sample_ID;
-  int divergence;
-  bool genotype;
+  int sample_ID = 0;
+  int divergence = 0;
+  bool genotype = 0;
 
   // Linked list pointers
   Node* above = nullptr;

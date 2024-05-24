@@ -11,7 +11,7 @@
 class HMM {
 public:
   // HMM data
-  int num_states;
+  int num_states = 0;
   std::vector<double> expected_times;
 
   std::vector<std::vector<double>> non_transition_score;
