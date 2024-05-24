@@ -54,9 +54,9 @@ def interpolate_map(map_gz, pgen):
     Reading in map file (format has columns [chrom, SNP, cM-pos, bp])
     """
     if (map_gz[:-3] == ".gz") :
-        maps = pd.read_table(map_gz, header=None, compression='gzip', delim_whitespace=True)
+        maps = pd.read_table(map_gz, header=None, compression='gzip', sep="\\s+")
     else:
-        maps = pd.read_table(map_gz, header=None, delim_whitespace=True)
+        maps = pd.read_table(map_gz, header=None, sep="\\s+")
     cm_pos_map = maps[2].values.astype(np.float64)
     phys_pos_map = maps[3].values.astype(np.float64)
     pvar = pgen.replace("pgen", "pvar")
@@ -64,9 +64,9 @@ def interpolate_map(map_gz, pgen):
 
     physical_positions = None
     if os.path.isfile(bim):
-        physical_positions = np.array(pd.read_table(bim, delim_whitespace=True, header=None, comment='#')[3]).astype(np.float64)
+        physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(np.float64)
     elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(pvar, delim_whitespace=True, header=None, comment='#')[1]).astype(np.float64)
+        physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(np.float64)
     else:
         raise RuntimeError(f"Can't find {bim} or {pvar}")
 
@@ -87,10 +87,10 @@ def get_map_from_bim(pgen, rho):
     cm_out = None
     physical_positions = None
     if os.path.isfile(bim):
-        physical_positions = np.array(pd.read_table(bim, delim_whitespace=True, header=None, comment='#')[3]).astype(int)
+        physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(int)
         cm_out = rho * 100 * physical_positions
     elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(pvar, delim_whitespace=True, header=None, comment='#')[1]).astype(int)
+        physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(int)
         cm_out = rho * 100 * physical_positions
     else:
         raise RuntimeError(f"Can't find {bim} or {pvar}")
@@ -101,5 +101,5 @@ def get_map_from_bim(pgen, rho):
     return cm_out, physical_positions
 
 def parse_demography(demography):
-    d = pd.read_table(demography, delim_whitespace=True, header=None)
+    d = pd.read_table(demography, sep="\\s+", header=None)
     return list(d[0]), list(d[1])
