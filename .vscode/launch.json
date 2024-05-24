@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) unit_tests",
+            "name": "(gdb) ctest",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/test/unit_tests",
@@ -25,15 +25,18 @@
             "preLaunchTask": "CMake: build"
         },
         {
-            "name": "(python) unit_tests",
+            "name": "(python) pytest",
             "type": "debugpy",
             "request": "launch",
             "module": "pytest",
             "args": [],
+            "env": {
+                "PYTHONPATH": "src:build/src"
+            },
             "preLaunchTask": "CMake: build"
         },
         {
-            "name": "(gdb) Launch infer example",
+            "name": "(gdb) launch infer example",
             "type": "cppdbg",
             "request": "launch",
             "program": "/usr/bin/python3",
@@ -47,9 +50,8 @@
             ],
             "environment": [
                 {
-                    "_comment": "Explicit import of generated .so in build folder",
                     "name": "PYTHONPATH",
-                    "value": "${workspaceFolder}/build/src"
+                    "value": "src:build/src"
                 }
             ],
             "stopAtEntry": false,
@@ -66,7 +68,7 @@
             "preLaunchTask": "CMake: build"
         },
         {
-            "name": "(gdb) Launch convert example",
+            "name": "(gdb) launch convert example",
             "type": "cppdbg",
             "request": "launch",
             "program": "/usr/bin/python3",
@@ -79,9 +81,8 @@
             ],
             "environment": [
                 {
-                    "_comment": "Explicit import of generated .so in build folder",
                     "name": "PYTHONPATH",
-                    "value": "${workspaceFolder}/build/src"
+                    "value": "src:build/src"
                 }
             ],
             "stopAtEntry": false,
