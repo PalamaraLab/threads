@@ -8,12 +8,11 @@
 #include <unordered_set>
 #include <vector>
 
-
 ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
                                      const std::vector<double>& _genetic_positions,
                                      double _query_interval_size, int _neighborhood_size)
-    : num_reference(_n_ref), num_target(_n_target), genetic_positions(_genetic_positions),
-      query_interval_size(_query_interval_size), neighborhood_size(_neighborhood_size) {
+    : neighborhood_size(_neighborhood_size), num_reference(_n_ref), num_target(_n_target),
+      query_interval_size(_query_interval_size), genetic_positions(_genetic_positions) {
   if (genetic_positions.size() <= 2) {
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(genetic_positions.size()));
@@ -22,15 +21,17 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
   num_samples = num_reference + num_target;
   sites_processed = 0;
 
-  // Check maps are strictly increasing
-  // for (int i = 0; i < num_sites - 1; i++) {
-  //   if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
-  //     std::string prompt = "Genetic coordinates must be strictly increasing, found ";
-  //     prompt += std::to_string(genetic_positions[i + 1]) + " after " +
-  //               std::to_string(genetic_positions[i]);
-  //     throw std::runtime_error(prompt);
-  //   }
-  // }
+  // Set to 1 for runtime check that maps are strictly increasing
+#if 0
+  for (int i = 0; i < num_sites - 1; i++) {
+    if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
+      std::string prompt = "Genetic coordinates must be strictly increasing, found ";
+      prompt += std::to_string(genetic_positions[i + 1]) + " after " +
+                std::to_string(genetic_positions[i]);
+      throw std::runtime_error(prompt);
+    }
+  }
+#endif
 
   int query_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];
@@ -175,10 +176,10 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
   sites_processed++;
 }
 
-std::unordered_map<int, std::unordered_set<int>> ImputationMatcher::get_matches() {
+const std::unordered_map<int, std::unordered_set<int>>& ImputationMatcher::get_matches() const {
   return match_sets;
 }
 
-std::vector<int> ImputationMatcher::get_sorting() {
+const std::vector<int>& ImputationMatcher::get_sorting() const {
   return sorting;
 }
