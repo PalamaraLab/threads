@@ -40,7 +40,7 @@ public:
     return os;
   }
 
-  TgenSegment operator&(const TgenSegment& other) const {
+  TgenSegment calc_intersection_with(const TgenSegment& other) const {
     int new_first = std::max(lower(), other.lower());
     int new_past = std::min(upper(), other.upper());
 

@@ -148,7 +148,7 @@ public:
 //       std::queue<TgenSegment> seg_queue;
 //       auto eqr = segments.equal_range(range);
 //       for (SegmentSet::const_iterator iter = eqr.first; iter != eqr.second; iter++) {
-//         seg_queue.push(*iter & range);
+//         seg_queue.push(iter->calc_intersection_with(range));
 //       }
 
 //       // Process everything in the queue
@@ -225,7 +225,7 @@ public:
         std::queue<TgenSegment> seg_queue;
         auto eqr = segments.equal_range(range);
         for (SegmentSet::const_iterator iter = eqr.first; iter != eqr.second; iter++) {
-          seg_queue.push(*iter & range);
+          seg_queue.push(iter->calc_intersection_with(range));
         }
 
         // Process everything in the queue
@@ -259,7 +259,7 @@ public:
             // We've not yet reached somewhere to copy from, so we keep traversing
             auto new_eqr = interval_sets[segment.target].equal_range(segment);
             for (SegmentSet::const_iterator iter = new_eqr.first; iter != new_eqr.second; iter++) {
-              seg_queue.push(*iter & segment);
+              seg_queue.push(iter->calc_intersection_with(segment));
             }
           }
           seg_queue.pop();
