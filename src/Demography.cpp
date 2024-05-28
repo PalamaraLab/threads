@@ -1,11 +1,11 @@
 #include "Demography.hpp"
-#include <algorithm> // for std::sort
+
+#include <algorithm>
 #include <iostream>
 #include <math.h>
 #include <sstream>
-#include <stdexcept> // to throw errors
+#include <stdexcept>
 #include <vector>
-
 
 Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
     : times(_times), sizes(_sizes), std_times(std::vector<double>()) {
@@ -13,8 +13,8 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
     throw std::runtime_error("Demography times and sizes must have equal length");
   }
 
-  for (int i = 0; i < times.size(); i++) {
-    if (times[i] < 0 || sizes[i] <= 0) {
+  for (std::size_t i = 0; i < times.size(); i++) {
+    if ((times[i] < 0.0) || (sizes[i] <= 0.0)) {
       throw std::runtime_error("Demography expects non-negative times and strictly positive sizes");
     }
 
@@ -33,9 +33,9 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
   }
 
   // Compute times in standard coalescent space
-  int K = times.size();
+  std::size_t K = times.size();
   std_times.push_back(0.0);
-  for (int i = 1; i < K; i++) {
+  for (std::size_t i = 1; i < K; i++) {
     double d = (times[i] - times[i - 1]) / sizes[i - 1];
     std_times.push_back(std_times[i - 1] + d);
   }
@@ -48,24 +48,24 @@ double Demography::std_to_gen(const double t) {
   if (t < 0) {
     throw std::runtime_error("Demography can only convert non-negative times to std");
   }
+
   // Find the highest i s.t. std_times[i] <= t.
-  int i =
-      std::distance(std_times.begin(), std::upper_bound(std_times.begin(), std_times.end(), t)) - 1;
+  const auto it = std::upper_bound(std_times.begin(), std_times.end(), t);
+  if (it == std_times.begin()) {
+    throw std::runtime_error("Cannot work on first element");
+  }
+
+  // Static cast is safe as above check ensures it > std_times.begin()
+  std::size_t i = static_cast<std::size_t>(it - std_times.begin() - 1);
   return times[i] + (t - std_times[i]) * sizes[i];
 }
 
-/**
- * @brief Compute the expected length of the N-th branch
- *
- * @param N
- * @return double
- */
 double Demography::expected_branch_length(const int N) {
   return std_to_gen(2. / N);
 }
 
 std::ostream& operator<<(std::ostream& os, const Demography& d) {
-  for (int i = 0; i < d.sizes.size(); i++) {
+  for (std::size_t i = 0; i < d.sizes.size(); i++) {
     std::cout << d.times[i] << " " << d.sizes[i] << " " << d.std_times[i] << std::endl;
   }
   return os;

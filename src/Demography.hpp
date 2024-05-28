@@ -1,30 +1,28 @@
 #ifndef THREADS_ARG_DEMOGRAPHY_HPP
 #define THREADS_ARG_DEMOGRAPHY_HPP
 
-#include <vector>
 #include <iostream>
+#include <vector>
 
-// This class is a wrapper for simple coalescence time queries under a piecewise-constant demography
+/// This class is a wrapper for simple coalescence time queries under a piecewise-constant demography
 class Demography {
 public:
-  // These are in generations
-  std::vector<double> times;
-  // These are *haploid*
-  std::vector<double> sizes;
-  // Normalised coalescence times
-  std::vector<double> std_times;
-  // Expected pairwise coalescent time
-  double expected_time = 0.0;
-
   Demography(std::vector<double> _times, std::vector<double> _sizes);
 
-  // Map a time in the standard coalescent to generations under this demography
+  /// Map a time in the standard coalescent to generations under this demography
   double std_to_gen(const double t);
-  // The expected branch length of a new branch in a tree with N leaves
+
+  /// The expected branch length of a new branch in a tree with N leaves
   double expected_branch_length(const int N);
 
-  // Output
+  /// Stream output
   friend std::ostream& operator<<(std::ostream& os, const Demography& demography);
+
+public:
+  std::vector<double> times;      ///< These are in generations
+  std::vector<double> sizes;      ///< These are *haploid*
+  std::vector<double> std_times;  ///< Normalised coalescence times
+  double expected_time = 0.0;     ///< Expected pairwise coalescent time
 };
 
 #endif // THREADS_ARG_DEMOGRAPHY_HPP
