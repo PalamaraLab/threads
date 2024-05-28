@@ -45,17 +45,18 @@ Demography::Demography(std::vector<double> _sizes, std::vector<double> _times)
 }
 
 double Demography::std_to_gen(const double t) {
-  if (t < 0) {
-    throw std::runtime_error("Demography can only convert non-negative times to std");
+  if (t < std_times.front()) {
+    throw std::runtime_error("Demography can only convert times greater than the first entry");
   }
 
   // Find the highest i s.t. std_times[i] <= t.
   const auto it = std::upper_bound(std_times.begin(), std_times.end(), t);
+
+  // Defensive check as the t < std_times.front check above should mean `it` is never first
   if (it == std_times.begin()) {
-    throw std::runtime_error("Cannot work on first element");
+    throw std::runtime_error("Unexpected std_to_gen upper bound finding first element");
   }
 
-  // Static cast is safe as above check ensures it > std_times.begin()
   std::size_t i = static_cast<std::size_t>(it - std_times.begin() - 1);
   return times[i] + (t - std_times[i]) * sizes[i];
 }
