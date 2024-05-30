@@ -14,23 +14,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     endif()
 endif()
 
-# Try to find Eigen3 version 3.4 locally installed
-find_package(Eigen3 3.4 QUIET)
-
-if(NOT Eigen3_FOUND)
-    include(FetchContent)
-    message(STATUS "Suitable local version of Eigen3 (>= 3.4) not found, fetching from repository...")
-    FetchContent_Declare(
-        Eigen3
-        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-        GIT_TAG        9df21dc8b4b576a7aa5c0094daa8d7e8b8be60f0  # 3.4 branch at 2024-03-15
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(Eigen3)
-    set(Eigen3_VERSION "3.4")
-endif()
-message(STATUS "Found Eigen3 ${Eigen3_VERSION}")
-
 # Threads static library
 set(threads_arg_src
     Demography.cpp
@@ -77,8 +60,6 @@ target_link_libraries(threads_arg
     PRIVATE
         Boost::headers
         project_warnings
-    PUBLIC
-        Eigen3::Eigen
 )
 
 # Conditionally create python bindings

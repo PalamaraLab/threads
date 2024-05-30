@@ -38,7 +38,7 @@ jobs:
       - name: install system packages
         run: |
           sudo apt -y update
-          sudo apt -y install libboost-dev libeigen3-dev
+          sudo apt -y install libboost-dev
 
       - name: install python dependencies
         run: |

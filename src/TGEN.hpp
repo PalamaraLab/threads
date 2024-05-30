@@ -1,7 +1,6 @@
 #ifndef THREADS_ARG_TGEN_HPP
 #define THREADS_ARG_TGEN_HPP
 
-#include <Eigen/Dense>
 #include <limits>
 #include <memory>
 #include <vector>

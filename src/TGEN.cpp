@@ -2,7 +2,6 @@
 
 #include "TgenSegment.hpp"
 
-#include <Eigen/Core>
 #include <boost/icl/separate_interval_set.hpp>
 
 #include <limits>
@@ -51,15 +50,12 @@ public:
   std::vector<SegmentSet> interval_sets;
 
   std::unordered_map<int, int> pos_idx_map;
-  Eigen::VectorXi reference_genome;
   std::vector<bool> reference_genome_vec;
   std::vector<std::vector<int>> bp_starts;
   std::vector<std::vector<int>> target_IDs;
   std::vector<std::vector<int>> het_sites;
   std::vector<int> positions;
   std::vector<std::vector<bool>> genotypes;
-
-  Eigen::MatrixXi genotype_cache;
   std::unordered_map<int, int> cached_genotypes_map;
 
   // Constructor
@@ -73,12 +69,8 @@ public:
       pos_idx_map[positions[i]] = i;
     }
 
-    // FIXME Arni/Alex review remove eigen for now (note int/size_t indexing)?
-    // set reference genome here
-    reference_genome = Eigen::VectorXi::Zero(positions.size());
     reference_genome_vec = std::vector<bool>(positions.size(), false);
     for (int h : het_sites[0]) {
-      reference_genome[pos_idx_map.at(h)] = 1;
       reference_genome_vec[pos_idx_map.at(h)] = true;
     }
 
@@ -192,7 +184,6 @@ public:
 
   void clear_cache() {
     cached_genotypes_map.clear();
-    genotype_cache.resize(0, 0);
     cached_genotypes_map[0] = -1;
   }
 };
