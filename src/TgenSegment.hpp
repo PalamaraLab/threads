@@ -9,25 +9,26 @@
 // Here is a typical class that may model intervals in your application.
 class TgenSegment {
 public:
-  TgenSegment() : _first(), _past(), target(std::numeric_limits<int>::max()) {
-  }
-  TgenSegment(const TgenSegment& other)
-      : _first(other._first), _past(other._past), het_sites(other.het_sites), target(other.target) {
-  }
-  TgenSegment(int lo, int up) : _first(lo), _past(up), target(std::numeric_limits<int>::max()) {
-  }
-  TgenSegment(int lo, int up, std::vector<int> _hets, int _target)
-      : _first(lo), _past(up), het_sites(_hets), target(_target) {
+  TgenSegment() : target(std::numeric_limits<int>::max()), first(), past() {
   }
 
-  std::vector<int> het_sites;
-  int target = std::numeric_limits<int>::max();
+  TgenSegment(const TgenSegment& other)
+      : het_sites(other.het_sites), target(other.target), first(other.first), past(other.past) {
+  }
+
+  TgenSegment(int lo, int up) : target(std::numeric_limits<int>::max()), first(lo), past(up) {
+  }
+
+  TgenSegment(int lo, int up, std::vector<int> _hets, int _target)
+      : het_sites(_hets), target(_target), first(lo), past(up) {
+  }
 
   [[nodiscard]] int lower() const {
-    return _first;
+    return first;
   }
+
   [[nodiscard]] int upper() const {
-    return _past;
+    return past;
   }
 
   friend std::ostream& operator<<(std::ostream& os, const TgenSegment& seg) {
@@ -53,9 +54,13 @@ public:
     return {new_first, new_past, merged_sites, std::min(target, other.target)};
   }
 
+public:
+  std::vector<int> het_sites;
+  int target = std::numeric_limits<int>::max();
+
 private:
-  int _first = 0;
-  int _past = 0;
+  int first = 0;
+  int past = 0;
 };
 
 #endif // THREADS_ARG_TGEN_SEGMENT_HPP
