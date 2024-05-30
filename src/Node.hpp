@@ -4,8 +4,17 @@
 #include <array>
 #include <iostream>
 
-
 class Node {
+public:
+  // Constructors
+  Node(int sample_ID, int divergence, bool genotype);
+
+  // Node movers-arounders
+  void insert_above(Node* node);
+
+  // Output
+  friend std::ostream& operator<<(std::ostream& os, const Node& node);
+
 public:
   // Node data
   int sample_ID = 0;
@@ -18,15 +27,6 @@ public:
 
   // "Next below to the right" for 0 and 1
   std::array<Node*, 2> w = {nullptr, nullptr};
-
-  // Constructors
-  Node(int sample_ID, int divergence, bool genotype);
-
-  // Node movers-arounders
-  void insert_above(Node* node);
-
-  // Output
-  friend std::ostream& operator<<(std::ostream& os, const Node& node);
 };
 
 #endif // THREADS_ARG_NODE_HPP

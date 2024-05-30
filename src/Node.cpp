@@ -2,7 +2,6 @@
 
 #include <iostream>
 
-
 Node::Node(int _sample_ID, int _divergence, bool _genotype)
     : sample_ID(_sample_ID), divergence(_divergence), genotype(_genotype) {
 }
