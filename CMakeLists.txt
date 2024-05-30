@@ -16,9 +16,7 @@ include(cmake/ProjectSettings.cmake)
 # Link this 'library' to use the warnings specified in CompilerWarnings.cmake
 add_library(project_warnings INTERFACE)
 include(cmake/CompilerWarnings.cmake)
-
-# FIXME Uncomment to enable warnings
-#set_project_warnings(project_warnings)
+set_project_warnings(project_warnings)
 
 # Sanitiser options if supported by compiler
 include(cmake/Sanitisers.cmake)
