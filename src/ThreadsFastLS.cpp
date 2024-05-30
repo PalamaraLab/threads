@@ -21,6 +21,7 @@
 namespace {
 
 const int END_ALLELE = 0;
+const int HMM_SPLIT_THRESHOLD = 1000;
 
 inline size_t pair_key(int i, int j) {
   return (static_cast<std::size_t>(i) << 32) | static_cast<std::size_t>(j);
@@ -1320,9 +1321,7 @@ ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype
     }
     total_num_het_sites += num_het_sites;
 
-    // FIXME Alex/Arni review - work in progress, but just checking if these numbers should be
-    // consts declared above is it ok to have 100 here?
-    if (use_hmm && num_samples < 1000) {
+    if (use_hmm && num_samples < HMM_SPLIT_THRESHOLD) {
       // is it ok to have 10 here?
       if (num_het_sites > 5) {
         std::vector<int> breakpoints = hmm->breakpoints(het_hom_sites, segment_start);
