@@ -37,7 +37,7 @@ public:
 
   // 4. save output (done on Python side)
 
-  int count_branches();
+  int count_branches() const;
 
   // Make pickle-able path output
   std::tuple<std::vector<std::vector<int>>, std::vector<std::vector<int>>,
