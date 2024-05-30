@@ -83,7 +83,6 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
     trellis[start][i] = score;
   }
 
-  // FIXME review with Arni, defensive check for assignment to 'k' below
   if (num_states > std::numeric_limits<unsigned short>::max()) {
     throw std::runtime_error("Unable to store breakpoints for more than 2^16 states");
   }
