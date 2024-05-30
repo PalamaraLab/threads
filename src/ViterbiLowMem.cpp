@@ -7,6 +7,13 @@
 #include <unordered_set>
 #include <vector>
 
+namespace {
+
+inline size_t coord_id_key(int i, int j) {
+  return (static_cast<std::size_t>(i) << 32) | static_cast<std::size_t>(j);
+}
+
+} // namespace
 
 TracebackNode::TracebackNode(int _sample_id, int _site, TracebackNode* _previous, double _score)
     : sample_id(_sample_id), site(_site), previous(_previous), score(_score) {
@@ -31,8 +38,8 @@ void ViterbiPath::reverse() {
   std::reverse(sample_ids.begin(), sample_ids.end());
 }
 
-int ViterbiPath::size() {
-  return segment_starts.size();
+int ViterbiPath::size() const {
+  return static_cast<int>(segment_starts.size());
 }
 
 void ViterbiPath::append(int segment_start, int sample_id) {
@@ -68,7 +75,7 @@ void ViterbiPath::map_positions(std::vector<int>& positions) {
 std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>
 ViterbiPath::dump_data_in_range(int start, int end) {
   int n_segs = size();
-  if (start == -1 && end == -1 || n_segs == 0) {
+  if (((start == -1) && (end == -1)) || (n_segs == 0)) {
     return std::tuple<std::vector<int>, std::vector<int>, std::vector<double>>(
         bp_starts, sample_ids, heights);
   }
@@ -82,8 +89,8 @@ ViterbiPath::dump_data_in_range(int start, int end) {
   for (int i = 0; i < n_segs; i++) {
     int seg_start = bp_starts.at(i);
     int seg_end = i < n_segs - 1 ? bp_starts.at(i + 1) : tmp_end;
-    if (seg_start <= tmp_start && tmp_start < seg_end ||
-        tmp_start <= seg_start && seg_start < tmp_end) {
+    if (((seg_start <= tmp_start) && (tmp_start < seg_end)) ||
+        ((tmp_start <= seg_start) && (seg_start < tmp_end))) {
       out_starts.push_back(std::max(tmp_start, seg_start));
       out_ids.push_back(sample_ids.at(i));
       out_heights.push_back(heights.at(i));
@@ -211,8 +218,8 @@ TracebackNode* ViterbiState::recursive_insert(std::unordered_map<size_t, Traceba
   return &state_map.at(key);
 }
 
-int ViterbiState::count_branches() {
-  return traceback_states.size();
+int ViterbiState::count_branches() const {
+  return static_cast<int>(traceback_states.size());
 }
 
 ViterbiPath ViterbiState::traceback() {
