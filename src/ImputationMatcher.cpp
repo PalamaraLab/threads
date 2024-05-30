@@ -17,10 +17,11 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(genetic_positions.size()));
   }
-  num_sites = genetic_positions.size();
+  num_sites = static_cast<int>(genetic_positions.size());
   num_samples = num_reference + num_target;
   sites_processed = 0;
 
+  // FIXME Arni/Alex review. OK to remove or instead add an explicit macro?
   // Set to 1 for runtime check that maps are strictly increasing
 #if 0
   for (int i = 0; i < num_sites - 1; i++) {
@@ -35,7 +36,7 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
 
   int query_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];
-  for (int i = 0; i < genetic_positions.size(); i++) {
+  for (int i = 0; i < static_cast<int>(genetic_positions.size()); i++) {
     double cm = genetic_positions.at(i);
     if (cm > gen_pos_offset + query_interval_size * query_site_idx) {
       query_sites.push_back(i);
@@ -83,11 +84,11 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
     }
   }
 
-  if (genotype.size() != num_samples) {
+  if (static_cast<int>(genotype.size()) != num_samples) {
     throw std::runtime_error("invalid genotype vector size");
   }
 
-  if (next_query_site_idx < query_sites.size() &&
+  if (next_query_site_idx < static_cast<int>(query_sites.size()) &&
       sites_processed == query_sites.at(next_query_site_idx)) {
     next_query_site_idx++;
     int ref_allele_count = 0;
