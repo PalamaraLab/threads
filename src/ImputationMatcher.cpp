@@ -8,6 +8,10 @@
 #include <unordered_set>
 #include <vector>
 
+// Uncomment this #define to enable a runtime check that genetic position are in order. This
+// diagnostic check is left in whilst we may have issues during development.
+// #define IMPUTATION_MATCHER_CHECK_IN_ORDER
+
 ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
                                      const std::vector<double>& _genetic_positions,
                                      double _query_interval_size, int _neighborhood_size)
@@ -21,9 +25,7 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
   num_samples = num_reference + num_target;
   sites_processed = 0;
 
-  // FIXME Arni/Alex review. OK to remove or instead add an explicit macro?
-  // Set to 1 for runtime check that maps are strictly increasing
-#if 0
+#ifdef IMPUTATION_MATCHER_CHECK_IN_ORDER
   for (int i = 0; i < num_sites - 1; i++) {
     if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
       std::string prompt = "Genetic coordinates must be strictly increasing, found ";
@@ -32,7 +34,7 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
       throw std::runtime_error(prompt);
     }
   }
-#endif
+#endif // IMPUTATION_MATCHER_CHECK_IN_ORDER
 
   int query_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];

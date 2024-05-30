@@ -14,6 +14,10 @@
 #include <unordered_set>
 #include <vector>
 
+// Uncomment this #define to enable a runtime check that genetic position are in order. This
+// diagnostic check is left in whilst we may have issues during development.
+// #define THREADS_FAST_LS_CHECK_IN_ORDER
+
 namespace {
 
 const int END_ALLELE = 0;
@@ -49,9 +53,7 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
   num_sites = static_cast<int>(physical_positions.size());
   num_samples = 0;
 
-  // FIXME Arni/Alex review. OK to remove or instead add an explicit macro?
-  // Set to 1 for runtime check that maps are strictly increasing
-#if 0
+#ifdef THREADS_FAST_LS_CHECK_IN_ORDER
   for (int i = 0; i < num_sites - 1; i++) {
     if (physical_positions[i + 1] <= physical_positions[i]) {
       cerr << "Physical positions must be strictly increasing, found ";
@@ -64,7 +66,7 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
       exit(1);
     }
   }
-#endif
+#endif // THREADS_FAST_LS_CHECK_IN_ORDER
 
   // Initialize map burn-in
   threading_start = physical_positions.front() + burn_in_left;
