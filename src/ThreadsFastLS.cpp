@@ -1379,16 +1379,10 @@ std::vector<ImputationSegment> ThreadsFastLS::impute(std::vector<bool>& genotype
     ImputationSegment imp_seg;
     imp_seg.seg_start = static_cast<int>(physical_positions[std::get<1>(segment)[0]]);
     imp_seg.ids = samples;
-    std::vector<double> wts;
+    std::vector<double> weights(samples.size(), 1. / static_cast<double>(samples.size()));
     std::vector<double> ages(samples.size(), seg_ages[i]);
     imp_seg.ages = ages;
-    for (auto s : samples) {
-      // FIXME Alex/Arni review, s not used, just change to regular for loop for now?
-      (void) s;
-
-      wts.push_back(1. / static_cast<double>(samples.size()));
-    }
-    imp_seg.weights = wts;
+    imp_seg.weights = weights;
     imputation_segments.push_back(imp_seg);
   }
   return imputation_segments;
