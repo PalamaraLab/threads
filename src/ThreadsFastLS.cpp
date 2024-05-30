@@ -1181,7 +1181,7 @@ double ThreadsFastLS::date_segment(const int num_het_sites, const int start, con
     cm_size += cm_sizes[i];
   }
   if (sparse_sites) {
-    return ThreadsFastLS::date_segment_sparse(num_het_sites, cm_size, demography);
+    return ThreadsFastLS::date_segment_sparse(cm_size, demography);
   }
   else {
     // FIXME Alex/Arni review - removed old 'm' variable here, confirm double not needed
@@ -1230,11 +1230,8 @@ double ThreadsFastLS::date_segment(int num_het_sites, double cm_size, double bp_
   return numerator / denominator;
 }
 
-double ThreadsFastLS::date_segment_sparse(int num_het_sites, double cm_size,
+double ThreadsFastLS::date_segment_sparse(double cm_size,
                                           Demography& demography) {
-
-  // FIXME Arni/Alex review num_het_sites is not used. Remove from args?
-  (void) num_het_sites;
 
   double rho = 2. * 0.01 * cm_size;
   double numerator = 0;

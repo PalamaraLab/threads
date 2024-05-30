@@ -154,7 +154,7 @@ public:
 
   static double date_segment(int num_het_sites, double cm_length, double bp_length,
                              double mutation_rate, Demography& demography);
-  static double date_segment_sparse(int num_het_sites, double cm_length, Demography& demography);
+  static double date_segment_sparse(double cm_length, Demography& demography);
 
   /// For debugging: print the sample-IDs of the arrayified panel
   void print_sorting() const;
