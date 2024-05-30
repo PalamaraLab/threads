@@ -1184,7 +1184,6 @@ double ThreadsFastLS::date_segment(const int num_het_sites, const int start, con
     return ThreadsFastLS::date_segment_sparse(cm_size, demography);
   }
   else {
-    // FIXME Alex/Arni review - removed old 'm' variable here, confirm double not needed
     return ThreadsFastLS::date_segment(num_het_sites, cm_size, bp_size, mutation_rate, demography);
   }
 }
@@ -1195,9 +1194,6 @@ double ThreadsFastLS::date_segment(int num_het_sites, double cm_size, double bp_
   double mu = 2. * mutation_rate * bp_size;
   double rho = 2. * 0.01 * cm_size;
   if (m > 15) {
-    // FIXME Alex/Arni - I have removed many couts but were they still needed for debug? If so I can
-    // put a #def in cout << "Warning: very many heterozygous sites, defaulting to const-demography
-    // method.\n";
     double gamma = 1. / demography.expected_time;
     return (m + 2) / (gamma + rho + mu);
   }
@@ -1323,8 +1319,6 @@ ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype
       if (num_het_sites > 5) {
         std::vector<int> breakpoints = hmm->breakpoints(het_hom_sites, segment_start);
 
-        // FIXME Alex/Arni review - was 'i' but dangerous as shadowing out loop, changed to 'j',
-        // confirm ok.
         for (int j = 0; j < static_cast<int>(breakpoints.size()); j++) {
           int breakpoint_start = breakpoints[j];
           int breakpoint_end =
@@ -1383,7 +1377,6 @@ std::vector<ImputationSegment> ThreadsFastLS::impute(std::vector<bool>& genotype
     const std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>& segment = best_path[i];
     const std::vector<int>& samples = std::get<0>(segment);
     ImputationSegment imp_seg;
-    // FIXME Alex/Arni review double to int conversion OK? Should it be ceil/floor/round?
     imp_seg.seg_start = static_cast<int>(physical_positions[std::get<1>(segment)[0]]);
     imp_seg.ids = samples;
     std::vector<double> wts;
@@ -1427,7 +1420,6 @@ ThreadsFastLS::remove_burn_in(std::vector<int>& bp_starts,
     // Keep segments that start on or before threading_start
     int seg_start_i = 0;
     for (int i = 0; i < num_segments; i++) {
-      // FIXME Alex/Arni review double to int conversion OK? Should it be ceil/floor/round?
       int seg_end = i == num_segments - 1 ? static_cast<int>(threading_end) : bp_starts[i + 1];
       if (threading_start < seg_end) {
         break;
@@ -1447,10 +1439,7 @@ ThreadsFastLS::remove_burn_in(std::vector<int>& bp_starts,
       }
     }
 
-    // FIXME Alex/Arni - is usage correct? .begin() is an iterator not value, adding a value then
-    // assigning to an int
     trim_starts = {bp_starts.begin() + seg_start_i, bp_starts.begin() + seg_end_i};
-    // FIXME Alex/Arni - direct cast from double OK?
     trim_starts[0] = static_cast<int>(threading_start);
     trim_IDs = {target_IDs.begin() + seg_start_i, target_IDs.begin() + seg_end_i};
     trim_ages = {segment_ages.begin() + seg_start_i, segment_ages.begin() + seg_end_i};
@@ -1536,7 +1525,6 @@ ThreadsFastLS::het_sites_from_thread(const int focal_ID, const std::vector<int> 
   int site_i = 0;
   for (int seg_i = 0; seg_i < num_segments; seg_i++) {
     int segment_start = bp_starts[seg_i];
-    // FIXME Arni/Alex review - double to int OK, floor/ceil/round?
     int segment_end = seg_i == num_segments - 1 ? (static_cast<int>(physical_positions.back()) + 1)
                                                 : bp_starts[seg_i + 1];
     int target_ID = target_IDs[seg_i][0];
@@ -1544,7 +1532,6 @@ ThreadsFastLS::het_sites_from_thread(const int focal_ID, const std::vector<int> 
            physical_positions[site_i] < segment_end && site_i < num_sites) {
       if (panel[ID_map.at(focal_ID)][site_i]->genotype !=
           panel[ID_map.at(target_ID)][site_i]->genotype) {
-        // FIXME Arni/Alex review - double to int OK, floor/ceil/round?
         het_sites.push_back(static_cast<int>(physical_positions[site_i]));
       }
       site_i++;
