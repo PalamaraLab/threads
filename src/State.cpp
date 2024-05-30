@@ -54,8 +54,7 @@ void StateBranch::prune() {
   });
 
   std::vector<State> new_states;
-  double running_min_score =
-      std::numeric_limits<double>::infinity(); // FIXME review with Arni - infinity or max?
+  double running_min_score = std::numeric_limits<double>::max();
   for (const State& s : states) {
     if (s.score < running_min_score) {
       new_states.push_back(s);
