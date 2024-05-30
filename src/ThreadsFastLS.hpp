@@ -40,9 +40,7 @@ public:
   /// @return Node* Pointer to node below the sequence being inserted at site i+1
   Node* extend_node(Node* node, bool genotype, const int i);
 
-  // FIXME Alex/Arni confirm meaning of "May alter" below, also my change to return comment
-  /// Determine whether state can be extended through panel by appending g.
-  ///        May alter
+  /// Determine whether state can be extended through panel by appending genotype 'g'
   /// @param s State at site i
   /// @param t_next Node at site i+1
   /// @param g Candidate genotype for s at i+1
