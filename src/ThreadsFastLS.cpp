@@ -1335,8 +1335,7 @@ ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype
               (j == (static_cast<int>(breakpoints.size()) - 1)) ? segment_end : breakpoints[j + 1];
           target_IDs.push_back(target_ID_L);
           bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[breakpoint_start])));
-          // FIXME Alex/Arni review - just spotted, checking on context for comment
-          // This is wrong!!! need to actually re-do num het_sites!!!!
+          // TODO Pass right number of heterozygous sites to date segments when HMM is used (ticket #24)
           segment_ages.push_back(date_segment(num_het_sites, breakpoint_start, breakpoint_end));
         }
       }
