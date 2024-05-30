@@ -8,7 +8,6 @@
 #include <unordered_set>
 #include <vector>
 
-
 // For a given interval, this contains all the matches for all the samples
 MatchGroup::MatchGroup(int _num_samples, double _cm_position)
     : num_samples(_num_samples), cm_position(_cm_position) {
@@ -24,7 +23,7 @@ MatchGroup::MatchGroup(const std::vector<int>& target_ids,
   if (target_ids.size() != matches.size()) {
     throw std::runtime_error("Inconsistent target/matches sizes");
   }
-  for (int i = 0; i < target_ids.size(); i++) {
+  for (int i = 0; i < static_cast<int>(target_ids.size()); i++) {
     match_candidates[target_ids[i]] = matches[i];
   }
 }
@@ -78,7 +77,7 @@ void MatchGroup::filter_matches(int min_matches) {
   // Then determine top 4 candidates for neighboring groups
   top_four_maps.reserve(num_samples);
   for (int i = 0; i < num_samples; i++) {
-    top_four_maps.emplace_back(std::min(4, (int) match_candidates.at(i).size()));
+    top_four_maps.emplace_back(std::min(4, static_cast<int>(match_candidates.at(i).size())));
     std::partial_sort_copy(match_candidates_counts.at(i).begin(),
                            match_candidates_counts.at(i).end(), top_four_maps.at(i).begin(),
                            top_four_maps.at(i).end(),
@@ -107,12 +106,13 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
                  double _match_group_interval_size, int _neighborhood_size, int _min_matches)
     : num_samples(_n), genetic_positions(_genetic_positions),
       query_interval_size(_query_interval_size),
-      match_group_interval_size(_match_group_interval_size), neighborhood_size(_neighborhood_size), min_matches(_min_matches) {
+      match_group_interval_size(_match_group_interval_size), neighborhood_size(_neighborhood_size),
+      min_matches(_min_matches) {
   if (genetic_positions.size() <= 2) {
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(genetic_positions.size()));
   }
-  num_sites = genetic_positions.size();
+  num_sites = static_cast<int>(genetic_positions.size());
   sites_processed = 0;
 
   // Check maps are strictly increasing
@@ -130,7 +130,7 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
   int match_group_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];
   match_group_sites = {0};
-  for (int i = 0; i < genetic_positions.size(); i++) {
+  for (int i = 0; i < static_cast<int>(genetic_positions.size()); i++) {
     double cm = genetic_positions.at(i);
     if (cm > gen_pos_offset + query_interval_size * query_site_idx) {
       query_sites.push_back(i);
@@ -162,7 +162,7 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
   }
   match_group_idx = 0;
   std::cout << "Will use " << query_sites.size() << " query sites and " << match_group_sites.size()
-       << " match_group_sites" << std::endl;
+            << " match_group_sites" << std::endl;
 
   match_groups.reserve(match_group_sites.size());
   for (int match_group_site : match_group_sites) {
@@ -195,7 +195,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   }
   int counter0 = 0;
   int counter1 = 0;
-  if (genotype.size() != num_samples) {
+  if (static_cast<int>(genotype.size()) != num_samples) {
     throw std::runtime_error("invalid genotype vector size");
   }
 
@@ -217,14 +217,14 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   sorting = next_sorting;
 
   // Threading-neighbor queries
-  if (match_group_idx < match_group_sites.size() - 1 &&
-      sites_processed >= match_group_sites.at(match_group_idx + 1)) {
+  if (match_group_idx < (static_cast<int>(match_group_sites.size()) - 1) &&
+      (sites_processed >= match_group_sites.at(match_group_idx + 1))) {
     match_group_idx++;
     match_groups.at(match_group_idx - 1).filter_matches(min_matches);
   }
 
   // If we've reached a query site, query
-  if (next_query_site_idx < query_sites.size() &&
+  if (next_query_site_idx < static_cast<int>(query_sites.size()) &&
       sites_processed == query_sites.at(next_query_site_idx)) {
     // Get the arg-sort of the sorting
     for (int i = 0; i < num_samples; i++) {
@@ -238,18 +238,18 @@ void Matcher::process_site(const std::vector<int>& genotype) {
     // Insert sequences and query in order
     for (int i = 1; i < num_samples; i++) {
       std::vector<int> matches;
-      int allele = genotype.at(i);
       matches.reserve(neighborhood_size);
       auto iter = threaded.insert(permutation.at(i));
       auto iter_up = iter.first;
       auto iter_down = iter.first;
       // Check if genotypes are identical, just to be sure
-      while (matches.size() < neighborhood_size && (iter_down != threaded.begin() || iter_up != threaded.end())) {
+      while ((static_cast<int>(matches.size()) < neighborhood_size) &&
+             (iter_down != threaded.begin() || iter_up != threaded.end())) {
         if (iter_down != threaded.begin()) {
           iter_down--;
           matches.push_back(sorting.at(*iter_down));
         }
-        if (matches.size() < neighborhood_size && iter_up != threaded.end()) {
+        if (static_cast<int>(matches.size()) < neighborhood_size && iter_up != threaded.end()) {
           iter_up++;
           if (iter_up != threaded.end()) {
             matches.push_back(sorting.at(*iter_up));
@@ -273,7 +273,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
     }
 
     // Special case for last query
-    if (next_query_site_idx == query_sites.size()) {
+    if (next_query_site_idx == static_cast<int>(query_sites.size())) {
       match_groups.at(match_group_sites.size() - 1).filter_matches(min_matches);
     }
   }
@@ -282,7 +282,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
 
 // Propagate top 4 matches from left and right match groups
 void Matcher::propagate_adjacent_matches() {
-  for (int i = 1; i < match_groups.size(); i++) {
+  for (int i = 1; i < static_cast<int>(match_groups.size()); i++) {
     MatchGroup& group = match_groups.at(i);
     MatchGroup& prev = match_groups.at(i - 1);
     group.insert_tops_from(prev);
