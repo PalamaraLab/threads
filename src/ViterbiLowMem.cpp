@@ -9,6 +9,9 @@
 
 namespace {
 
+const int ALLELE_MISSING = -9;
+const int ALLELE_UNPHASED_HET = -7;
+
 inline size_t coord_id_key(int i, int j) {
   return (static_cast<std::size_t>(i) << 32) | static_cast<std::size_t>(j);
 }
@@ -119,7 +122,6 @@ ViterbiState::ViterbiState(int _target_id, std::vector<int> _sample_ids)
   best_match = sample_ids.at(0);
 }
 
-// -9 is "missing" (not implemented yet) and -7 is "unphased"
 void ViterbiState::process_site(const std::vector<int>& genotype, double rho, double rho_c,
                                 double mu, double mu_c) {
   int current_site = sites_processed;
@@ -131,8 +133,7 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
   for (int sample_id : sample_ids) {
     int allele = genotype.at(sample_id);
     double copy_penalty;
-    // "-7" encodes unphased heterozygotes, because why not
-    if (allele == -7 || observed_allele == -7) {
+    if ((allele == ALLELE_UNPHASED_HET) || (observed_allele == ALLELE_UNPHASED_HET)) {
       copy_penalty = (mu_c + mu) / 2.;
     }
     else {
