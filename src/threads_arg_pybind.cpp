@@ -1,5 +1,5 @@
-#include "TGEN.hpp"
 #include "ImputationMatcher.hpp"
+#include "TGEN.hpp"
 #include "ThreadsLowMem.hpp"
 
 #include <pybind11/eigen.h>
@@ -63,7 +63,8 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
   py::class_<Matcher>(m, "Matcher")
       .def(py::init<int, std::vector<double>, double, double, int, int>(), "Initialize",
            py::arg("num_samples"), py::arg("genetic_positions"), py::arg("query_interval_size"),
-           py::arg("match_group_interval_size"), py::arg("neighborhood_size") = 4, py::arg("min_matches") = 4)
+           py::arg("match_group_interval_size"), py::arg("neighborhood_size") = 4,
+           py::arg("min_matches") = 4)
       .def_readonly("query_sites", &Matcher::query_sites)
       .def_readonly("genetic_positions", &Matcher::genetic_positions)
       .def_readonly("query_interval_size", &Matcher::query_interval_size)
