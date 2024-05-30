@@ -183,7 +183,7 @@ void ThreadsLowMem::date_segments() {
     throw std::runtime_error(
         "Can't date segments, not all sites have been parsed for heterozygosity.");
   }
-  // for (int i = 1; i < num_samples; i++) {
+
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
@@ -197,16 +197,10 @@ void ThreadsLowMem::date_segments() {
     }
   }
 
-  // I get segfault on this?
-
-  // FIXME Alex/Arni - in progress, but #def couts for now?
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
     }
-    // cout << "dating sample " << i << endl;
-    // compute length in bp/cM and num_hets for each segment
     ViterbiPath& path = paths.at(target_id);
     ViterbiPath new_path(target_id);
     std::size_t n_segs = path.segment_starts.size();
@@ -214,8 +208,6 @@ void ThreadsLowMem::date_segments() {
       int sample_id = path.sample_ids.at(k);
       int segment_start = path.segment_starts.at(k);
       int segment_end = k < n_segs - 1 ? path.segment_starts.at(k + 1) : num_sites - 1;
-      // cout << "dating segment [" << segment_start << ", " << segment_end << ") no. " << k << "
-      // out of " << n_segs - 1 << endl;
       if (segment_end == segment_start) {
         continue;
       }
@@ -223,7 +215,6 @@ void ThreadsLowMem::date_segments() {
       // This is inefficient but probably not that bad
       std::vector<int> segment_hets;
       for (int h : path.het_sites) {
-        // FIXME Alex/Arnie review parenthesis
         if (((segment_start <= h) && (h < segment_end)) ||
             ((h == num_sites - 1) && (segment_end == num_sites - 1))) {
           segment_hets.push_back(h);
@@ -240,7 +231,6 @@ void ThreadsLowMem::date_segments() {
         }
         // Here we use the hmm to break the big segment up into smaller segments
         std::vector<int> breakpoints = psmc.breakpoints(het_hom_sites, segment_start);
-        // cout << "found " << breakpoints.size() << " breakpoints" << endl;
         for (std::size_t j = 0; j < breakpoints.size(); j++) {
           int breakpoint_start = breakpoints[j];
           int breakpoint_end = (j == breakpoints.size() - 1) ? segment_end : breakpoints[j + 1];
@@ -280,9 +270,8 @@ void ThreadsLowMem::date_segments() {
   return;
 }
 
-int ThreadsLowMem::count_branches() {
+int ThreadsLowMem::count_branches() const {
   int n_branches = 0;
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
@@ -293,7 +282,6 @@ int ThreadsLowMem::count_branches() {
 }
 
 void ThreadsLowMem::prune() {
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
