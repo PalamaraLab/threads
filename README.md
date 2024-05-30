@@ -8,11 +8,8 @@ module load git/2.36.0-GCCcore-11.3.0-nodocs
 module load Python/3.10.4-GCCcore-11.3.0
 module load GSL/2.7-GCC-11.3.0
 module load Boost/1.79.0-GCC-11.3.0
-module load Eigen/3.4.0-GCCcore-11.3.0
 module load pybind11/2.9.2-GCCcore-11.3.0
 ```
-
-NB: Eigen is only used for functionality in TGEN.cpp. We can consider releasing without TGEN to have fewer dependencies.
 
 Fire up and activate a new venv:
 ```

@@ -25,5 +25,4 @@ RUN apt-get install -y \
 RUN apt-get install -y \
     python3-dev \
     libboost-dev \
-    libeigen3-dev \
     pybind11-dev
