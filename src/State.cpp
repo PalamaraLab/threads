@@ -5,7 +5,6 @@
 #include <limits>
 #include <vector>
 
-
 TracebackState::TracebackState(int _site, Node* _best_prev_node, TracebackState* _prev)
     : site(_site), best_prev_node(_best_prev_node), prev(_prev) {
 }
@@ -14,7 +13,7 @@ State::State(Node* _below, double _score, TracebackState* _traceback)
     : below(_below), score(_score), traceback(_traceback) {
 }
 
-bool State::genotype() {
+bool State::genotype() const {
   return this->below->above->genotype;
 }
 
@@ -55,7 +54,8 @@ void StateBranch::prune() {
   });
 
   std::vector<State> new_states;
-  double running_min_score = std::numeric_limits<double>::infinity();
+  double running_min_score =
+      std::numeric_limits<double>::infinity(); // FIXME review with Arni - infinity or max?
   for (const State& s : states) {
     if (s.score < running_min_score) {
       new_states.push_back(s);
@@ -81,7 +81,7 @@ void StateTree::prune() {
   }
 }
 
-std::vector<State> StateTree::dump() {
+std::vector<State> StateTree::dump() const {
   std::vector<State> states;
   for (auto pair : branches) {
     for (auto s : pair.second.states) {
