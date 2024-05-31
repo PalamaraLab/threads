@@ -73,7 +73,6 @@ private:
   int sites_processed = 0;
   int next_query_site_idx = 0;
   int match_group_idx = 0;
-  int min_match_length = 1;
   std::vector<MatchGroup> match_groups;
   std::vector<int> sorting;
   std::vector<int> next_sorting;

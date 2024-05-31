@@ -44,7 +44,8 @@ function(set_project_warnings project_name)
       -Woverloaded-virtual # warn if you overload (not override) a virtual function
       -Wpedantic # warn if non-standard C++ is used
       -Wconversion # warn on type conversions that may lose data
-      # TODO Change int to size_t where appropriate (ticket #26)
+      # TODO replace -Wno-sign-conversion with -Wsign-conversion (ticket #26)
+      -Wno-sign-conversion # disabled until int/size_t resolved
       #-Wsign-conversion # warn on sign conversions
       -Wnull-dereference # warn if a null dereference is detected
       -Wdouble-promotion # warn if float is implicit promoted to double
