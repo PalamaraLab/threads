@@ -28,7 +28,7 @@ HMM::HMM(Demography demography, std::vector<double> bp_sizes, std::vector<double
   compute_recombination_scores(cm_sizes);
   compute_mutation_scores(bp_sizes, mutation_rate);
 
-  // FIXME Alex review with Arni, worth reserving up front or using emplace_back?
+  // TODO Profile usage of std containers (ticket #25)
   for (std::size_t i = 0; i < bp_sizes.size(); i++) {
     std::vector<double> trellis_row(num_states, 0.0);
     std::vector<unsigned short> pointer_row(num_states, 0);
