@@ -1,16 +1,16 @@
 // This file is part of the Threads software suite.
 // Copyright (C) 2024 Threads Developers.
-// 
+//
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -27,7 +27,7 @@ namespace {
 
 const int ALLELE_UNPHASED_HET = -7;
 
-inline size_t coord_id_key(int i, int j) {
+inline std::size_t coord_id_key(int i, int j) {
   return (static_cast<std::size_t>(i) << 32) | static_cast<std::size_t>(j);
 }
 
@@ -37,7 +37,7 @@ TracebackNode::TracebackNode(int _sample_id, int _site, TracebackNode* _previous
     : sample_id(_sample_id), site(_site), previous(_previous), score(_score) {
 }
 
-size_t TracebackNode::key() {
+std::size_t TracebackNode::key() const {
   return coord_id_key(site, sample_id);
 }
 
@@ -129,7 +129,7 @@ ViterbiState::ViterbiState(int _target_id, std::vector<int> _sample_ids)
                              std::to_string(target_id));
   }
   for (int sample_id : sample_ids) {
-    size_t key = coord_id_key(0, sample_id);
+    std::size_t key = coord_id_key(0, sample_id);
     traceback_states.emplace(key, TracebackNode(sample_id, 0, nullptr, 0.));
     current_tracebacks[sample_id] = &traceback_states.at(key);
   }
@@ -158,7 +158,7 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
       // If we've just added new sites (this will happen vary rarely),
       // recombine from previous best state
       new_score = best_score + copy_penalty + rho;
-      size_t key = coord_id_key(current_site, sample_id);
+      std::size_t key = coord_id_key(current_site, sample_id);
       traceback_states.emplace(key, TracebackNode(sample_id, current_site, prev_best, new_score));
       current_tracebacks[sample_id] = &traceback_states.at(key);
     }
@@ -173,7 +173,7 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
       else {
         // If we recombine, add a new branch
         new_score = best_score + copy_penalty + rho;
-        size_t key = coord_id_key(current_site, sample_id);
+        std::size_t key = coord_id_key(current_site, sample_id);
         traceback_states.emplace(key, TracebackNode(sample_id, current_site, prev_best, new_score));
         current_tracebacks.at(sample_id) = &traceback_states.at(key);
       }
@@ -203,7 +203,7 @@ void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
 }
 
 void ViterbiState::prune() {
-  std::unordered_map<size_t, TracebackNode> tmp_traceback_states;
+  std::unordered_map<std::size_t, TracebackNode> tmp_traceback_states;
 
   for (int sample_id : sample_ids) {
     TracebackNode* state = current_tracebacks.at(sample_id);
@@ -220,12 +220,13 @@ void ViterbiState::prune() {
 }
 
 // add everything above and return a key to the new address
-TracebackNode* ViterbiState::recursive_insert(std::unordered_map<size_t, TracebackNode>& state_map,
-                                              TracebackNode* state) {
+TracebackNode*
+ViterbiState::recursive_insert(std::unordered_map<std::size_t, TracebackNode>& state_map,
+                               TracebackNode* state) {
   if (state == nullptr) {
     return nullptr;
   }
-  size_t key = state->key();
+  std::size_t key = state->key();
   if (!state_map.count(key)) {
     TracebackNode* parent = state->previous;
     TracebackNode* new_parent = recursive_insert(state_map, parent);
