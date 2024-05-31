@@ -571,7 +571,7 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
     for (StatePair& p : current_pairs) {
       std::size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
       std::size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
-      double z_pair;
+      double z_pair = 0.0;
 
       // Set/get extensibility
       if (extmap_0.count(key_a)) {
