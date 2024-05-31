@@ -145,15 +145,15 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
 std::tuple<std::vector<double>, std::vector<double>>
 ThreadsFastLS::site_sizes(std::vector<double> positions) {
   // Find mid-points between sites
-  int M = static_cast<int>(positions.size());
+  std::size_t M = positions.size();
   std::vector<double> pos_means(M - 1);
-  for (int i = 0; i < M - 1; i++) {
+  for (std::size_t i = 0; i < M - 1; i++) {
     pos_means[i] = (positions[i] + positions[i + 1]) / 2.;
   }
   // Find the mean size of mid-point differences
   std::vector<double> site_sizes(M);
   // Mid-point deltas tell us about the area around each site
-  for (int i = 1; i < M - 1; i++) {
+  for (std::size_t i = 1; i < M - 1; i++) {
     site_sizes[i] = (pos_means[i] - pos_means[i - 1]);
   }
   double mean_size = (pos_means[M - 2] - pos_means[0]) / double(M - 2);
@@ -168,7 +168,7 @@ ThreadsFastLS::site_sizes(std::vector<double> positions) {
   std::vector<double> boundaries(M + 1);
   boundaries[0] = positions[0];
   boundaries[M] = positions[M - 1];
-  for (int i = 1; i < M; i++) {
+  for (std::size_t i = 1; i < M; i++) {
     boundaries[i] = pos_means[i - 1];
   }
   return std::tuple(boundaries, site_sizes);
