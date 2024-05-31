@@ -25,7 +25,6 @@
 
 namespace {
 
-const int ALLELE_MISSING = -9;
 const int ALLELE_UNPHASED_HET = -7;
 
 inline size_t coord_id_key(int i, int j) {

@@ -28,10 +28,6 @@ public:
   TgenSegment() : target(std::numeric_limits<int>::max()), first(), past() {
   }
 
-  TgenSegment(const TgenSegment& other)
-      : het_sites(other.het_sites), target(other.target), first(other.first), past(other.past) {
-  }
-
   TgenSegment(int lo, int up) : target(std::numeric_limits<int>::max()), first(lo), past(up) {
   }
 

@@ -222,7 +222,7 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   panel.emplace_back(std::vector<std::unique_ptr<Node>>(num_sites + 1));
 
   Node* t0 = bottoms[0].get();
-  panel[ID_map.at(ID)][0] = std::move(std::make_unique<Node>(ID, 0, genotype[0]));
+  panel[ID_map.at(ID)][0] = std::make_unique<Node>(ID, 0, genotype[0]);
   Node* z0 = panel[ID_map.at(ID)][0].get();
 
   // Inserts z0 above t0
@@ -238,7 +238,7 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
     // Add current thingy to panel
-    panel[ID_map.at(ID)][k + 1] = std::move(std::make_unique<Node>(ID, k + 1, next_genotype));
+    panel[ID_map.at(ID)][k + 1] = std::make_unique<Node>(ID, k + 1, next_genotype);
     z_next = panel[ID_map.at(ID)][k + 1].get();
     tmp = z_k->above;
     while (tmp->sample_ID != -1 && tmp->genotype != g_k) {
@@ -962,7 +962,6 @@ std::vector<std::tuple<int, std::vector<int>>>
 ThreadsFastLS::traceback(TracebackState* tb, Node* match, bool return_all) {
   std::vector<std::tuple<int, std::vector<int>>> best_path;
   while (tb != nullptr) {
-    int n_matches = 1;
     int segment_start = tb->site;
     int match_id = match->sample_ID;
     std::vector<int> div_states = {match_id};
@@ -977,7 +976,6 @@ ThreadsFastLS::traceback(TracebackState* tb, Node* match, bool return_all) {
         break;
       }
       div_states.push_back(div_node->sample_ID);
-      n_matches += 1;
       if (div_node->sample_ID < min_id) {
         min_id = div_node->sample_ID;
       }
@@ -1009,7 +1007,6 @@ ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb
   std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> imputation_path;
   int prev_end = num_sites;
   while (tb != nullptr) {
-    int n_matches = 1;
     int segment_start = tb->site;
     int segment_end = prev_end;
     prev_end = segment_start;
@@ -1028,7 +1025,6 @@ ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb
         break;
       }
       div_states.push_back(div_node->sample_ID);
-      n_matches += 1;
       if (div_node->sample_ID < min_id) {
         min_id = div_node->sample_ID;
       }
@@ -1037,7 +1033,6 @@ ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb
     div_node = match->below;
     while (div_node != nullptr && div_node->divergence <= segment_start) {
       div_states.push_back(div_node->sample_ID);
-      n_matches += 1;
       if (div_node->sample_ID < min_id) {
         min_id = div_node->sample_ID;
       }
@@ -1311,7 +1306,6 @@ ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype
   std::vector<int> bp_starts;
   std::vector<std::vector<int>> target_IDs;
   std::vector<double> segment_ages;
-  int total_num_het_sites = 0;
   // Date segments
   for (int i = 0; i < static_cast<int>(best_path.size()); i++) {
     int segment_start = std::get<0>(best_path[i]);
@@ -1328,7 +1322,6 @@ ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype
         num_het_sites++;
       }
     }
-    total_num_het_sites += num_het_sites;
 
     if (use_hmm && num_samples < HMM_SPLIT_THRESHOLD) {
       // is it ok to have 10 here?
