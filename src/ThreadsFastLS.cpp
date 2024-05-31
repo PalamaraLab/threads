@@ -1,16 +1,16 @@
 // This file is part of the Threads software suite.
 // Copyright (C) 2024 Threads Developers.
-// 
+//
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -39,7 +39,7 @@ namespace {
 const int END_ALLELE = 0;
 const int HMM_SPLIT_THRESHOLD = 1000;
 
-inline size_t pair_key(int i, int j) {
+inline std::size_t pair_key(int i, int j) {
   return (static_cast<std::size_t>(i) << 32) | static_cast<std::size_t>(j);
 }
 
@@ -1237,8 +1237,7 @@ double ThreadsFastLS::date_segment(int num_het_sites, double cm_size, double bp_
   return numerator / denominator;
 }
 
-double ThreadsFastLS::date_segment_sparse(double cm_size,
-                                          Demography& demography) {
+double ThreadsFastLS::date_segment_sparse(double cm_size, Demography& demography) {
 
   double rho = 2. * 0.01 * cm_size;
   double numerator = 0;
@@ -1334,7 +1333,8 @@ ThreadsFastLS::thread(const int new_sample_ID, const std::vector<bool>& genotype
               (j == (static_cast<int>(breakpoints.size()) - 1)) ? segment_end : breakpoints[j + 1];
           target_IDs.push_back(target_ID_L);
           bp_starts.push_back(static_cast<int>(ceil(bp_boundaries[breakpoint_start])));
-          // TODO Pass right number of heterozygous sites to date segments when HMM is used (ticket #24)
+          // TODO Pass right number of heterozygous sites to date segments when HMM is used (ticket
+          // #24)
           segment_ages.push_back(date_segment(num_het_sites, breakpoint_start, breakpoint_end));
         }
       }

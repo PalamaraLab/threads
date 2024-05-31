@@ -1,16 +1,16 @@
 // This file is part of the Threads software suite.
 // Copyright (C) 2024 Threads Developers.
-// 
+//
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -25,7 +25,7 @@
 class TracebackNode {
 public:
   TracebackNode(int _sample_id, int _site, TracebackNode* _previous, double _score);
-  size_t key();
+  std::size_t key() const;
 
 public:
   int sample_id = 0;
@@ -69,8 +69,8 @@ public:
   ViterbiPath traceback();
 
 private:
-  std::unordered_map<size_t, TracebackNode> traceback_states;
-  TracebackNode* recursive_insert(std::unordered_map<size_t, TracebackNode>& state_map,
+  std::unordered_map<std::size_t, TracebackNode> traceback_states;
+  TracebackNode* recursive_insert(std::unordered_map<std::size_t, TracebackNode>& state_map,
                                   TracebackNode* state);
 
 public:
