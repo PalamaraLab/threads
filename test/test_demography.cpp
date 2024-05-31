@@ -46,6 +46,6 @@ TEST_CASE("Demography constructor exceptions") {
 TEST_CASE("Demography std_to_gen exceptions") {
   SECTION("std_to_gen value must be non-negative") {
     Demography d{{1}, {0}};
-    CHECK_THROWS_WITH(d.std_to_gen(-1), Catch::Matchers::ContainsSubstring("Demography can only convert non-negative times to std"));
+    CHECK_THROWS_WITH(d.std_to_gen(-1), Catch::Matchers::ContainsSubstring("Demography can only convert times greater than the first entry"));
   }
 }
