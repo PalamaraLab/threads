@@ -9,7 +9,7 @@ RUN apt-get install -y \
 
 # Packages for local testing
 RUN pip install --upgrade pip setuptools wheel
-RUN pip install pytest h5py numpy
+RUN pip install pytest numpy
 
 # Packages for local build
 RUN pip install cmake ninja
