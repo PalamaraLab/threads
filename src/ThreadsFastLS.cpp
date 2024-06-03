@@ -571,7 +571,7 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
     for (StatePair& p : current_pairs) {
       std::size_t key_a = pair_key(p.below_a->above->sample_ID, p.traceback_a->site);
       std::size_t key_b = pair_key(p.below_b->above->sample_ID, p.traceback_b->site);
-      double z_pair = 0.0;
+      double z_pair = std::numeric_limits<double>::max();
 
       // Set/get extensibility
       if (extmap_0.count(key_a)) {
@@ -642,6 +642,10 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
           z_pair = p.score + 2 * mutation_cost;
         }
       }
+      else {
+        throw std::runtime_error("Illegal genotype value " + std::to_string(allele));
+      }
+
       if (!local_min.count(key_a)) {
         // Set local minima
         local_min[key_a] = z_pair;
