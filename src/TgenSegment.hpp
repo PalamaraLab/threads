@@ -1,3 +1,19 @@
+// This file is part of the Threads software suite.
+// Copyright (C) 2024 Threads Developers.
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 #ifndef THREADS_ARG_TGEN_SEGMENT_HPP
 #define THREADS_ARG_TGEN_SEGMENT_HPP
 
@@ -9,25 +25,22 @@
 // Here is a typical class that may model intervals in your application.
 class TgenSegment {
 public:
-  TgenSegment() : _first(), _past(), target(std::numeric_limits<int>::max()) {
-  }
-  TgenSegment(const TgenSegment& other)
-      : _first(other._first), _past(other._past), het_sites(other.het_sites), target(other.target) {
-  }
-  TgenSegment(int lo, int up) : _first(lo), _past(up), target(std::numeric_limits<int>::max()) {
-  }
-  TgenSegment(int lo, int up, std::vector<int> _hets, int _target)
-      : _first(lo), _past(up), het_sites(_hets), target(_target) {
+  TgenSegment() : target(std::numeric_limits<int>::max()), first(), past() {
   }
 
-  std::vector<int> het_sites;
-  int target = std::numeric_limits<int>::max();
+  TgenSegment(int lo, int up) : target(std::numeric_limits<int>::max()), first(lo), past(up) {
+  }
+
+  TgenSegment(int lo, int up, std::vector<int> _hets, int _target)
+      : het_sites(_hets), target(_target), first(lo), past(up) {
+  }
 
   [[nodiscard]] int lower() const {
-    return _first;
+    return first;
   }
+
   [[nodiscard]] int upper() const {
-    return _past;
+    return past;
   }
 
   friend std::ostream& operator<<(std::ostream& os, const TgenSegment& seg) {
@@ -40,7 +53,7 @@ public:
     return os;
   }
 
-  TgenSegment operator&(const TgenSegment& other) const {
+  TgenSegment calc_intersection_with(const TgenSegment& other) const {
     int new_first = std::max(lower(), other.lower());
     int new_past = std::min(upper(), other.upper());
 
@@ -53,9 +66,13 @@ public:
     return {new_first, new_past, merged_sites, std::min(target, other.target)};
   }
 
+public:
+  std::vector<int> het_sites;
+  int target = std::numeric_limits<int>::max();
+
 private:
-  int _first = 0;
-  int _past = 0;
+  int first = 0;
+  int past = 0;
 };
 
 #endif // THREADS_ARG_TGEN_SEGMENT_HPP

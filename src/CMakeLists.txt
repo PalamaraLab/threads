@@ -1,5 +1,18 @@
-# This file is part of https://github.com/PalamaraLab/threads which is released under the GPL-3.0 license.
-# See accompanying LICENSE and COPYING for copyright notice and full details.
+# This file is part of the Threads software suite.
+# Copyright (C) 2024 Threads Developers.
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Find Boost
 find_package(Boost REQUIRED)
@@ -13,23 +26,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         add_compile_options(-fno-new-ttp-matching)
     endif()
 endif()
-
-# Try to find Eigen3 version 3.4 locally installed
-find_package(Eigen3 3.4 QUIET)
-
-if(NOT Eigen3_FOUND)
-    include(FetchContent)
-    message(STATUS "Suitable local version of Eigen3 (>= 3.4) not found, fetching from repository...")
-    FetchContent_Declare(
-        Eigen3
-        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-        GIT_TAG        9df21dc8b4b576a7aa5c0094daa8d7e8b8be60f0  # 3.4 branch at 2024-03-15
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(Eigen3)
-    set(Eigen3_VERSION "3.4")
-endif()
-message(STATUS "Found Eigen3 ${Eigen3_VERSION}")
 
 # Threads static library
 set(threads_arg_src
@@ -77,8 +73,6 @@ target_link_libraries(threads_arg
     PRIVATE
         Boost::headers
         project_warnings
-    PUBLIC
-        Eigen3::Eigen
 )
 
 # Conditionally create python bindings

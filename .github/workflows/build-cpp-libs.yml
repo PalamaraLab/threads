@@ -19,16 +19,16 @@ jobs:
         include:
           - os: ubuntu-22.04
             build-type: Debug
-            system-deps: "sudo apt -y install libboost-dev libboost-math-dev libeigen3-dev"
+            system-deps: "sudo apt -y install libboost-dev libboost-math-dev"
           - os: ubuntu-22.04
             build-type: Release
-            system-deps: "sudo apt -y install libboost-dev libboost-math-dev libeigen3-dev"
+            system-deps: "sudo apt -y install libboost-dev libboost-math-dev"
           - os: macos-14
             build-type: Debug
-            system-deps: "brew install boost eigen"
+            system-deps: "brew install boost"
           - os: macos-14
             build-type: Release
-            system-deps: "brew install boost eigen"
+            system-deps: "brew install boost"
 
     steps:
 
