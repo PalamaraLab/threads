@@ -1,3 +1,19 @@
+// This file is part of the Threads software suite.
+// Copyright (C) 2024 Threads Developers.
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 #include "ThreadsLowMem.hpp"
 
 #include <algorithm>
@@ -8,15 +24,14 @@
 #include <unordered_set>
 #include <vector>
 
-
 ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
                              const std::vector<double>& _physical_positions,
                              const std::vector<double>& _genetic_positions, std::vector<double> ne,
                              std::vector<double> ne_times, double _mutation_rate, bool _sparse)
-    : target_ids(_target_ids), physical_positions(_physical_positions),
-      genetic_positions(_genetic_positions), demography(Demography(ne, ne_times)),
-      mutation_rate(_mutation_rate), sparse(_sparse) {
-  num_samples = target_ids.size();
+    : target_ids(_target_ids), mutation_rate(_mutation_rate),
+      physical_positions(_physical_positions), genetic_positions(_genetic_positions),
+      sparse(_sparse), demography(Demography(ne, ne_times)) {
+  num_samples = static_cast<int>(target_ids.size());
   if (physical_positions.size() != genetic_positions.size()) {
     throw std::runtime_error("Map lengths don't match.");
   }
@@ -24,7 +39,7 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(physical_positions.size()));
   }
-  num_sites = physical_positions.size();
+  num_sites = static_cast<int>(physical_positions.size());
 
   // Check maps are strictly increasing
   for (int i = 0; i < num_sites - 1; i++) {
@@ -49,7 +64,8 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
   }
 
   // Mean interval size in base-pairs
-  mean_bp_size = (double) (physical_positions.back() - physical_positions[0]) / (num_sites - 1);
+  mean_bp_size =
+      (physical_positions.back() - physical_positions[0]) / static_cast<double>(num_sites - 1);
   for (int target_id : target_ids) {
     segment_indices[target_id] = 0;
     expected_branch_lengths[target_id] = demography.expected_branch_length(target_id + 1);
@@ -60,7 +76,7 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
   het_sites_processed = 0;
   std::tie(bp_boundaries, bp_sizes) = ThreadsFastLS::site_sizes(physical_positions);
 
-  for (int i = 0; i < genetic_positions.size(); i++) {
+  for (std::size_t i = 0; i < genetic_positions.size(); i++) {
     if (i == genetic_positions.size() - 1) {
       // TO allow for closely spaced markers
       cm_sizes.push_back(0.0000001);
@@ -87,7 +103,7 @@ void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_se
     throw std::runtime_error("Match-data is missing or does not have same shape as genetic map");
   }
   match_groups.reserve(match_ids.size());
-  for (int i = 0; i < match_ids.size(); i++) {
+  for (std::size_t i = 0; i < match_ids.size(); i++) {
     match_groups.emplace_back(target_ids, match_ids.at(i), cm_positions.at(i));
   }
 
@@ -107,9 +123,9 @@ void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_se
 void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
   bool group_change = false;
 
-  if (match_group_idx < match_groups.size() - 1 &&
-      genetic_positions.at(hmm_sites_processed) >=
-          match_groups.at(match_group_idx + 1).cm_position) {
+  if (match_group_idx < (static_cast<int>(match_groups.size()) - 1) &&
+      (genetic_positions.at(hmm_sites_processed) >=
+       match_groups.at(match_group_idx + 1).cm_position)) {
     match_group_idx++;
     group_change = true;
   }
@@ -150,7 +166,6 @@ void ThreadsLowMem::traceback() {
 }
 
 void ThreadsLowMem::process_site_hets(const std::vector<int>& genotype) {
-
   for (int target_id : target_ids) {
     if (target_id == 0) {
       if (genotype.at(0) == 1) {
@@ -160,8 +175,8 @@ void ThreadsLowMem::process_site_hets(const std::vector<int>& genotype) {
     else {
       ViterbiPath& path = paths.at(target_id);
       int current_seg_idx = segment_indices.at(target_id);
-      while (current_seg_idx < path.segment_starts.size() - 1 &&
-             het_sites_processed >= path.segment_starts.at(current_seg_idx + 1)) {
+      while (current_seg_idx < (static_cast<int>(path.segment_starts.size()) - 1) &&
+             (het_sites_processed >= path.segment_starts.at(current_seg_idx + 1))) {
         current_seg_idx++;
       }
       segment_indices.at(target_id) = current_seg_idx;
@@ -184,7 +199,7 @@ void ThreadsLowMem::date_segments() {
     throw std::runtime_error(
         "Can't date segments, not all sites have been parsed for heterozygosity.");
   }
-  // for (int i = 1; i < num_samples; i++) {
+
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
@@ -198,54 +213,41 @@ void ThreadsLowMem::date_segments() {
     }
   }
 
-  // I get segfault on this?
-
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
     }
-    // cout << "dating sample " << i << endl;
-    // compute length in bp/cM and num_hets for each segment
     ViterbiPath& path = paths.at(target_id);
     ViterbiPath new_path(target_id);
-    int n_segs = path.segment_starts.size();
-    for (int k = 0; k < n_segs; k++) {
+    std::size_t n_segs = path.segment_starts.size();
+    for (std::size_t k = 0; k < n_segs; k++) {
       int sample_id = path.sample_ids.at(k);
       int segment_start = path.segment_starts.at(k);
       int segment_end = k < n_segs - 1 ? path.segment_starts.at(k + 1) : num_sites - 1;
-      // cout << "dating segment [" << segment_start << ", " << segment_end << ") no. " << k << "
-      // out of " << n_segs - 1 << endl;
       if (segment_end == segment_start) {
         continue;
       }
-      double bp_size = physical_positions.at(segment_end) - physical_positions.at(segment_start);
-      double cm_size = genetic_positions.at(segment_end) - genetic_positions.at(segment_start);
 
       // This is inefficient but probably not that bad
       std::vector<int> segment_hets;
       for (int h : path.het_sites) {
-        if (segment_start <= h && h < segment_end ||
-            h == num_sites - 1 && segment_end == num_sites - 1) {
+        if (((segment_start <= h) && (h < segment_end)) ||
+            ((h == num_sites - 1) && (segment_end == num_sites - 1))) {
           segment_hets.push_back(h);
         }
         else if (h >= segment_end) {
           break;
         }
       }
-      // cout << "found bpsize: " << bp_size << " cmsize " << cm_size << " nhets " <<
-      // segment_hets.size() << " sample " << sample_id << endl; disabling hmm for now
-      if (target_id < n_hmm_samples && segment_hets.size() > hmm_min_sites) {
-        // cout << "running hmm on segment [" << segment_start << ", " << segment_end << ")... ";
+
+      if ((target_id < n_hmm_samples) && (static_cast<int>(segment_hets.size()) > hmm_min_sites)) {
         std::vector<bool> het_hom_sites(segment_end - segment_start, false);
         for (int h : segment_hets) {
-          // cout << h << endl;
           het_hom_sites[h - segment_start] = true;
         }
         // Here we use the hmm to break the big segment up into smaller segments
         std::vector<int> breakpoints = psmc.breakpoints(het_hom_sites, segment_start);
-        // cout << "found " << breakpoints.size() << " breakpoints" << endl;
-        for (int j = 0; j < breakpoints.size(); j++) {
+        for (std::size_t j = 0; j < breakpoints.size(); j++) {
           int breakpoint_start = breakpoints[j];
           int breakpoint_end = (j == breakpoints.size() - 1) ? segment_end : breakpoints[j + 1];
           // there may be off-by-one errors here on the last segment (but who cares?)
@@ -257,16 +259,16 @@ void ThreadsLowMem::date_segments() {
           // Same as above
           std::vector<int> breakpoint_hets;
           for (int h : segment_hets) {
-            if (breakpoint_start <= h && h < breakpoint_end ||
-                h == num_sites - 1 && breakpoint_end == num_sites - 1) {
+            if (((breakpoint_start <= h) && (h < breakpoint_end)) ||
+                ((h == num_sites - 1) && (breakpoint_end == num_sites - 1))) {
               breakpoint_hets.push_back(h);
             }
             else if (h >= breakpoint_end) {
               break;
             }
           }
-          double height = ThreadsFastLS::date_segment(
-              breakpoint_hets.size(), cm_size, bp_size, mutation_rate, demography);
+          double height = ThreadsFastLS::date_segment(static_cast<int>(breakpoint_hets.size()),
+                                                      cm_size, bp_size, mutation_rate, demography);
           new_path.append(breakpoint_start, sample_id, height, breakpoint_hets);
         }
       }
@@ -274,8 +276,8 @@ void ThreadsLowMem::date_segments() {
         // there are off-by-one errors here on the last segment (but who cares?)
         double bp_size = physical_positions.at(segment_end) - physical_positions.at(segment_start);
         double cm_size = genetic_positions.at(segment_end) - genetic_positions.at(segment_start);
-        double height =
-            ThreadsFastLS::date_segment(segment_hets.size(), cm_size, bp_size, mutation_rate, demography);
+        double height = ThreadsFastLS::date_segment(
+            static_cast<int>(segment_hets.size()), cm_size, bp_size, mutation_rate, demography);
         new_path.append(segment_start, sample_id, height, segment_hets);
       }
     }
@@ -284,9 +286,8 @@ void ThreadsLowMem::date_segments() {
   return;
 }
 
-int ThreadsLowMem::count_branches() {
+int ThreadsLowMem::count_branches() const {
   int n_branches = 0;
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
@@ -297,7 +298,6 @@ int ThreadsLowMem::count_branches() {
 }
 
 void ThreadsLowMem::prune() {
-  // for (int i = 1; i < num_samples; i++) {
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;

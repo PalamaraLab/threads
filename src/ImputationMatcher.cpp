@@ -1,3 +1,19 @@
+// This file is part of the Threads software suite.
+// Copyright (C) 2024 Threads Developers.
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 #include "ImputationMatcher.hpp"
 
 #include <algorithm>
@@ -8,33 +24,37 @@
 #include <unordered_set>
 #include <vector>
 
+// Uncomment this #define to enable a runtime check that genetic position are in order. This
+// diagnostic check is left in whilst we may have issues during development.
+// #define IMPUTATION_MATCHER_CHECK_IN_ORDER
 
 ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
                                      const std::vector<double>& _genetic_positions,
                                      double _query_interval_size, int _neighborhood_size)
-    : num_reference(_n_ref), num_target(_n_target), genetic_positions(_genetic_positions),
-      query_interval_size(_query_interval_size), neighborhood_size(_neighborhood_size) {
+    : neighborhood_size(_neighborhood_size), num_reference(_n_ref), num_target(_n_target),
+      query_interval_size(_query_interval_size), genetic_positions(_genetic_positions) {
   if (genetic_positions.size() <= 2) {
     throw std::runtime_error("Need at least 3 sites, found " +
                              std::to_string(genetic_positions.size()));
   }
-  num_sites = genetic_positions.size();
+  num_sites = static_cast<int>(genetic_positions.size());
   num_samples = num_reference + num_target;
   sites_processed = 0;
 
-  // Check maps are strictly increasing
-  // for (int i = 0; i < num_sites - 1; i++) {
-  //   if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
-  //     std::string prompt = "Genetic coordinates must be strictly increasing, found ";
-  //     prompt += std::to_string(genetic_positions[i + 1]) + " after " +
-  //               std::to_string(genetic_positions[i]);
-  //     throw std::runtime_error(prompt);
-  //   }
-  // }
+#ifdef IMPUTATION_MATCHER_CHECK_IN_ORDER
+  for (int i = 0; i < num_sites - 1; i++) {
+    if (genetic_positions.at(i + 1) <= genetic_positions.at(i)) {
+      std::string prompt = "Genetic coordinates must be strictly increasing, found ";
+      prompt += std::to_string(genetic_positions[i + 1]) + " after " +
+                std::to_string(genetic_positions[i]);
+      throw std::runtime_error(prompt);
+    }
+  }
+#endif // IMPUTATION_MATCHER_CHECK_IN_ORDER
 
   int query_site_idx = 1;
   double gen_pos_offset = genetic_positions[0];
-  for (int i = 0; i < genetic_positions.size(); i++) {
+  for (int i = 0; i < static_cast<int>(genetic_positions.size()); i++) {
     double cm = genetic_positions.at(i);
     if (cm > gen_pos_offset + query_interval_size * query_site_idx) {
       query_sites.push_back(i);
@@ -82,11 +102,11 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
     }
   }
 
-  if (genotype.size() != num_samples) {
+  if (static_cast<int>(genotype.size()) != num_samples) {
     throw std::runtime_error("invalid genotype vector size");
   }
 
-  if (next_query_site_idx < query_sites.size() &&
+  if (next_query_site_idx < static_cast<int>(query_sites.size()) &&
       sites_processed == query_sites.at(next_query_site_idx)) {
     next_query_site_idx++;
     int ref_allele_count = 0;
@@ -175,10 +195,10 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
   sites_processed++;
 }
 
-std::unordered_map<int, std::unordered_set<int>> ImputationMatcher::get_matches() {
+const std::unordered_map<int, std::unordered_set<int>>& ImputationMatcher::get_matches() const {
   return match_sets;
 }
 
-std::vector<int> ImputationMatcher::get_sorting() {
+const std::vector<int>& ImputationMatcher::get_sorting() const {
   return sorting;
 }

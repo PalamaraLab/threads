@@ -1,3 +1,19 @@
+# This file is part of the Threads software suite.
+# Copyright (C) 2024 Threads Developers.
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import os
 import gc
 import sys
@@ -263,9 +279,9 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
             phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
             if (phased_out == 0).any():
                 unphased_sites, unphased_samples = (1 - phased_out).nonzero()
-                # We encode "unphased het" by "-7"
-                alleles_out[unphased_sites, 2 * unphased_samples] = -7
-                alleles_out[unphased_sites, 2 * unphased_samples + 1] = -7
+                ALLELE_UNPHASED_HET = -7
+                alleles_out[unphased_sites, 2 * unphased_samples] = ALLELE_UNPHASED_HET
+                alleles_out[unphased_sites, 2 * unphased_samples + 1] = ALLELE_UNPHASED_HET
             reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
 
             # For each variant in chunk, pass the genotypes through Threads-LS

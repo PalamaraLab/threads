@@ -1,15 +1,29 @@
+// This file is part of the Threads software suite.
+// Copyright (C) 2024 Threads Developers.
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 #include "TGEN.hpp"
 
 #include "TgenSegment.hpp"
 
-#include <Eigen/Core>
 #include <boost/icl/separate_interval_set.hpp>
 
 #include <limits>
 #include <queue>
 #include <utility>
 #include <vector>
-
 
 namespace boost::icl {
 // See
@@ -52,15 +66,12 @@ public:
   std::vector<SegmentSet> interval_sets;
 
   std::unordered_map<int, int> pos_idx_map;
-  Eigen::VectorXi reference_genome;
   std::vector<bool> reference_genome_vec;
   std::vector<std::vector<int>> bp_starts;
   std::vector<std::vector<int>> target_IDs;
   std::vector<std::vector<int>> het_sites;
   std::vector<int> positions;
   std::vector<std::vector<bool>> genotypes;
-
-  Eigen::MatrixXi genotype_cache;
   std::unordered_map<int, int> cached_genotypes_map;
 
   // Constructor
@@ -70,27 +81,23 @@ public:
         het_sites(std::move(_het_sites)), positions(std::move(_positions)) {
     positions.push_back(std::numeric_limits<int>::max());
     // position-to-site map
-    for (int i = 0; i < positions.size(); i++) {
+    for (int i = 0; i < static_cast<int>(positions.size()); i++) {
       pos_idx_map[positions[i]] = i;
     }
 
-    // set reference genome here
-    reference_genome = Eigen::VectorXi::Zero(positions.size());
     reference_genome_vec = std::vector<bool>(positions.size(), false);
     for (int h : het_sites[0]) {
-      reference_genome[pos_idx_map.at(h)] = 1;
       reference_genome_vec[pos_idx_map.at(h)] = true;
     }
 
     interval_sets.reserve(bp_starts.size());
     // Initialize interval maps for each sample. This can get too slow
-    for (int i = 0; i < bp_starts.size(); i++) {
+    for (std::size_t i = 0; i < bp_starts.size(); i++) {
       SegmentSet iset;
-      int n_segs = bp_starts[i].size();
+      int n_segs = static_cast<int>(bp_starts[i].size());
       std::vector<int>& sample_hets = het_sites[i];
-      int n_hets = sample_hets.size();
+      int n_hets = static_cast<int>(sample_hets.size());
       int het_site_idx = 0;
-      int pos_idx = 0;
       std::vector<int> seg_hets;
       for (int j = 0; j < n_segs; j++) {
         int seg_start = bp_starts[i][j];
@@ -116,84 +123,7 @@ public:
     cached_genotypes_map[0] = -1;
   }
 
-  // Eigen-based query
-//  Eigen::MatrixXi& query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
-//    clear_cache();
-
-// Deprecated eigen-based query
-// Eigen::MatrixXi& TGEN::query(const int bp_from, const int bp_to, const std::vector<int>& samples) {
-//   clear_cache();
-
-//   // Find number of expected sites
-//   int start_pos = *std::lower_bound(positions.begin(), positions.end(), bp_from);
-//   int end_pos = *std::upper_bound(positions.begin(), positions.end(), bp_to);
-//   int idx_offset = pos_idx_map[start_pos];
-//   genotype_cache.resize(samples.size(), pos_idx_map[end_pos] - idx_offset);
-
-//   TgenSegment range(start_pos, end_pos);
-
-//   for (int i = 0; i < samples.size(); i++) {
-//     cached_genotypes_map[samples[i]] = i;
-//     if (samples[i] == 0) {
-//       auto insert_range =
-//           Eigen::seq(0, pos_idx_map[end_pos] - idx_offset - 1); // eigen seq is inclusive
-//       auto copy_range = Eigen::seq(idx_offset, pos_idx_map[end_pos] - 1);
-//       genotype_cache(i, insert_range) = reference_genome(
-//           copy_range); //.eval(); //WARNING need .eval() here (or do we? I don't think we do)
-//     }
-//     else {
-//       SegmentSet& segments(interval_sets[samples[i]]);
-
-//       // Initialize the queue
-//       std::queue<TgenSegment> seg_queue;
-//       auto eqr = segments.equal_range(range);
-//       for (SegmentSet::const_iterator iter = eqr.first; iter != eqr.second; iter++) {
-//         seg_queue.push(*iter & range);
-//       }
-
-//       // Process everything in the queue
-//       while (!seg_queue.empty()) {
-//         TgenSegment& segment = seg_queue.front();
-//         if (cached_genotypes_map.find(segment.target) != cached_genotypes_map.end()) {
-//           // We've reached somewhere along the tree where we can copy from
-//           int seg_start_idx = pos_idx_map[segment.lower()];
-//           int seg_end_idx = pos_idx_map[segment.upper()];
-//           auto insert_range = Eigen::seq(
-//               seg_start_idx - idx_offset, seg_end_idx - idx_offset - 1); // eigen seq is inclusive
-//           if (segment.target == 0) {
-//             auto copy_range = Eigen::seq(seg_start_idx, seg_end_idx - 1);
-//             // We've reached the root of the tree and copy from the "reference" genome
-//             genotype_cache(i, insert_range) = reference_genome(copy_range);
-//           }
-//           else {
-//             // We've found a cached genotype to copy from
-
-//             genotype_cache(i, insert_range) =
-//                 genotype_cache(cached_genotypes_map[segment.target], insert_range);
-//           }
-
-//           // We then flip all the het sites
-//           for (int h : segment.het_sites) {
-//             genotype_cache(i, pos_idx_map[h] - idx_offset) =
-//                 1 - genotype_cache(i, pos_idx_map[h] - idx_offset);
-//           }
-//         }
-//         else {
-//           // We've not yet reached somewhere to copy from, so we keep traversing
-//           auto new_eqr = interval_sets[segment.target].equal_range(segment);
-//           for (SegmentSet::const_iterator iter = new_eqr.first; iter != new_eqr.second; iter++) {
-//             seg_queue.push(*iter & segment);
-//           }
-//         }
-//         seg_queue.pop();
-//       }
-//     }
-//   }
-//   return genotype_cache;
-// }
-
-// std::vector-based query
-// Warning: This makes a copy when returned through the python interface
+  // Warning: This makes a copy when returned through the python interface
   std::vector<std::vector<bool>>& query(const int bp_from, const int bp_to,
                                         const std::vector<int>& samples) {
     genotypes.clear();
@@ -203,15 +133,14 @@ public:
     int end_pos = *std::upper_bound(positions.begin(), positions.end(), bp_to);
     int idx_offset = pos_idx_map[start_pos];
 
-    int n_samples = samples.size();
     int n_sites = pos_idx_map[end_pos] - idx_offset;
     genotypes.reserve(samples.size());
-    for (int i = 0; i < samples.size(); i++) {
+    for (std::size_t i = 0; i < samples.size(); i++) {
       genotypes.push_back(std::vector<bool>(n_sites));
     }
     TgenSegment range(start_pos, end_pos);
 
-    for (int i = 0; i < samples.size(); i++) {
+    for (int i = 0; i < static_cast<int>(samples.size()); i++) {
       std::vector<bool>& current_gt = genotypes.at(i);
       cached_genotypes_map[samples[i]] = i;
       if (samples[i] == 0) {
@@ -225,7 +154,7 @@ public:
         std::queue<TgenSegment> seg_queue;
         auto eqr = segments.equal_range(range);
         for (SegmentSet::const_iterator iter = eqr.first; iter != eqr.second; iter++) {
-          seg_queue.push(*iter & range);
+          seg_queue.push(iter->calc_intersection_with(range));
         }
 
         // Process everything in the queue
@@ -259,7 +188,7 @@ public:
             // We've not yet reached somewhere to copy from, so we keep traversing
             auto new_eqr = interval_sets[segment.target].equal_range(segment);
             for (SegmentSet::const_iterator iter = new_eqr.first; iter != new_eqr.second; iter++) {
-              seg_queue.push(*iter & segment);
+              seg_queue.push(iter->calc_intersection_with(segment));
             }
           }
           seg_queue.pop();
@@ -271,7 +200,6 @@ public:
 
   void clear_cache() {
     cached_genotypes_map.clear();
-    genotype_cache.resize(0, 0);
     cached_genotypes_map[0] = -1;
   }
 };
@@ -279,11 +207,15 @@ public:
 TGEN::TGEN(std::vector<int> _positions, std::vector<std::vector<int>> _bp_starts,
            std::vector<std::vector<int>> _target_IDs, std::vector<std::vector<int>> _het_sites)
     : pimpl(std::make_unique<TGENImpl>(std::move(_positions), std::move(_bp_starts),
-                                       std::move(_target_IDs), std::move(_het_sites))) {}
+                                       std::move(_target_IDs), std::move(_het_sites))) {
+}
 
-TGEN::~TGEN() = default;
+TGEN::~TGEN() {
+  // Empty destructor is declared in source rather than header so pimpl destructor is accessible
+}
 
-std::vector<std::vector<bool>>& TGEN::query(int start_pos, int end_pos, const std::vector<int>& samples) {
+std::vector<std::vector<bool>>& TGEN::query(int start_pos, int end_pos,
+                                            const std::vector<int>& samples) {
   // Forward the call to pimpl
   return pimpl->query(start_pos, end_pos, samples);
 }

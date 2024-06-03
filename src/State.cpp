@@ -1,10 +1,25 @@
+// This file is part of the Threads software suite.
+// Copyright (C) 2024 Threads Developers.
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 #include "State.hpp"
 
 #include <algorithm>
 #include <iostream>
 #include <limits>
 #include <vector>
-
 
 TracebackState::TracebackState(int _site, Node* _best_prev_node, TracebackState* _prev)
     : site(_site), best_prev_node(_best_prev_node), prev(_prev) {
@@ -14,7 +29,7 @@ State::State(Node* _below, double _score, TracebackState* _traceback)
     : below(_below), score(_score), traceback(_traceback) {
 }
 
-bool State::genotype() {
+bool State::genotype() const {
   return this->below->above->genotype;
 }
 
@@ -55,7 +70,7 @@ void StateBranch::prune() {
   });
 
   std::vector<State> new_states;
-  double running_min_score = std::numeric_limits<double>::infinity();
+  double running_min_score = std::numeric_limits<double>::max();
   for (const State& s : states) {
     if (s.score < running_min_score) {
       new_states.push_back(s);
@@ -81,7 +96,7 @@ void StateTree::prune() {
   }
 }
 
-std::vector<State> StateTree::dump() {
+std::vector<State> StateTree::dump() const {
   std::vector<State> states;
   for (auto pair : branches) {
     for (auto s : pair.second.states) {
