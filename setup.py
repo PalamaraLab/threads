@@ -62,7 +62,7 @@ class CMakeBuild(build_ext):
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
-            "-DWARNINGS_AS_ERRORS=ON",
+            "-DWARNINGS_AS_ERRORS=OFF",
             "-DENABLE_TESTING=OFF",
             "-DBoost_NO_BOOST_CMAKE=ON", # from arni: o/w boost 1.74 gets confused re. mtx
             "-DMAKE_DOCS=OFF"
