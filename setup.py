@@ -130,7 +130,7 @@ setup(
     version='0.1',
     author='Threads developers',
     url='https://github.com/PalamaraLab/threads/',
-    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg-needle-lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
+    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy<2.0', 'tszip', 'arg-needle-lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
     extras_require={
         'dev': [
             'pytest',
