@@ -41,6 +41,9 @@ dev = [
     "pytest"
 ]
 
+[project.scripts]
+threads = "threads_arg:shell_cli"
+
 [project.urls]
 "Homepage" = "https://github.com/PalamaraLab/threads"
 
