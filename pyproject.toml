@@ -19,7 +19,7 @@ dependencies = [
     "pandas",
     "numpy<2.0",
     "tszip",
-    #FIXME add "arg-needle-lib",
+    "arg-needle-lib",
     "cyvcf2",
     "ray",
     "pgenlib==0.83.0"
