@@ -22,6 +22,7 @@ project(threads_arg LANGUAGES CXX VERSION 0.1)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(PYBIND11_NEWPYTHON ON)
 
 # Project settings including default build type
 include(cmake/ProjectSettings.cmake)
