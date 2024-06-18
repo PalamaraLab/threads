@@ -46,18 +46,17 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: 10.15
 
     steps:
-
       - name: checkout repo & submodules
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.17.0
+        uses: pypa/cibuildwheel@v2.18.1
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
-          name: wheels-cloud
+          name: wheels-cloud-${{ matrix.os }}
           path: ./wheelhouse/*.whl
           retention-days: 1
 
@@ -68,12 +67,11 @@ jobs:
     if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
 
     steps:
-      - uses: actions/setup-python@v3
-
       - name: Download wheels from cloud runners
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          name: wheels-cloud
+          pattern: wheels-cloud-*
+          merge-multiple: true
           path: wheels
 
       - uses: pypa/gh-action-pypi-publish@v1.8.14
