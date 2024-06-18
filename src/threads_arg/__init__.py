@@ -15,3 +15,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from threads_arg_python_bindings import *
+
+# Extra entrypoint to generate shell script for pyproject.toml
+def shell_cli():
+    from threads_arg.__main__ import main as _main
+    _main()
