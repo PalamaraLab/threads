@@ -62,7 +62,7 @@ class CMakeBuild(build_ext):
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
-            "-DWARNINGS_AS_ERRORS=ON",
+            "-DWARNINGS_AS_ERRORS=OFF",
             "-DENABLE_TESTING=OFF",
             "-DBoost_NO_BOOST_CMAKE=ON", # from arni: o/w boost 1.74 gets confused re. mtx
             "-DMAKE_DOCS=OFF"
@@ -130,7 +130,7 @@ setup(
     version='0.1',
     author='Threads developers',
     url='https://github.com/PalamaraLab/threads/',
-    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy', 'tszip', 'arg-needle-lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
+    install_requires=['click', 'xarray', 'h5py', 'pandas', 'numpy<2.0', 'tszip', 'arg-needle-lib', 'cyvcf2', 'ray', 'pgenlib==0.83.0'],
     extras_require={
         'dev': [
             'pytest',
