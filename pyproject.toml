@@ -51,8 +51,7 @@ threads = "threads_arg:shell_cli"
 cmake.args = [
     "-DBUILD_PYTHON_MODULE=ON",
     "-DENABLE_TESTING=OFF",
-    "-DMAKE_DOCS=OFF",
-    "-GNinja"
+    "-DMAKE_DOCS=OFF"
 ]
 cmake.verbose = true
 cmake.build-type = "Release"
