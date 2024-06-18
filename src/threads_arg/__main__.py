@@ -618,6 +618,16 @@ def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
     goodbye()
 
 
+@main.command()
+def map():
+    print("threads map implementation coming soon")
+
+
+@main.command()
+def impute():
+    print("threads impute implementation coming soon")
+
+
 @click.command()
 @click.argument("mode", type=click.Choice(["infer", "convert", "map"]))
 @click.option("--argn", help="Path to .argn file with results")
