@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-threads = "threads_arg:shell_cli"
+threads = "threads_arg.__main__:main"
 
 [tool.scikit-build]
 cmake.args = [
