@@ -91,4 +91,6 @@ if(PYTHON_BINDINGS)
             threads_arg
             project_warnings
     )
+
+    install(TARGETS threads_arg_python_bindings LIBRARY DESTINATION .)
 endif()
