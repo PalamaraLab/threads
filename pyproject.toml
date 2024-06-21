@@ -23,6 +23,8 @@ dependencies = [
     "cyvcf2",
     "ray",
     "pgenlib==0.83.0"
+    "tqdm",
+    "lshmm==0.0.5"
 ]
 
 classifiers = [
