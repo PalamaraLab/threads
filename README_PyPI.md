@@ -1,8 +1,8 @@
 # Threads
 
-Ultra-Fast ARG Inference
+Highly scalable inference of ancestral recombination graphs (ARGs)
 
-## Installation:
+## Installation
 
 ```sh
 pip install threads_arg
@@ -13,6 +13,7 @@ pip install threads_arg
 ### ARG inference
 
 You will need
+
 - genotypes in pgen format
 - list of variants in bim or pvar format (with the same prefix as the pgen)
 - genetic map with 4 columns: Chromosome, SNP, cM, bp
