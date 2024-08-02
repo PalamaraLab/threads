@@ -7,9 +7,10 @@ from cyvcf2 import VCF
 from threads_arg import ThreadsFastLS, ImputationMatcher
 import numpy as np
 import pandas as pd
-import lshmm
 from scipy.sparse import csr_array, lil_matrix
 from datetime import datetime
+
+from .fwbw import fwbw
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +291,7 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
     ref_matches = reference_matching(panel_snps, target_snps, cm_pos_array)
     num_samples_panel = panel_snps.shape[1]
 
-    mutation_rates = np.array([0.0001] * num_snps)
+    mutation_rate = 0.0001
     cm_sizes = list(cm_pos_array[1:] - cm_pos_array[:-1])
     cm_sizes = np.array(cm_sizes + [cm_sizes[-1]])
     Ne = 20_000
@@ -312,11 +313,7 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
         # Union of the two match sets
         matched_samples = np.array(list(matched_samples_viterbi.union(matched_samples_matcher)))
 
-        # Janky hmm (should re-do this more efficiently, this won't scale)
-        forward_array, normalisation_factor_from_forward, log_likelihood = lshmm.forwards(panel_snps[:, matched_samples], h_target[None, :], recombination_rates, None, mutation_rates, scale_mutation_based_on_n_alleles=False)
-        backward_array = lshmm.backwards(panel_snps[:, matched_samples], h_target[None, :], normalisation_factor_from_forward, recombination_rates, None, mutation_rates, scale_mutation_based_on_n_alleles=False)
-        posterior = forward_array * backward_array
-
+        posterior = fwbw(panel_snps[:, matched_samples], h_target[None, :], recombination_rates, mutation_rate)
         sparse_posterior = sparsify_posterior(posterior, matched_samples, num_snps=num_snps, num_samples=num_samples_panel)
 
         assert sparse_posterior.shape == (num_snps, num_samples_panel)
