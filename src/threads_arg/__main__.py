@@ -624,8 +624,17 @@ def map():
 
 
 @main.command()
-def impute():
-    print("threads impute implementation coming soon")
+@click.option("--panel", required=True, help="pgen array panel")
+@click.option("--target", required=True, help="pgen array targets")
+@click.option("--mut", required=True, help="pgen array targets")
+@click.option("--map", required=True, help="Path to genotype map")
+@click.option("--mutation_rate", type=float, help="Per-site-per-generation SNP mutation rate.", default=1.4e-8)
+@click.option("--demography", required=True, help="Path to file containing demographic history.")
+@click.option("--out", required=True, help="Path to output .vcf file.")
+@click.option("--region", required=True, type=str)
+def impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
+    from .impute import threads_impute
+    threads_impute(panel, target, map, mut, demography, out, region, mutation_rate)
 
 
 @click.command()
