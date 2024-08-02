@@ -1,5 +1,7 @@
 import logging
 import time
+from contextlib import contextmanager
+
 from tqdm import tqdm
 from cyvcf2 import VCF
 from threads_arg import ThreadsFastLS, ImputationMatcher
@@ -8,6 +10,15 @@ import pandas as pd
 import lshmm
 from scipy.sparse import csr_array, lil_matrix
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    format='%(asctime)s %(levelname)-8s %(message)s',
+    level=logging.INFO,
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
 
 # this is only for imputation
 def write_vcf_header(out, samples, contig):
@@ -23,6 +34,7 @@ def write_vcf_header(out, samples, contig):
         f.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Phased genotypes\">\n")
         f.write("##FORMAT=<ID=DS,Number=A,Type=Float,Description=\"Genotype dosage\">\n")
         f.write(("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(samples) + "\n"))
+
 
 def write_site(f, genotypes, record, imputed, contig):
     imp_str = "IMP;" if imputed else ""
@@ -41,11 +53,6 @@ def write_site(f, genotypes, record, imputed, contig):
     gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
     f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
-
-logging.basicConfig(
-    format='%(asctime)s %(levelname)-8s %(message)s',
-    level=logging.INFO,
-    datefmt='%Y-%m-%d %H:%M:%S')
 
 def read_map_gz(map_gz):
     """
@@ -209,6 +216,7 @@ def get_variants(target, region):
         variants.append(record.ID)
     return variants
 
+
 def read_panel_snps(panel, target, region):
     # read genotypes from panel that are in target
     target_variants = get_variants(target, region)
@@ -275,13 +283,12 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
                         sparse_sites,
                         use_hmm=use_hmm)
 
-    logging.info("Building panel...")
+    logger.info("Building panel...")
     for h in panel_snps.transpose():
         bwt.insert(h)
 
     ref_matches = reference_matching(panel_snps, target_snps, cm_pos_array)
     num_samples_panel = panel_snps.shape[1]
-    num_samples_target = target_snps.shape[1]
 
     mutation_rates = np.array([0.0001] * num_snps)
     cm_sizes = list(cm_pos_array[1:] - cm_pos_array[:-1])
@@ -292,7 +299,7 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
     posteriors = []
     imputation_threads = []
     L = 16
-    logging.info("Doing posteriors")
+    logger.info("Doing posteriors")
     for i, h_target in tqdm(enumerate(target_snps.transpose())):
         # Imputation thread with divergence matching
         imputation_thread = bwt.impute(list(h_target), L)
@@ -304,7 +311,6 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
 
         # Union of the two match sets
         matched_samples = np.array(list(matched_samples_viterbi.union(matched_samples_matcher)))
-        panel_idx_map = {s: i for i, s in enumerate(matched_samples)}
 
         # Janky hmm (should re-do this more efficiently, this won't scale)
         forward_array, normalisation_factor_from_forward, log_likelihood = lshmm.forwards(panel_snps[:, matched_samples], h_target[None, :], recombination_rates, None, mutation_rates, scale_mutation_based_on_n_alleles=False)
@@ -318,96 +324,103 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
     return posteriors, imputation_threads
 
 
-def threads_impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
+# FIXME WIP for profiling. Remove or move to common file if needed elsewhere
+@contextmanager
+def timer_block(desc: str):
+    logger.info(f"Starting {desc}...")
     start_time = time.time()
+    yield
+    end_time = time.time() - start_time
+    logger.info(f"Finished {desc} (time {end_time:.3f}s)")
 
-    panel_samples = VCF(panel).samples
-    target_samples = VCF(target).samples
-    target_contigs = VCF(target).seqnames
-    assert len(target_contigs) == 1
-    chrom_num = target_contigs[0]
-    n_target_haps = 2 * len(target_samples)
 
-    logging.info("Starting!")
-    posteriors, imputation_threads = sparse_posteriors(panel=panel,
-        target=target,
-        map=map,
-        demography=demography,
-        region=region,
-        mutation_rate=mutation_rate)
-    logging.info("Done with posteriors!")
+def threads_impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
+    with timer_block("imputation"):
+        target_samples = VCF(target).samples
+        target_contigs = VCF(target).seqnames
+        assert len(target_contigs) == 1
+        chrom_num = target_contigs[0]
+        n_target_haps = 2 * len(target_samples)
 
-    phys_pos_array, _ = interpolate_map(target, map, region)
-    num_snps = len(phys_pos_array)
+        with timer_block("compute posteriors"):
+            posteriors, imputation_threads = sparse_posteriors(panel=panel,
+                target=target,
+                map=map,
+                demography=demography,
+                region=region,
+                mutation_rate=mutation_rate)
 
-    logging.info("Parsing mutations!")
-    mutation_container = MutationContainer(mut)
-    logging.info("Done with mutations!")
+        with timer_block("compute snps"):
+            phys_pos_array, _ = interpolate_map(target, map, region)
+            num_snps = len(phys_pos_array)
 
-    # this will be the memory-heavy bit
-    logging.info(f"Imputing and writing to {out}")
-    write_vcf_header(out, target_samples, chrom_num)
+        with timer_block("parsing mutations"):
+            mutation_container = MutationContainer(mut)
 
-    snp_positions = []
-    snp_ids = []
-    with open(out, "a") as outfile:
-        for record in VCF(target)(region):
-            snp_positions.append(record.POS)
-            snp_ids.append(record.ID)
-        target_genotypes = read_target_snps(target, region)
-        next_snp_idx = 0
+        # this will be the memory-heavy bit
+        logger.info(f"Writing VCF header in {out}")
+        write_vcf_header(out, target_samples, chrom_num)
 
-        panel_vcf = VCF(panel)
-        for record in panel_vcf(region):
-            var_id = record.ID
-            pos = record.POS
-            af = int(record.INFO["AC"]) / int(record.INFO["AN"])
-            flipped = af > 0.5
-            genotypes = None
-            imputed = True
-            if var_id in snp_ids:
-                imputed = False
-                var_idx = snp_ids.index(var_id)
-                genotypes = target_genotypes[var_idx]
-                # write genotype from there
-            else:
-                while next_snp_idx < len(snp_positions) and pos >= snp_positions[next_snp_idx]:
-                    next_snp_idx += 1
-                    if next_snp_idx == len(snp_positions):
-                        break
-                genotypes = []
-                panel_genotypes = np.array(record.genotypes)[:, :2].flatten()
-                carriers = (1 - panel_genotypes).nonzero()[0] if flipped else panel_genotypes.nonzero()[0]
-                for target_idx in range(n_target_haps):
-                    # Extract and interpolate posterior
-                    site_posterior = None
-                    if next_snp_idx == 0:
-                        # FIXME replace _getrow with [] operator after profiling
-                        site_posterior = posteriors[target_idx]._getrow(0).toarray()
-                    elif next_snp_idx == num_snps:
-                        site_posterior = posteriors[target_idx]._getrow(-1).toarray()
+        snp_positions = []
+        snp_ids = []
+        with open(out, "a") as outfile:
+            for record in VCF(target)(region):
+                snp_positions.append(record.POS)
+                snp_ids.append(record.ID)
+            target_genotypes = read_target_snps(target, region)
+            next_snp_idx = 0
+
+            panel_vcf = VCF(panel)
+            with timer_block(f"processing records"):
+                for record in panel_vcf(region):
+                    var_id = record.ID
+                    pos = record.POS
+                    af = int(record.INFO["AC"]) / int(record.INFO["AN"])
+                    flipped = af > 0.5
+                    genotypes = None
+                    imputed = True
+                    if var_id in snp_ids:
+                        imputed = False
+                        var_idx = snp_ids.index(var_id)
+                        genotypes = target_genotypes[var_idx]
+                        # write genotype from there
                     else:
-                        bp_prev = snp_positions[next_snp_idx - 1]
-                        bp_next = snp_positions[next_snp_idx]
-                        assert bp_prev <= pos <= bp_next
-                        prev_wt, next_wt = None, None
-                        if bp_prev == bp_next:
-                            prev_wt = 1
-                            next_wt = 0
-                        else:
-                            prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
-                            next_wt = 1 - prev_wt
-                        site_posterior = prev_wt * posteriors[target_idx]._getrow(next_snp_idx - 1).toarray() + next_wt * posteriors[target_idx]._getrow(next_snp_idx).toarray()
-                        site_posterior /= np.sum(site_posterior)
-                    site_posterior = site_posterior.flatten()
+                        while next_snp_idx < len(snp_positions) and pos >= snp_positions[next_snp_idx]:
+                            next_snp_idx += 1
+                            if next_snp_idx == len(snp_positions):
+                                break
+                        genotypes = []
+                        panel_genotypes = np.array(record.genotypes)[:, :2].flatten()
+                        carriers = (1 - panel_genotypes).nonzero()[0] if flipped else panel_genotypes.nonzero()[0]
+                        for target_idx in range(n_target_haps):
+                            # Extract and interpolate posterior
+                            site_posterior = None
+                            if next_snp_idx == 0:
+                                # FIXME replace _getrow with [] operator after profiling
+                                site_posterior = posteriors[target_idx]._getrow(0).toarray()
+                            elif next_snp_idx == num_snps:
+                                site_posterior = posteriors[target_idx]._getrow(-1).toarray()
+                            else:
+                                bp_prev = snp_positions[next_snp_idx - 1]
+                                bp_next = snp_positions[next_snp_idx]
+                                assert bp_prev <= pos <= bp_next
+                                prev_wt, next_wt = None, None
+                                if bp_prev == bp_next:
+                                    prev_wt = 1
+                                    next_wt = 0
+                                else:
+                                    prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
+                                    next_wt = 1 - prev_wt
+                                site_posterior = prev_wt * posteriors[target_idx]._getrow(next_snp_idx - 1).toarray() + next_wt * posteriors[target_idx]._getrow(next_snp_idx).toarray()
+                                site_posterior /= np.sum(site_posterior)
+                            site_posterior = site_posterior.flatten()
 
-                    if mutation_container.is_mapped(var_id):
-                        mutation_mapping = mutation_container.get_mapping(var_id)
-                        arg_mask = site_arg_mask(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
-                        genotypes.append((site_posterior * arg_mask * panel_genotypes).sum())
-                    else:
-                        genotypes.append((site_posterior * panel_genotypes).sum())
-            genotypes = np.round(genotypes, decimals=3)
-            assert 0 <= np.max(genotypes) <= 1
-            write_site(outfile, genotypes, record, imputed, chrom_num)
-    logging.info(f"Done! in {time.time() - start_time:.3f} (s)")
+                            if mutation_container.is_mapped(var_id):
+                                mutation_mapping = mutation_container.get_mapping(var_id)
+                                arg_mask = site_arg_mask(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
+                                genotypes.append((site_posterior * arg_mask * panel_genotypes).sum())
+                            else:
+                                genotypes.append((site_posterior * panel_genotypes).sum())
+                    genotypes = np.round(genotypes, decimals=3)
+                    assert 0 <= np.max(genotypes) <= 1
+                    write_site(outfile, genotypes, record, imputed, chrom_num)
