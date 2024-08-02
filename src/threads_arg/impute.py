@@ -488,9 +488,10 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                     # Extract and interpolate posterior
                     site_posterior = None
                     if next_snp_idx == 0:
-                        site_posterior = posteriors[target_idx].getrow(0).toarray()
+                        # FIXME replace _getrow with [] operator after profiling
+                        site_posterior = posteriors[target_idx]._getrow(0).toarray()
                     elif next_snp_idx == num_snps:
-                        site_posterior = posteriors[target_idx].getrow(-1).toarray()
+                        site_posterior = posteriors[target_idx]._getrow(-1).toarray()
                     else:
                         bp_prev = snp_positions[next_snp_idx - 1]
                         bp_next = snp_positions[next_snp_idx]
@@ -502,7 +503,7 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                         else:
                             prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
                             next_wt = 1 - prev_wt
-                        site_posterior = prev_wt * posteriors[target_idx].getrow(next_snp_idx - 1).toarray() + next_wt * posteriors[target_idx].getrow(next_snp_idx).toarray()
+                        site_posterior = prev_wt * posteriors[target_idx]._getrow(next_snp_idx - 1).toarray() + next_wt * posteriors[target_idx]._getrow(next_snp_idx).toarray()
                         site_posterior /= np.sum(site_posterior)
                     site_posterior = site_posterior.flatten()
 
