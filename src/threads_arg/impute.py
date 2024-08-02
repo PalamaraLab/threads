@@ -1,11 +1,7 @@
-import click
 import logging
 import time
-import os
-# import pgenlib
 from tqdm import tqdm
 from cyvcf2 import VCF
-import h5py
 from threads_arg import ThreadsFastLS, ImputationMatcher
 import numpy as np
 import pandas as pd
@@ -29,44 +25,22 @@ def write_vcf_header(out, samples, contig):
         f.write(("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(samples) + "\n"))
 
 def write_site(f, genotypes, record, imputed, contig):
-        imp_str = "IMP;" if imputed else ""
-        # for (pos, snp_id, af, hap1_var, hap2_var, dosage_var) in zip(positions, snp_ids, afs, hap1_genotypes, hap2_genotypes, dosages):
-        # imp_str = "" if pos in genotyped_pos else "IMP;"
-        haps1 = genotypes[::2]
-        haps2 = genotypes[1::2]
-        dosages = haps1 + haps2
-        pos = str(record.POS)
-        snp_id = record.ID
-        ref = record.REF
-        alt = record.ALT
-        assert len(alt) == 1
-        alt = alt[0]
-        qual = "."
-        filter = "PASS"
-        af = int(record.INFO["AC"]) / int(record.INFO["AN"])
-        gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
-        f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
-        # f.write(("\t".join([contig, str(pos), snp_id.replace("'", "").replace(":", "_"), "A", "C", ".", "PASS", f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
+    imp_str = "IMP;" if imputed else ""
+    haps1 = genotypes[::2]
+    haps2 = genotypes[1::2]
+    dosages = haps1 + haps2
+    pos = str(record.POS)
+    snp_id = record.ID
+    ref = record.REF
+    alt = record.ALT
+    assert len(alt) == 1
+    alt = alt[0]
+    qual = "."
+    filter = "PASS"
+    af = int(record.INFO["AC"]) / int(record.INFO["AN"])
+    gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
+    f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
-# def write_vcf(out_vcf_gz, samples, positions, snp_ids, afs, hap1_genotypes, hap2_genotypes, dosages, genotyped_pos):
-#     chrom = "1"
-#     # with gzip.open(out_vcf_gz, "wb") as f:
-#     with open(out_vcf_gz, "w") as f:
-#         f.write("##fileformat=VCFv4.2\n")
-#         f.write("##FILTER=<ID=PASS,Description=\"All filters passed\">\n")
-#         f.write(f"##fileDate={datetime.now().strftime('%m/%d/%Y, %H:%M:%S')}\n")
-#         f.write("##source=Threads 0.0\n")
-#         f.write(f"##contig=<ID={chrom}>\n")
-#         f.write("##FPLOIDY=2\n")
-#         f.write("##INFO=<ID=IMP,Number=0,Type=Flag,Description=\"Imputed marker\">\n")
-#         f.write("##INFO=<ID=AF,Number=A,Type=Float,Description=\"Estimated allele frequency\">\n")
-#         f.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Phased genotypes\">\n")
-#         f.write("##FORMAT=<ID=DS,Number=A,Type=Float,Description=\"Genotype dosage\">\n")
-#         f.write(("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(samples) + "\n"))
-#         for (pos, snp_id, af, hap1_var, hap2_var, dosage_var) in zip(positions, snp_ids, afs, hap1_genotypes, hap2_genotypes, dosages):
-#             imp_str = "" if pos in genotyped_pos else "IMP;"
-#             gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(hap1_var, hap2_var, dosage_var)]
-#             f.write(("\t".join([chrom, str(pos), snp_id.replace("'", "").replace(":", "_"), "A", "C", ".", "PASS", f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
@@ -76,14 +50,10 @@ logging.basicConfig(
 def read_map_gz(map_gz):
     """
     Reading in map file for Li-Stephens
-    THIS IS IN THE SHAPEIT5 FORMAT NOT LIKE THE OTHER MAPS WE'VE BEEN USING
+
+    Note that this is in the shapeit5 format not like the other maps we've been using
     """
-    # if (map_gz[:-3] == ".gz") :
-    #     maps = pd.read_table(map_gz, header=None, compression='gzip')
-    # else:
-    #     maps = pd.read_table(map_gz, header=None)
     maps = pd.read_table(map_gz, delim_whitespace=True)
-    
     cm_pos = maps.cM.values.astype(np.float64)
     phys_pos = maps.pos.values.astype(np.float64)
     for i in range(1, len(cm_pos)):
@@ -91,9 +61,11 @@ def read_map_gz(map_gz):
             cm_pos[i] = cm_pos[i-1] + 1e-5
     return phys_pos, cm_pos
 
+
 def parse_demography(demography):
     d = pd.read_table(demography, delim_whitespace=True, header=None)
     return list(d[0]), list(d[1])
+
 
 def interpolate_posterior(posterior, array_coords, wgs_coords):
     n_samples = posterior.shape[1]
@@ -114,19 +86,6 @@ def reference_matching(haps_panel, haps_target, cm_pos):
         matcher.process_site(g)
     return matcher.get_matches()
 
-# def read_panel_wgs(wgs_path, matched_samples, start_idx, end_idx):
-#     # funky mapping haploid diploid and back
-#     diploid_ids = np.unique(matched_samples // 2)
-#     all_haploid_ids = np.sort(np.concatenate((2 * diploid_ids, 2 * diploid_ids + 1)))
-#     map_back = [np.searchsorted(all_haploid_ids, s_hap) for s_hap in matched_samples]
-
-#     alleles_out = np.empty((end_idx - start_idx, len(all_haploid_ids)), dtype=np.int32)
-#     phased_out = np.empty((end_idx - start_idx, len(diploid_ids)), dtype=np.uint8)
-
-#     reader = pgenlib.PgenReader(wgs_path.encode(), sample_subset=diploid_ids.astype(np.uint32))
-#     reader.read_alleles_and_phasepresent_range(start_idx, end_idx, alleles_out, phased_out)
-
-#     return alleles_out.transpose()[map_back]
 
 def site_arg_mask(site_posterior, imputation_thread, mutation_mapping, carriers, pos):
     arg_mask = np.ones(site_posterior.shape)
@@ -152,16 +111,6 @@ def site_arg_mask(site_posterior, imputation_thread, mutation_mapping, carriers,
             arg_mask[s_id] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
     return arg_mask
 
-        # if panel_wgs[panel_idx_map[s_id], i] == 1:
-        #     mut_lower, mut_upper = mutation.get_boundaries(s_id)
-        #     mut_height = (mut_upper + mut_lower) / 2
-        #     lam = 2. / height
-
-    # seg.ages
-    # seg.ids
-    # seg.seg_start
-    # seg.weights
-
 
 def build_arg_mask(imputation_thread, panel_wgs, phys_pos_out, mutation_container, panel_idx_map, start, end, arg_threshold=0.02):
     arg_mask = np.ones(panel_wgs.shape, dtype=float)
@@ -184,50 +133,29 @@ def build_arg_mask(imputation_thread, panel_wgs, phys_pos_out, mutation_containe
                 import pdb
                 pdb.set_trace()
 
-            # segment_height = segment.ages[0]
             try:
                 focal_genotypes = panel_wgs[[panel_idx_map[s] for s in segment.ids], i]
             except KeyError:
                 import pdb
                 pdb.set_trace()
+
             if not mutation.flipped and focal_genotypes.sum() > 0:
-                # something to check
                 for s_id, height in zip(segment.ids, segment.ages):
                     if panel_wgs[panel_idx_map[s_id], i] == 1:
                         mut_lower, mut_upper = mutation.get_boundaries(s_id)
                         mut_height = (mut_upper + mut_lower) / 2
                         lam = 2. / height
-
-                        # cdf_upper = np.exp(-lam * mut_upper) * (1 + lam * mut_upper)
-                        # cdf_lower = np.exp(-lam * mut_lower) * (1 + lam * mut_lower)
-                        # mut_distr = np.linspace(mut_lower, mut_upper, 10)
-
-                        # dosage_lower = 0
-                        # dosage_edge = (cdf_upper - cdf_lower) * (1 - np.mean(np.exp(-lam * mut_distr) * (1 + lam * mut_distr)))
-                        # dosage_upper = 1 - cdf_upper
-
                         arg_mask[panel_idx_map[s_id], i] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
-
-                        # arg_mask[panel_idx_map[s_id], i] = 1 - np.exp(-lam * height) * (1 + lam * height)
-                        # compute dosage here:
-                        # if height >= upper:
-                        #     continue
-                        # elif height <= lower:
-                        #     arg_mask[panel_idx_map[s_id], i] = 0
-                        # else:
-                            # arg_mask[panel_idx_map[s_id], i] = (height - lower) / (upper - lower)
-                        # arg_mask[panel_idx_map[s], i]
             elif mutation.flipped and focal_genotypes.sum() < len(focal_genotypes):
-                # something to check
                 for s_id, height in zip(segment.ids, segment.ages):
                     if panel_wgs[[panel_idx_map[s_id]], i] == 0:
                         mut_lower, mut_upper = mutation.get_boundaries(s_id)
                         mut_height = (mut_upper + mut_lower) / 2
                         lam = 2. / height
-
                         arg_mask[panel_idx_map[s_id], i] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
 
     return arg_mask
+
 
 class MutationMap:
     def __init__(self, snp, flipped, mapping_str):
@@ -255,6 +183,7 @@ class MutationMap:
         else:
             return self.boundaries[int(sample_id)]
 
+
 class MutationContainer:
     def __init__(self, mut_path):
         self.mut_dict = {}
@@ -262,7 +191,6 @@ class MutationContainer:
             for line in mutfile:
                 snp, pos, flipped, mapping_str = line.strip().split()
                 self.mut_dict[snp] = MutationMap(snp, int(flipped), mapping_str)
-                # self.mut_dict[int(pos)] = MutationMap(snp, int(flipped), mapping_str)
 
     def is_mapped(self, snp):
         try:
@@ -272,13 +200,7 @@ class MutationContainer:
 
     def get_mapping(self, snp):
         return self.mut_dict[snp]
-    
-    # def mutation_mapped_at(self, snp):
-    #     try:
-    #         # return self.mut_dict[int(pos)].mapped
-    #         return self.mut_dict[snp].mapped
-    #     except KeyError:
-    #         return False
+
 
 def get_variants(target, region):
     vcf = VCF(target)
@@ -290,8 +212,6 @@ def get_variants(target, region):
 def read_panel_snps(panel, target, region):
     # read genotypes from panel that are in target
     target_variants = get_variants(target, region)
-    # panel_variants = get_variants(panel, region)
-
     genotypes = []
     vcf = VCF(panel)
     for record in vcf(region):
@@ -299,12 +219,14 @@ def read_panel_snps(panel, target, region):
             genotypes.append(np.array(record.genotypes)[:, :2].flatten())
     return np.array(genotypes)
 
+
 def read_target_snps(target, region):
     genotypes = []
     vcf = VCF(target)
     for record in vcf(region):
         genotypes.append(np.array(record.genotypes)[:, :2].flatten())
     return np.array(genotypes)
+
 
 def sparsify_posterior(P, matched_samples, num_snps, num_samples):
     """
@@ -320,6 +242,7 @@ def sparsify_posterior(P, matched_samples, num_snps, num_samples):
             matrix[i, matched_samples[j]] = q[j]
     return csr_array(matrix)
 
+
 def interpolate_map(vcf_path, map_path, region):
     # get vcf positions
     vcf = VCF(vcf_path)
@@ -331,6 +254,7 @@ def interpolate_map(vcf_path, map_path, region):
     map_bp, map_cm = read_map_gz(map_path)
     cm_array = np.interp(positions, map_bp, map_cm)
     return positions, cm_array
+
 
 def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
     panel_snps = read_panel_snps(panel, target, region)
@@ -359,22 +283,20 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
     num_samples_panel = panel_snps.shape[1]
     num_samples_target = target_snps.shape[1]
 
-    # Todo: get expected time from input demography :-)
     mutation_rates = np.array([0.0001] * num_snps)
     cm_sizes = list(cm_pos_array[1:] - cm_pos_array[:-1])
     cm_sizes = np.array(cm_sizes + [cm_sizes[-1]])
     Ne = 20_000
     recombination_rates = 1 - np.exp(-4 * Ne * 0.01 * cm_sizes / num_samples_panel)
 
-    posteriors = []  # he, he
-    imputation_threads = []  # he, he
+    posteriors = []
+    imputation_threads = []
     L = 16
     logging.info("Doing posteriors")
     for i, h_target in tqdm(enumerate(target_snps.transpose())):
         # Imputation thread with divergence matching
         imputation_thread = bwt.impute(list(h_target), L)
         imputation_threads.append(imputation_thread)
-        # imputation_thread = bwt.impute(h_target, L=16)
         matched_samples_viterbi = set([match_id for seg in imputation_thread for match_id in seg.ids])
 
         # All locally sampled matches
@@ -395,33 +317,6 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
         posteriors.append(sparse_posterior)
     return posteriors, imputation_threads
 
-# @click.command()
-# @click.option("--panel_array", required=True, help="pgen array panel. Array!!")
-# @click.option("--panel_wgs", required=True, help="pgen array panel. Wgs!!")
-# @click.option("--target", required=True, help="pgen array targets")
-# @click.option("--mutation_file", required=True, help="pgen array targets", default=None)
-# @click.option("--map_gz_array", required=True, help="Path to genotype map")
-# @click.option("--map_gz_wgs", required=True, help="Path to genotype map")
-# @click.option("--mutation_rate", required=True, type=float, help="Per-site-per-generation SNP mutation rate.")
-# @click.option("--demography", required=True, help="Path to file containing demographic history.")
-# @click.option("--out", required=True, help="Path to output .vcf file.")
-# @click.option("--out_arg", required=True, help="Path to output .vcf file.")
-# @click.option("--l", default=128, help="Maximum number of matching states sampled per segment. Default is 128 (too high? too high)")
-# @click.option("--start", type=int)
-# @click.option("--end", type=int)
-# def impute(panel_array, panel_wgs, target, mutation_file, map_gz_array, map_gz_wgs, mutation_rate, demography, out, out_arg, l, start, end):
-@click.command()
-@click.option("--panel", required=True, help="pgen array panel. Array!!")
-@click.option("--target", required=True, help="pgen array targets")
-@click.option("--mut", required=True, help="pgen array targets")
-@click.option("--map", required=True, help="Path to genotype map")
-@click.option("--mutation_rate", type=float, help="Per-site-per-generation SNP mutation rate.", default=1.4e-8)
-@click.option("--demography", required=True, help="Path to file containing demographic history.")
-@click.option("--out", required=True, help="Path to output .vcf file.")
-@click.option("--region", required=True, type=str)
-def impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
-    threads_impute(panel, target, map, mut, demography, out, region, mutation_rate)
-
 
 def threads_impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
     start_time = time.time()
@@ -431,7 +326,6 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
     target_contigs = VCF(target).seqnames
     assert len(target_contigs) == 1
     chrom_num = target_contigs[0]
-    n_panel_haps = 2 * len(panel_samples)
     n_target_haps = 2 * len(target_samples)
 
     logging.info("Starting!")
@@ -443,7 +337,7 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
         mutation_rate=mutation_rate)
     logging.info("Done with posteriors!")
 
-    phys_pos_array, cm_pos_array = interpolate_map(target, map, region)
+    phys_pos_array, _ = interpolate_map(target, map, region)
     num_snps = len(phys_pos_array)
 
     logging.info("Parsing mutations!")
@@ -517,37 +411,3 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
             assert 0 <= np.max(genotypes) <= 1
             write_site(outfile, genotypes, record, imputed, chrom_num)
     logging.info(f"Done! in {time.time() - start_time:.3f} (s)")
-    # posterior = interpolate_posterior(posterior, cm_pos_array, cm_pos_out)
-    # panel_alleles = read_panel_wgs(panel_wgs, matched_samples, start_idx, end_idx)
-    # assert posterior.shape == panel_alleles.shape
-    # arg_mask = build_arg_mask(imputation_thread, panel_alleles, phys_pos_out, mutation_container, panel_idx_map, start=start, end=end)
-    # assert arg_mask.shape == panel_alleles.shape
-
-    # imputed_dosages[i] = (posterior * panel_alleles).sum(axis=0)
-    # arg_imputed_dosages[i] = (posterior * arg_mask * panel_alleles).sum(axis=0)
-    
-    # assert np.isnan(imputed_dosages).sum() == 0
-    # assert np.isnan(arg_imputed_dosages).sum() == 0
-
-    # snp_ids = [f"SNP_{p}" for p in phys_pos_out]
-    # afs = [0 for p in phys_pos_out]
-    # samples = [f"Sample_{p}" for p in range(num_samples_target // 2)]
-
-    # hap1_genotypes = imputed_dosages[::2]
-    # hap2_genotypes = imputed_dosages[1::2]
-    # dosages =  (imputed_dosages[::2] + imputed_dosages[1::2]).transpose()
-    # hap1_genotypes = np.rint(imputed_dosages[::2]).astype(int).transpose()
-    # hap2_genotypes = np.rint(imputed_dosages[1::2]).astype(int).transpose()
-    # assert len(phys_pos_out) == len(hap1_genotypes) == len(hap2_genotypes) == len(dosages) == len(snp_ids)
-    # write_vcf(out, samples, phys_pos_out, snp_ids, afs, hap1_genotypes, hap2_genotypes, dosages, phys_pos_array)
-
-    # arg_hap1_genotypes = arg_imputed_dosages[::2]
-    # arg_hap2_genotypes = arg_imputed_dosages[1::2]
-    # arg_dosages =  (arg_imputed_dosages[::2] + arg_imputed_dosages[1::2]).transpose()
-    # arg_hap1_genotypes = np.rint(arg_imputed_dosages[::2]).astype(int).transpose()
-    # arg_hap2_genotypes = np.rint(arg_imputed_dosages[1::2]).astype(int).transpose()
-    # assert len(phys_pos_out) == len(arg_hap1_genotypes) == len(arg_hap2_genotypes) == len(arg_dosages) == len(snp_ids)
-    # write_vcf(out_arg, samples, phys_pos_out, snp_ids, afs, arg_hap1_genotypes, arg_hap2_genotypes, arg_dosages, phys_pos_array)
-
-if __name__ == "__main__":
-    impute()
