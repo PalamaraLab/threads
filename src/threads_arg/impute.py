@@ -14,12 +14,6 @@ from .fwbw import fwbw
 
 logger = logging.getLogger(__name__)
 
-logging.basicConfig(
-    format='%(asctime)s %(levelname)-8s %(message)s',
-    level=logging.INFO,
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-
 
 # this is only for imputation
 def write_vcf_header(out, samples, contig):
@@ -82,8 +76,8 @@ def interpolate_posterior(posterior, array_coords, wgs_coords):
     for i in range(n_samples):
         interpolated[i, :] = np.interp(wgs_coords, array_coords, posterior[:, i])
     assert np.isnan(interpolated).sum() == 0
-
     return interpolated
+
 
 def reference_matching(haps_panel, haps_target, cm_pos):
     num_reference = haps_panel.shape[1]
