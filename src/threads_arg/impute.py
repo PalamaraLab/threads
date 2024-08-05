@@ -349,9 +349,8 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
         cached_posteriors_first = []
         cached_posteriors_last = []
         for i, p in enumerate(posteriors):
-            # FIXME replace _getrow with new array accessors? Requires profiling.
-            cached_posteriors_first.append(p._getrow(0).toarray().flatten())
-            cached_posteriors_last.append(p._getrow(-1).toarray().flatten())
+            cached_posteriors_first.append(p[[0],:].toarray().flatten())
+            cached_posteriors_last.append(p[[-1],:].toarray().flatten())
             cached_posteriors_row_arrays.append(None)
 
         def ensure_posteriors_cached(target_idx: int, snp_idx: int):
@@ -359,7 +358,7 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                 cached_posteriors_row_arrays[target_idx] = [None] * row_len
 
             if cached_posteriors_row_arrays[target_idx][snp_idx] is None:
-                next_snp_row = posteriors[target_idx]._getrow(snp_idx).toarray()
+                next_snp_row = posteriors[target_idx][[snp_idx],:].toarray()
                 cached_posteriors_row_arrays[target_idx][snp_idx] = (next_snp_row / np.sum(next_snp_row)).flatten()
 
         with timer_block("compute snps"):
