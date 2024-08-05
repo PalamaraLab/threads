@@ -1,3 +1,5 @@
+# FIXME review with Pier/Arni to confirm credit attributed correctly
+
 # NB! This is mostly copied from an old version of LSHMM
 # see https://github.com/astheeggeggs/lshmm
 import numba
