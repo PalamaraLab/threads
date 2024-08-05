@@ -361,12 +361,12 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                 next_snp_row = posteriors[target_idx][[snp_idx],:].toarray()
                 cached_posteriors_row_arrays[target_idx][snp_idx] = (next_snp_row / np.sum(next_snp_row)).flatten()
 
-        with timer_block("compute snps"):
-            phys_pos_array, _ = interpolate_map(target, map, region)
-            num_snps = len(phys_pos_array)
+        logger.info("Computing snps")
+        phys_pos_array, _ = interpolate_map(target, map, region)
+        num_snps = len(phys_pos_array)
 
-        with timer_block("parsing mutations"):
-            mutation_container = MutationContainer(mut)
+        logger.info("Parsing mutations")
+        mutation_container = MutationContainer(mut)
 
         # this will be the memory-heavy bit
         logger.info(f"Writing VCF header in {out}")
