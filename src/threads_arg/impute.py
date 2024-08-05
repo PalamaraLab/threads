@@ -55,7 +55,7 @@ def read_map_gz(map_gz):
 
     Note that this is in the shapeit5 format not like the other maps we've been using
     """
-    maps = pd.read_table(map_gz, delim_whitespace=True)
+    maps = pd.read_table(map_gz, sep='\s+')
     cm_pos = maps.cM.values.astype(np.float64)
     phys_pos = maps.pos.values.astype(np.float64)
     for i in range(1, len(cm_pos)):
@@ -65,7 +65,7 @@ def read_map_gz(map_gz):
 
 
 def parse_demography(demography):
-    d = pd.read_table(demography, delim_whitespace=True, header=None)
+    d = pd.read_table(demography, sep='\s+', header=None)
     return list(d[0]), list(d[1])
 
 
