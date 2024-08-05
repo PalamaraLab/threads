@@ -167,7 +167,7 @@ class MutationMap:
         self.mapped = mapping_str != "NaN"
         self.uniquely_mapped = self.mapped and len(mapping_str.split(";")) == 1
         if self.mapped:
-            for mut in mapping_str.split(";"):
+            for mut in mapping_str.split(";"): # FIXME expensive approx 10%
                 ids, lower, upper = mut.split(",")
                 for sample_id in ids.split("."):
                     self.boundaries[int(sample_id)] = (float(lower), float(upper))
@@ -341,6 +341,27 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                 region=region,
                 mutation_rate=mutation_rate)
 
+        # FIXME work in progress
+        # Cache special cases of first and last posteriors rows and an empty
+        # table for all others that gets propaged when needed.
+        row_len = len(posteriors[0].toarray())
+        cached_posteriors_row_arrays = []
+        cached_posteriors_first = []
+        cached_posteriors_last = []
+        for i, p in enumerate(posteriors):
+            # FIXME replace _getrow with new array accessors? Requires profiling.
+            cached_posteriors_first.append(p._getrow(0).toarray().flatten())
+            cached_posteriors_last.append(p._getrow(-1).toarray().flatten())
+            cached_posteriors_row_arrays.append(None)
+
+        def ensure_posteriors_cached(target_idx: int, snp_idx: int):
+            if cached_posteriors_row_arrays[target_idx] is None:
+                cached_posteriors_row_arrays[target_idx] = [None] * row_len
+
+            if cached_posteriors_row_arrays[target_idx][snp_idx] is None:
+                next_snp_row = posteriors[target_idx]._getrow(snp_idx).toarray()
+                cached_posteriors_row_arrays[target_idx][snp_idx] = (next_snp_row / np.sum(next_snp_row)).flatten()
+
         with timer_block("compute snps"):
             phys_pos_array, _ = interpolate_map(target, map, region)
             num_snps = len(phys_pos_array)
@@ -378,20 +399,34 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                     else:
                         while next_snp_idx < len(snp_positions) and pos >= snp_positions[next_snp_idx]:
                             next_snp_idx += 1
+                            # FIXME Work in progress
+                            # Rolling window of cached posteriors; they are computed when needed and dropped
+                            # when out of range
+                            for target_idx in range(n_target_haps):
+                                if not cached_posteriors_row_arrays[target_idx] is None:
+                                    cache_window_end_idx = next_snp_idx - 2
+                                    if cache_window_end_idx >= 0:
+                                        if not cached_posteriors_row_arrays[target_idx][cache_window_end_idx] is None:
+                                            cached_posteriors_row_arrays[target_idx][cache_window_end_idx] = None
                             if next_snp_idx == len(snp_positions):
                                 break
+
                         genotypes = []
-                        panel_genotypes = np.array(record.genotypes)[:, :2].flatten()
+                        # FIXME WIP move out of loop?
+                        # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
+                        panel_genotypes = np.array(record.genotypes, dtype=bool)[:, :2].flatten()
                         carriers = (1 - panel_genotypes).nonzero()[0] if flipped else panel_genotypes.nonzero()[0]
                         for target_idx in range(n_target_haps):
                             # Extract and interpolate posterior
                             site_posterior = None
                             if next_snp_idx == 0:
-                                # FIXME replace _getrow with [] operator after profiling
-                                site_posterior = posteriors[target_idx]._getrow(0).toarray()
+                                site_posterior = cached_posteriors_first[target_idx]
                             elif next_snp_idx == num_snps:
-                                site_posterior = posteriors[target_idx]._getrow(-1).toarray()
+                                site_posterior = cached_posteriors_last[target_idx]
                             else:
+                                ensure_posteriors_cached(target_idx, next_snp_idx)
+                                ensure_posteriors_cached(target_idx, next_snp_idx - 1)
+
                                 bp_prev = snp_positions[next_snp_idx - 1]
                                 bp_next = snp_positions[next_snp_idx]
                                 assert bp_prev <= pos <= bp_next
@@ -402,16 +437,22 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                                 else:
                                     prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
                                     next_wt = 1 - prev_wt
-                                site_posterior = prev_wt * posteriors[target_idx]._getrow(next_snp_idx - 1).toarray() + next_wt * posteriors[target_idx]._getrow(next_snp_idx).toarray()
-                                site_posterior /= np.sum(site_posterior)
-                            site_posterior = site_posterior.flatten()
 
+                                cached_target_idx = cached_posteriors_row_arrays[target_idx]
+                                # FIXME WIP move out of loop, and is np.average better in bulk?
+                                # - e.g. site_posterior = np.average([prev_target, next_target], axis=0, weights=[prev_wt, next_wt])
+                                prev_target = cached_target_idx[next_snp_idx - 1]
+                                next_target = cached_target_idx[next_snp_idx]
+                                site_posterior = prev_wt * prev_target + next_wt * next_target
+
+                            # FIXME WIP block processing?
                             if mutation_container.is_mapped(var_id):
                                 mutation_mapping = mutation_container.get_mapping(var_id)
                                 arg_mask = site_arg_mask(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
-                                genotypes.append((site_posterior * arg_mask * panel_genotypes).sum())
-                            else:
-                                genotypes.append((site_posterior * panel_genotypes).sum())
+                                site_posterior = site_posterior * arg_mask
+
+                            genotypes.append(np.sum(site_posterior, where=panel_genotypes))
+
                     genotypes = np.round(genotypes, decimals=3)
                     assert 0 <= np.max(genotypes) <= 1
                     write_site(outfile, genotypes, record, imputed, chrom_num)
