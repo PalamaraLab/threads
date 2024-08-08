@@ -1,6 +1,5 @@
 import logging
-import time
-from contextlib import contextmanager
+import os
 
 from tqdm import tqdm
 from cyvcf2 import VCF
@@ -9,10 +8,31 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import csr_array, lil_matrix
 from datetime import datetime
+from typing import Dict, Tuple
 
 from .fwbw import fwbw
+from .utils import timer_block, log_nth_element
 
 logger = logging.getLogger(__name__)
+
+# FIXME move and docstring for memo
+import multiprocessing
+from dataclasses import dataclass
+from typing import List
+
+# Get available processes from os (rather than all with multiprocessing.cpu_count)
+PROCESS_COUNT = len(os.sched_getaffinity(0))
+
+@dataclass
+class RecordMemo:
+    id: int
+    genotypes: None
+    pos: None
+    ref: None
+    alt: None
+    af: float
+
+RecordMemoDict = Dict[str, RecordMemo]
 
 
 class WriterVCF:
@@ -217,7 +237,7 @@ class MutationContainer:
         return self.mut_dict[snp]
 
 
-def get_variants(target, region):
+def get_variants(target, region): # FIXME replace with set
     vcf = VCF(target)
     variants = []
     for record in vcf(region):
@@ -225,14 +245,19 @@ def get_variants(target, region):
     return variants
 
 
-def read_panel_snps(panel, target, region):
-    # read genotypes from panel that are in target
-    target_variants = get_variants(target, region)
+def read_panel_snps(panel_dict: RecordMemoDict, target, region): # FIXME replace with target cach
+    """
+    Read genotypes from panel that are in target
+    """
+    # Match if panel record id is in target id set
+    target_variants = get_variants(target, region) # FIXME replace with set
+
+    logger.info("Reading panel snps")
     genotypes = []
-    vcf = VCF(panel)
-    for record in vcf(region):
-        if record.ID in target_variants:
-            genotypes.append(np.array(record.genotypes)[:, :2].flatten())
+    for id, record in panel_dict.items():
+        if id in target_variants:
+            genotypes.append(record.genotypes)
+
     return np.array(genotypes)
 
 
@@ -272,8 +297,10 @@ def interpolate_map(vcf_path, map_path, region):
     return positions, cm_array
 
 
-def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
-    panel_snps = read_panel_snps(panel, target, region)
+def sparse_posteriors(panel, target, map, demography, region, mutation_rate, panel_dict):
+    with timer_block("collating snps"):
+        panel_snps = read_panel_snps(panel_dict, target, region) # FIXME use records
+
     target_snps = read_target_snps(target, region)
     assert len(panel_snps) == len(target_snps)
 
@@ -307,7 +334,7 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
     posteriors = []
     imputation_threads = []
     L = 16
-    logger.info("Doing posteriors")
+    logger.info("Doing posteriors...")
     for i, h_target in tqdm(enumerate(target_snps.transpose())):
         # Imputation thread with divergence matching
         imputation_thread = bwt.impute(list(h_target), L)
@@ -328,17 +355,82 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate):
     return posteriors, imputation_threads
 
 
-# FIXME WIP for profiling. Remove or move to common file if needed elsewhere
-@contextmanager
-def timer_block(desc: str):
-    logger.info(f"Starting {desc}...")
-    start_time = time.time()
-    yield
-    end_time = time.time() - start_time
-    logger.info(f"Finished {desc} (time {end_time:.3f}s)")
+def _memoize_nth_record_process(filename, region, proc_idx, proc_max) -> List[Tuple[int, RecordMemo]]:
+    """
+    Process for for reading a region for a filename for every nth record
+
+    Enumerating the enture VCF region per-process may seem counterintuitive
+    because it's iterating many more times. However, the iteration itself is not
+    expensive, it's the access to record.genotypes and conversion to a numpy
+    array. Each process only calls these methods by filtering every record index
+    against the process index.
+
+    The returned list of memos is wrapped in a tuple that contains the original
+    record index. This allows the final code to reconstruct the memos in order.
+
+    proc_idx and proc_max are which process index this is and the max number of
+    processes respectively.
+    """
+    results = []
+    vcf = VCF(filename)
+    for i, record in enumerate(vcf(region)):
+        # This process only work on every nth record offset by i
+        if i % proc_max == proc_idx:
+            # The genotypes accessor and the conversion of the result (a python
+            # list) into a flat bool numpy are the most expensive parts of this
+            # operation, hence splitting into separate processes.
+            genotypes = record.genotypes
+            genotypes_flat = np.array(genotypes, dtype=bool)[:, :2].flatten()
+
+            # Store all data required for imputation in a memo
+            af = int(record.INFO["AC"]) / int(record.INFO["AN"])
+            memo = RecordMemo(
+                record.ID,
+                genotypes_flat,
+                record.POS,
+                record.REF,
+                record.ALT,
+                af
+            )
+
+            # To avoid race conditions, the results are not injected directly
+            # into a map, instead added to list with index to be sorted later
+            # and store in map in original order.
+            results.append((i, memo))
+
+    return results
+
+
+def memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> RecordMemoDict:
+    """
+    Given a VCF filename and region, generate a dictionary of record memos
+    containing just the data required for imputation.
+    """
+    # Split the expensive parts reading records over available processes.
+    # 'imemos' is shorthand for indexed memos, a list of tuples with index and memo
+    shortname = os.path.basename(filename)
+    with timer_block(f"memoising VCF {shortname}, region {region} ({cpu_count} CPUs)"):
+        jobs_args = [(filename, region, i, cpu_count) for i in range(cpu_count)]
+        with multiprocessing.Pool(processes=cpu_count) as pool:
+            imemos = pool.starmap(_memoize_nth_record_process, jobs_args)
+
+    # Flatten results (list of lists of tuples) into list of tuples
+    imemos_flattened = [tup for tups in imemos for tup in tups]
+
+    # Sort results by record index, the first element in tuple
+    imemos_sorted = sorted(imemos_flattened, key=lambda tup: tup[0])
+
+    # Collate into a dict looking up by memo id, using results_sorted ensure
+    # that the dict are stored in the order the records were read from the file.
+    record_dict = {memo.id: memo for _, memo in imemos_sorted}
+
+    logger.info(f"Stored {len(record_dict)} memos from {shortname}")
+    return record_dict
 
 
 def threads_impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
+    panel_dict = memoize_vcf_region_records(panel, region)
+
     with timer_block("imputation"):
         target_samples = VCF(target).samples
         target_contigs = VCF(target).seqnames
@@ -347,12 +439,15 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
         n_target_haps = 2 * len(target_samples)
 
         with timer_block("compute posteriors"):
-            posteriors, imputation_threads = sparse_posteriors(panel=panel,
+            posteriors, imputation_threads = sparse_posteriors(
+                panel=panel,
                 target=target,
                 map=map,
                 demography=demography,
                 region=region,
-                mutation_rate=mutation_rate)
+                mutation_rate=mutation_rate,
+                panel_dict=panel_dict
+            )
 
         # FIXME work in progress
         # Cache special cases of first and last posteriors rows and an empty

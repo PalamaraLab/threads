@@ -19,7 +19,12 @@ import numpy as np
 import h5py
 import pandas as pd
 import warnings
+import logging
+import time
 
+from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
 
 def decompress_threads(threads):
     f = h5py.File(threads, "r")
@@ -134,3 +139,23 @@ def split_list(list, n):
         si = (d+1)*(i if i < r else r) + d*(0 if i < r else i - r)
         sublists.append(list[si:si+(d+1 if i < r else d)])
     return sublists
+
+
+@contextmanager
+def timer_block(desc: str):
+    """
+    Context manager block for timing and logging blocks of code
+    """
+    logger.info(f"Starting {desc}...")
+    start_time = time.time()
+    yield
+    end_time = time.time() - start_time
+    logger.info(f"Finished {desc} (time {end_time:.3f}s)")
+
+
+def log_nth_element(desc: str, index: int, N=200):
+    """
+    Logger helper function that only displays desc on first or Nth iteration
+    """
+    if index == 0 or ((index + 1) % N) == 0:
+        logger.info(f"{desc} {index + 1}...")
