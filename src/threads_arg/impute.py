@@ -15,9 +15,17 @@ from .fwbw import fwbw
 logger = logging.getLogger(__name__)
 
 
-# this is only for imputation
-def write_vcf_header(out, samples, contig):
-    with open(out, "w") as f:
+class WriterVCF:
+    """
+    Custom VCF writer for imputation
+
+    FIXME Review with Arni, use this customised version or alternative library
+    """
+    def __init__(self, filename):
+        self.file = open(filename, "w")
+
+    def write_header(self, samples, contig):
+        f = self.file
         f.write("##fileformat=VCFv4.2\n")
         f.write("##FILTER=<ID=PASS,Description=\"All filters passed\">\n")
         f.write(f"##fileDate={datetime.now().strftime('%m/%d/%Y, %H:%M:%S')}\n")
@@ -30,23 +38,24 @@ def write_vcf_header(out, samples, contig):
         f.write("##FORMAT=<ID=DS,Number=A,Type=Float,Description=\"Genotype dosage\">\n")
         f.write(("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(samples) + "\n"))
 
+    def write_site(self, genotypes, record, imputed, contig):
+        imp_str = "IMP;" if imputed else ""
+        haps1 = genotypes[::2]
+        haps2 = genotypes[1::2]
+        dosages = haps1 + haps2
+        pos = str(record.POS)
+        snp_id = record.ID
+        ref = record.REF
+        alt = record.ALT
+        assert len(alt) == 1
+        alt = alt[0]
+        qual = "."
+        filter = "PASS"
+        af = int(record.INFO["AC"]) / int(record.INFO["AN"])
+        gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
 
-def write_site(f, genotypes, record, imputed, contig):
-    imp_str = "IMP;" if imputed else ""
-    haps1 = genotypes[::2]
-    haps2 = genotypes[1::2]
-    dosages = haps1 + haps2
-    pos = str(record.POS)
-    snp_id = record.ID
-    ref = record.REF
-    alt = record.ALT
-    assert len(alt) == 1
-    alt = alt[0]
-    qual = "."
-    filter = "PASS"
-    af = int(record.INFO["AC"]) / int(record.INFO["AN"])
-    gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
-    f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
+        f = self.file
+        f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
 
 def read_map_gz(map_gz):
@@ -370,7 +379,8 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
 
         # this will be the memory-heavy bit
         logger.info(f"Writing VCF header in {out}")
-        write_vcf_header(out, target_samples, chrom_num)
+        vcf_writer = WriterVCF(out)
+        vcf_writer.write_header(target_samples, chrom_num)
 
         snp_positions = []
         snp_ids = []
@@ -454,4 +464,5 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
 
                     genotypes = np.round(genotypes, decimals=3)
                     assert 0 <= np.max(genotypes) <= 1
-                    write_site(outfile, genotypes, record, imputed, chrom_num)
+
+                    vcf_writer.write_site(genotypes, record, imputed, chrom_num)
