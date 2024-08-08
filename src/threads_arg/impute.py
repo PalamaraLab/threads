@@ -98,8 +98,15 @@ def reference_matching(haps_panel, haps_target, cm_pos):
     return matcher.get_matches()
 
 
-def site_arg_mask(site_posterior, imputation_thread, mutation_mapping, carriers, pos):
-    arg_mask = np.ones(site_posterior.shape)
+def site_arg_probability(site_posterior, imputation_thread, mutation_mapping, carriers, pos):
+    """
+    For each target sequence, the LS-fwbw finds out which of the panel sequences
+    are most closely related to the target, rather than weighing by posterior.
+
+    This is described under "Threading-based imputation" in the Methods section
+    of the paper.
+    """
+    arg_probability = np.ones(site_posterior.shape)
     num_segs = len(imputation_thread)
     segment = None
     if pos < imputation_thread[0].seg_start:
@@ -112,15 +119,12 @@ def site_arg_mask(site_posterior, imputation_thread, mutation_mapping, carriers,
 
     for s_id, height in zip(segment.ids, segment.ages):
         if site_posterior[s_id] > 0 and s_id in carriers:
-            try:
-                mut_lower, mut_upper = mutation_mapping.get_boundaries(s_id)
-            except KeyError:
-                import pdb
-                pdb.set_trace()
+            mut_lower, mut_upper = mutation_mapping.get_boundaries(s_id)
             mut_height = (mut_upper + mut_lower) / 2
             lam = 2. / height
-            arg_mask[s_id] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
-    return arg_mask
+            arg_probability[s_id] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
+
+    return arg_probability
 
 
 def build_arg_mask(imputation_thread, panel_wgs, phys_pos_out, mutation_container, panel_idx_map, start, end, arg_threshold=0.02):
@@ -457,7 +461,7 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                             # FIXME WIP block processing?
                             if mutation_container.is_mapped(var_id):
                                 mutation_mapping = mutation_container.get_mapping(var_id)
-                                arg_mask = site_arg_mask(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
+                                arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
                                 site_posterior = site_posterior * arg_mask
 
                             genotypes.append(np.sum(site_posterior, where=panel_genotypes))
