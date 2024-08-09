@@ -492,8 +492,9 @@ class Impute:
 
     def _sparse_posteriors(self, target, map, demography, region, mutation_rate):
         with timer_block("collating snps"):
-            self.panel_snps = self._read_panel_snps()
-            self.target_snps = self._read_target_snps()
+            target_variants = set(self.target_dict.keys())
+            self.panel_snps = np.array([record.genotypes for record in self.panel_dict.values() if record.id in target_variants])
+            self.target_snps = np.array([record.genotypes for record in self.target_dict.values()])
             assert len(self.panel_snps) == len(self.target_snps)
 
         phys_pos_array, cm_pos_array = interpolate_map(target, map, region)
@@ -550,30 +551,3 @@ class Impute:
                 posteriors.append(sparse_posterior)
 
         return posteriors, imputation_threads
-
-
-    # FIXME reduce fn to list comprehension
-    def _read_panel_snps(self):
-        """
-        Read genotypes from panel that are in target
-        """
-        # Match if panel record id is in target id set
-        target_variants = set(self.target_dict.keys())
-
-        logger.info("Reading panel snps")
-        genotypes = []
-        for id, record in self.panel_dict.items():
-            if id in target_variants:
-                genotypes.append(record.genotypes)
-
-        return np.array(genotypes)
-
-
-    # FIXME reduce fn to list comprehension
-    def _read_target_snps(self):
-        logger.info("Reading target snps")
-        genotypes = []
-        for record in self.target_dict.values():
-            genotypes.append(record.genotypes)
-
-        return np.array(genotypes)
