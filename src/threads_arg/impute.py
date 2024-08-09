@@ -396,7 +396,7 @@ def _memoize_nth_record_process(filename, region, proc_idx, proc_max) -> List[Tu
     return results
 
 
-def memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> RecordMemoDict:
+def _memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> RecordMemoDict:
     """
     Given a VCF filename and region, generate a dictionary of record memos
     containing just the data required for imputation.
@@ -423,144 +423,155 @@ def memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> Rec
     return record_dict
 
 
-def threads_impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
-    panel_dict = memoize_vcf_region_records(panel, region)
-    target_dict = memoize_vcf_region_records(target, region)
+class Impute:
+    def __init__(
+        self,
+        panel: str,
+        target: str,
+        map: str,
+        mut: str,
+        demography: str,
+        out: str,
+        region: str,
+        mutation_rate=1.4e-8
+    ):
+        panel_dict = _memoize_vcf_region_records(panel, region)
+        target_dict = _memoize_vcf_region_records(target, region)
 
-    with timer_block("imputation"):
-        target_samples = VCF(target).samples
-        target_contigs = VCF(target).seqnames
-        assert len(target_contigs) == 1
-        chrom_num = target_contigs[0]
+        with timer_block("imputation"):
+            target_samples = VCF(target).samples
+            target_contigs = VCF(target).seqnames
+            assert len(target_contigs) == 1
+            chrom_num = target_contigs[0]
 
-        # 2N as this is a collection of N diploid individuals, i.e. each has two haplotypes
-        n_target_haps = 2 * len(target_samples)
+            # 2N as this is a collection of N diploid individuals, i.e. each has two haplotypes
+            n_target_haps = 2 * len(target_samples)
 
-        with timer_block("compute posteriors"):
-            posteriors, imputation_threads = sparse_posteriors(
-                target=target,
-                map=map,
-                demography=demography,
-                region=region,
-                mutation_rate=mutation_rate,
-                panel_dict=panel_dict,
-                target_dict=target_dict
-            )
+            with timer_block("compute posteriors"):
+                posteriors, imputation_threads = sparse_posteriors(
+                    target=target,
+                    map=map,
+                    demography=demography,
+                    region=region,
+                    mutation_rate=mutation_rate,
+                    panel_dict=panel_dict,
+                    target_dict=target_dict
+                )
 
-        # FIXME work in progress
-        # Cache special cases of first and last posteriors rows and an empty
-        # table for all others that gets propaged when needed.
-        row_len = len(posteriors[0].toarray())
-        cached_posteriors_row_arrays = []
-        cached_posteriors_first = []
-        cached_posteriors_last = []
-        for i, p in enumerate(posteriors):
-            cached_posteriors_first.append(p[[0],:].toarray().flatten())
-            cached_posteriors_last.append(p[[-1],:].toarray().flatten())
-            cached_posteriors_row_arrays.append(None)
+            # FIXME work in progress
+            # Cache special cases of first and last posteriors rows and an empty
+            # table for all others that gets propaged when needed.
+            row_len = len(posteriors[0].toarray())
+            cached_posteriors_row_arrays = []
+            cached_posteriors_first = []
+            cached_posteriors_last = []
+            for i, p in enumerate(posteriors):
+                cached_posteriors_first.append(p[[0],:].toarray().flatten())
+                cached_posteriors_last.append(p[[-1],:].toarray().flatten())
+                cached_posteriors_row_arrays.append(None)
 
-        def ensure_posteriors_cached(target_idx: int, snp_idx: int):
-            if cached_posteriors_row_arrays[target_idx] is None:
-                cached_posteriors_row_arrays[target_idx] = [None] * row_len
+            def ensure_posteriors_cached(target_idx: int, snp_idx: int):
+                if cached_posteriors_row_arrays[target_idx] is None:
+                    cached_posteriors_row_arrays[target_idx] = [None] * row_len
 
-            if cached_posteriors_row_arrays[target_idx][snp_idx] is None:
-                next_snp_row = posteriors[target_idx][[snp_idx],:].toarray()
-                cached_posteriors_row_arrays[target_idx][snp_idx] = (next_snp_row / np.sum(next_snp_row)).flatten()
+                if cached_posteriors_row_arrays[target_idx][snp_idx] is None:
+                    next_snp_row = posteriors[target_idx][[snp_idx],:].toarray()
+                    cached_posteriors_row_arrays[target_idx][snp_idx] = (next_snp_row / np.sum(next_snp_row)).flatten()
 
-        logger.info("Computing snps")
-        phys_pos_array, _ = interpolate_map(target, map, region)
-        num_snps = len(phys_pos_array)
+            logger.info("Computing snps")
+            phys_pos_array, _ = interpolate_map(target, map, region)
+            num_snps = len(phys_pos_array)
 
-        logger.info("Parsing mutations")
-        mutation_container = MutationContainer(mut)
+            logger.info("Parsing mutations")
+            mutation_container = MutationContainer(mut)
 
-        # this will be the memory-heavy bit
-        logger.info(f"Writing VCF header in {out}")
-        vcf_writer = WriterVCF(out)
-        vcf_writer.write_header(target_samples, chrom_num)
+            # this will be the memory-heavy bit
+            logger.info(f"Writing VCF header in {out}")
+            vcf_writer = WriterVCF(out)
+            vcf_writer.write_header(target_samples, chrom_num)
 
-        snp_positions = []
-        snp_ids = []
-        with open(out, "a") as outfile:
-            for record in VCF(target)(region):
-                snp_positions.append(record.POS)
-                snp_ids.append(record.ID)
-            target_genotypes = read_target_snps(target_dict) # FIXME reuse self.target_snps
-            next_snp_idx = 0
+            snp_positions = []
+            snp_ids = []
+            with open(out, "a") as outfile:
+                for record in VCF(target)(region):
+                    snp_positions.append(record.POS)
+                    snp_ids.append(record.ID)
+                target_genotypes = read_target_snps(target_dict) # FIXME reuse self.target_snps
+                next_snp_idx = 0
 
-            panel_vcf = VCF(panel)
-            with timer_block(f"processing records"):
-                for record in panel_vcf(region):
-                    var_id = record.ID
-                    pos = record.POS
-                    af = int(record.INFO["AC"]) / int(record.INFO["AN"])
-                    flipped = af > 0.5
-                    genotypes = None
-                    imputed = True
-                    if var_id in snp_ids:
-                        imputed = False
-                        var_idx = snp_ids.index(var_id)
-                        # FIXME conversion to float required for np.round
-                        genotypes = np.array(target_genotypes[var_idx], dtype=float)
-                    else:
-                        while next_snp_idx < len(snp_positions) and pos >= snp_positions[next_snp_idx]:
-                            next_snp_idx += 1
-                            # FIXME Work in progress
-                            # Rolling window of cached posteriors; they are computed when needed and dropped
-                            # when out of range
+                panel_vcf = VCF(panel)
+                with timer_block(f"processing records"):
+                    for record in panel_vcf(region):
+                        var_id = record.ID
+                        pos = record.POS
+                        af = int(record.INFO["AC"]) / int(record.INFO["AN"])
+                        flipped = af > 0.5
+                        genotypes = None
+                        imputed = True
+                        if var_id in snp_ids:
+                            imputed = False
+                            var_idx = snp_ids.index(var_id)
+                            # FIXME conversion to float required for np.round
+                            genotypes = np.array(target_genotypes[var_idx], dtype=float)
+                        else:
+                            while next_snp_idx < len(snp_positions) and pos >= snp_positions[next_snp_idx]:
+                                next_snp_idx += 1
+                                # FIXME Work in progress
+                                # Rolling window of cached posteriors; they are computed when needed and dropped
+                                # when out of range
+                                for target_idx in range(n_target_haps):
+                                    if not cached_posteriors_row_arrays[target_idx] is None:
+                                        cache_window_end_idx = next_snp_idx - 2
+                                        if cache_window_end_idx >= 0:
+                                            if not cached_posteriors_row_arrays[target_idx][cache_window_end_idx] is None:
+                                                cached_posteriors_row_arrays[target_idx][cache_window_end_idx] = None
+                                if next_snp_idx == len(snp_positions):
+                                    break
+
+                            genotypes = []
+                            # FIXME WIP move out of loop?
+                            # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
+                            #panel_genotypes = np.array(record.genotypes, dtype=bool)[:, :2].flatten()
+                            panel_genotypes = panel_dict[var_id].genotypes # FIXME remove dict lookup when switched to record list
+                            carriers = (1 - panel_genotypes).nonzero()[0] if flipped else panel_genotypes.nonzero()[0]
                             for target_idx in range(n_target_haps):
-                                if not cached_posteriors_row_arrays[target_idx] is None:
-                                    cache_window_end_idx = next_snp_idx - 2
-                                    if cache_window_end_idx >= 0:
-                                        if not cached_posteriors_row_arrays[target_idx][cache_window_end_idx] is None:
-                                            cached_posteriors_row_arrays[target_idx][cache_window_end_idx] = None
-                            if next_snp_idx == len(snp_positions):
-                                break
-
-                        genotypes = []
-                        # FIXME WIP move out of loop?
-                        # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
-                        #panel_genotypes = np.array(record.genotypes, dtype=bool)[:, :2].flatten()
-                        panel_genotypes = panel_dict[var_id].genotypes # FIXME remove dict lookup when switched to record list
-                        carriers = (1 - panel_genotypes).nonzero()[0] if flipped else panel_genotypes.nonzero()[0]
-                        for target_idx in range(n_target_haps):
-                            # Extract and interpolate posterior
-                            site_posterior = None
-                            if next_snp_idx == 0:
-                                site_posterior = cached_posteriors_first[target_idx]
-                            elif next_snp_idx == num_snps:
-                                site_posterior = cached_posteriors_last[target_idx]
-                            else:
-                                ensure_posteriors_cached(target_idx, next_snp_idx)
-                                ensure_posteriors_cached(target_idx, next_snp_idx - 1)
-
-                                bp_prev = snp_positions[next_snp_idx - 1]
-                                bp_next = snp_positions[next_snp_idx]
-                                assert bp_prev <= pos <= bp_next
-                                prev_wt, next_wt = None, None
-                                if bp_prev == bp_next:
-                                    prev_wt = 1
-                                    next_wt = 0
+                                # Extract and interpolate posterior
+                                site_posterior = None
+                                if next_snp_idx == 0:
+                                    site_posterior = cached_posteriors_first[target_idx]
+                                elif next_snp_idx == num_snps:
+                                    site_posterior = cached_posteriors_last[target_idx]
                                 else:
-                                    prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
-                                    next_wt = 1 - prev_wt
+                                    ensure_posteriors_cached(target_idx, next_snp_idx)
+                                    ensure_posteriors_cached(target_idx, next_snp_idx - 1)
 
-                                cached_target_idx = cached_posteriors_row_arrays[target_idx]
-                                # FIXME WIP move out of loop, and is np.average better in bulk?
-                                # - e.g. site_posterior = np.average([prev_target, next_target], axis=0, weights=[prev_wt, next_wt])
-                                prev_target = cached_target_idx[next_snp_idx - 1]
-                                next_target = cached_target_idx[next_snp_idx]
-                                site_posterior = prev_wt * prev_target + next_wt * next_target
+                                    bp_prev = snp_positions[next_snp_idx - 1]
+                                    bp_next = snp_positions[next_snp_idx]
+                                    assert bp_prev <= pos <= bp_next
+                                    prev_wt, next_wt = None, None
+                                    if bp_prev == bp_next:
+                                        prev_wt = 1
+                                        next_wt = 0
+                                    else:
+                                        prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
+                                        next_wt = 1 - prev_wt
 
-                            # FIXME WIP block processing?
-                            if mutation_container.is_mapped(var_id):
-                                mutation_mapping = mutation_container.get_mapping(var_id)
-                                arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
-                                site_posterior = site_posterior * arg_mask
+                                    cached_target_idx = cached_posteriors_row_arrays[target_idx]
+                                    # FIXME WIP move out of loop, and is np.average better in bulk?
+                                    # - e.g. site_posterior = np.average([prev_target, next_target], axis=0, weights=[prev_wt, next_wt])
+                                    prev_target = cached_target_idx[next_snp_idx - 1]
+                                    next_target = cached_target_idx[next_snp_idx]
+                                    site_posterior = prev_wt * prev_target + next_wt * next_target
 
-                            genotypes.append(np.sum(site_posterior, where=panel_genotypes))
+                                # FIXME WIP block processing?
+                                if mutation_container.is_mapped(var_id):
+                                    mutation_mapping = mutation_container.get_mapping(var_id)
+                                    arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
+                                    site_posterior = site_posterior * arg_mask
 
-                    genotypes = np.round(genotypes, decimals=3)
-                    assert 0 <= np.max(genotypes) <= 1
+                                genotypes.append(np.sum(site_posterior, where=panel_genotypes))
 
-                    vcf_writer.write_site(genotypes, record, imputed, chrom_num)
+                        genotypes = np.round(genotypes, decimals=3)
+                        assert 0 <= np.max(genotypes) <= 1
+
+                        vcf_writer.write_site(genotypes, record, imputed, chrom_num)

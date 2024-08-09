@@ -102,8 +102,8 @@ def map():
 @click.option("--out", required=True, help="Path to output .vcf file.")
 @click.option("--region", required=True, type=str)
 def impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
-    from .impute import threads_impute
-    threads_impute(panel, target, map, mut, demography, out, region, mutation_rate)
+    from .impute import Impute
+    Impute(panel, target, map, mut, demography, out, region, mutation_rate)
     goodbye()
 
 
