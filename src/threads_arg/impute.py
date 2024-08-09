@@ -441,6 +441,10 @@ class Impute:
                                 if next_snp_idx == len(snp_positions):
                                     break
 
+                            mutation_mapping = None
+                            if mutation_container.is_mapped(var_id):
+                                mutation_mapping = mutation_container.get_mapping(var_id)
+
                             genotypes = []
                             # FIXME WIP move out of loop?
                             # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
@@ -477,8 +481,7 @@ class Impute:
                                     site_posterior = prev_wt * prev_target + next_wt * next_target
 
                                 # FIXME WIP block processing?
-                                if mutation_container.is_mapped(var_id):
-                                    mutation_mapping = mutation_container.get_mapping(var_id)
+                                if mutation_mapping:
                                     arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
                                     site_posterior = site_posterior * arg_mask
 
