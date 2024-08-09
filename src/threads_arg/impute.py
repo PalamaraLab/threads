@@ -145,51 +145,6 @@ def site_arg_probability(site_posterior, imputation_thread, mutation_mapping, ca
     return arg_probability
 
 
-def build_arg_mask(imputation_thread, panel_wgs, phys_pos_out, mutation_container, panel_idx_map, start, end, arg_threshold=0.02):
-    arg_mask = np.ones(panel_wgs.shape, dtype=float)
-    allele_freqs = panel_wgs.mean(axis=0)
-    current_seg_idx = 0
-    for i, (pos, freq) in enumerate(zip(phys_pos_out, allele_freqs)):
-        if mutation_container.mutation_mapped_at(pos):
-            mutation = mutation_container.mutation_at(pos)
-
-            if (not mutation.flipped and freq > arg_threshold) or (mutation.flipped and freq < 1 - arg_threshold):
-                continue
-            while current_seg_idx < len(imputation_thread) - 1 and pos >= imputation_thread[current_seg_idx + 1].seg_start:
-                current_seg_idx += 1
-            segment = imputation_thread[current_seg_idx]
-            seg_start = max(start, segment.seg_start)
-            seg_end = end if current_seg_idx == len(imputation_thread) - 1 else min(end, imputation_thread[current_seg_idx + 1].seg_start)
-            try:
-                assert seg_start <= pos < seg_end or pos == end
-            except AssertionError:
-                import pdb
-                pdb.set_trace()
-
-            try:
-                focal_genotypes = panel_wgs[[panel_idx_map[s] for s in segment.ids], i]
-            except KeyError:
-                import pdb
-                pdb.set_trace()
-
-            if not mutation.flipped and focal_genotypes.sum() > 0:
-                for s_id, height in zip(segment.ids, segment.ages):
-                    if panel_wgs[panel_idx_map[s_id], i] == 1:
-                        mut_lower, mut_upper = mutation.get_boundaries(s_id)
-                        mut_height = (mut_upper + mut_lower) / 2
-                        lam = 2. / height
-                        arg_mask[panel_idx_map[s_id], i] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
-            elif mutation.flipped and focal_genotypes.sum() < len(focal_genotypes):
-                for s_id, height in zip(segment.ids, segment.ages):
-                    if panel_wgs[[panel_idx_map[s_id]], i] == 0:
-                        mut_lower, mut_upper = mutation.get_boundaries(s_id)
-                        mut_height = (mut_upper + mut_lower) / 2
-                        lam = 2. / height
-                        arg_mask[panel_idx_map[s_id], i] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
-
-    return arg_mask
-
-
 class MutationMap:
     def __init__(self, snp, flipped, mapping_str):
         self.boundaries = {}
