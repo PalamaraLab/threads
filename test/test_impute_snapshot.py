@@ -20,7 +20,7 @@ import time
 
 from pathlib import Path
 
-from threads_arg.impute import threads_impute
+from threads_arg.impute import Impute
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -47,7 +47,7 @@ def test_impute_snapshot_regression():
         data_dir = BASE_DIR / "test" / "data"
 
         start_time = time.perf_counter()
-        threads_impute(
+        Impute(
             data_dir / "panel.vcf.gz",
             data_dir / "target.vcf.gz",
             data_dir / "gmap.gz",
