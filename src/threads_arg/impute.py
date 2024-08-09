@@ -1,24 +1,22 @@
 import logging
+import multiprocessing
 import os
+import numpy as np
+import pandas as pd
 
 from tqdm import tqdm
 from cyvcf2 import VCF
 from threads_arg import ThreadsFastLS, ImputationMatcher
-import numpy as np
-import pandas as pd
 from scipy.sparse import csr_array, lil_matrix
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
+from dataclasses import dataclass
 
 from .fwbw import fwbw
 from .utils import timer_block, log_nth_element
 
 logger = logging.getLogger(__name__)
 
-# FIXME move and docstring for memo
-import multiprocessing
-from dataclasses import dataclass
-from typing import List
 
 # Get available processes from os (rather than all with multiprocessing.cpu_count)
 PROCESS_COUNT = len(os.sched_getaffinity(0))
@@ -237,20 +235,12 @@ class MutationContainer:
         return self.mut_dict[snp]
 
 
-def get_variants(target, region): # FIXME replace with set
-    vcf = VCF(target)
-    variants = []
-    for record in vcf(region):
-        variants.append(record.ID)
-    return variants
-
-
-def read_panel_snps(panel_dict: RecordMemoDict, target, region): # FIXME replace with target cach
+def read_panel_snps(panel_dict: RecordMemoDict, target_dict: RecordMemoDict):
     """
     Read genotypes from panel that are in target
     """
     # Match if panel record id is in target id set
-    target_variants = get_variants(target, region) # FIXME replace with set
+    target_variants = set(target_dict.keys())
 
     logger.info("Reading panel snps")
     genotypes = []
@@ -261,11 +251,12 @@ def read_panel_snps(panel_dict: RecordMemoDict, target, region): # FIXME replace
     return np.array(genotypes)
 
 
-def read_target_snps(target, region):
+def read_target_snps(target_dict: RecordMemoDict):
+    logger.info("Reading target snps")
     genotypes = []
-    vcf = VCF(target)
-    for record in vcf(region):
-        genotypes.append(np.array(record.genotypes)[:, :2].flatten())
+    for record in target_dict.values():
+        genotypes.append(record.genotypes)
+
     return np.array(genotypes)
 
 
@@ -297,12 +288,11 @@ def interpolate_map(vcf_path, map_path, region):
     return positions, cm_array
 
 
-def sparse_posteriors(panel, target, map, demography, region, mutation_rate, panel_dict):
+def sparse_posteriors(target, map, demography, region, mutation_rate, panel_dict, target_dict):
     with timer_block("collating snps"):
-        panel_snps = read_panel_snps(panel_dict, target, region) # FIXME use records
-
-    target_snps = read_target_snps(target, region)
-    assert len(panel_snps) == len(target_snps)
+        panel_snps = read_panel_snps(panel_dict, target_dict)
+        target_snps = read_target_snps(target_dict)
+        assert len(panel_snps) == len(target_snps)
 
     phys_pos_array, cm_pos_array = interpolate_map(target, map, region)
     num_snps = len(phys_pos_array)
@@ -319,11 +309,13 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate, pan
                         use_hmm=use_hmm)
 
     logger.info("Building panel...")
-    for h in panel_snps.transpose():
+    for i, h in enumerate(panel_snps.transpose()):
+        log_nth_element("Inserting haplotype", i)
         bwt.insert(h)
 
-    ref_matches = reference_matching(panel_snps, target_snps, cm_pos_array)
-    num_samples_panel = panel_snps.shape[1]
+    with timer_block("reference matching"):
+        ref_matches = reference_matching(panel_snps, target_snps, cm_pos_array)
+        num_samples_panel = panel_snps.shape[1]
 
     mutation_rate = 0.0001
     cm_sizes = list(cm_pos_array[1:] - cm_pos_array[:-1])
@@ -335,23 +327,26 @@ def sparse_posteriors(panel, target, map, demography, region, mutation_rate, pan
     imputation_threads = []
     L = 16
     logger.info("Doing posteriors...")
-    for i, h_target in tqdm(enumerate(target_snps.transpose())):
-        # Imputation thread with divergence matching
-        imputation_thread = bwt.impute(list(h_target), L)
-        imputation_threads.append(imputation_thread)
-        matched_samples_viterbi = set([match_id for seg in imputation_thread for match_id in seg.ids])
+    for i, h_target in enumerate(target_snps.transpose()): # FIXME keep tdqm?
+        with timer_block(f"impute and viterbi {i + 1}"):
+            # Imputation thread with divergence matching
+            imputation_thread = bwt.impute(list(h_target), L)
+            imputation_threads.append(imputation_thread)
+            matched_samples_viterbi = set([match_id for seg in imputation_thread for match_id in seg.ids])
 
-        # All locally sampled matches
-        matched_samples_matcher = (ref_matches[num_samples_panel + i])
+            # All locally sampled matches
+            matched_samples_matcher = (ref_matches[num_samples_panel + i])
 
-        # Union of the two match sets
-        matched_samples = np.array(list(matched_samples_viterbi.union(matched_samples_matcher)))
+            # Union of the two match sets
+            matched_samples = np.array(list(matched_samples_viterbi.union(matched_samples_matcher)))
 
-        posterior = fwbw(panel_snps[:, matched_samples], h_target[None, :], recombination_rates, mutation_rate)
-        sparse_posterior = sparsify_posterior(posterior, matched_samples, num_snps=num_snps, num_samples=num_samples_panel)
+        with timer_block(f"fwbw {i + 1}"):
+            posterior = fwbw(panel_snps[:, matched_samples], h_target[None, :], recombination_rates, mutation_rate)
+            sparse_posterior = sparsify_posterior(posterior, matched_samples, num_snps=num_snps, num_samples=num_samples_panel)
 
-        assert sparse_posterior.shape == (num_snps, num_samples_panel)
-        posteriors.append(sparse_posterior)
+            assert sparse_posterior.shape == (num_snps, num_samples_panel)
+            posteriors.append(sparse_posterior)
+
     return posteriors, imputation_threads
 
 
@@ -430,23 +425,26 @@ def memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> Rec
 
 def threads_impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
     panel_dict = memoize_vcf_region_records(panel, region)
+    target_dict = memoize_vcf_region_records(target, region)
 
     with timer_block("imputation"):
         target_samples = VCF(target).samples
         target_contigs = VCF(target).seqnames
         assert len(target_contigs) == 1
         chrom_num = target_contigs[0]
+
+        # 2N as this is a collection of N diploid individuals, i.e. each has two haplotypes
         n_target_haps = 2 * len(target_samples)
 
         with timer_block("compute posteriors"):
             posteriors, imputation_threads = sparse_posteriors(
-                panel=panel,
                 target=target,
                 map=map,
                 demography=demography,
                 region=region,
                 mutation_rate=mutation_rate,
-                panel_dict=panel_dict
+                panel_dict=panel_dict,
+                target_dict=target_dict
             )
 
         # FIXME work in progress
@@ -487,7 +485,7 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
             for record in VCF(target)(region):
                 snp_positions.append(record.POS)
                 snp_ids.append(record.ID)
-            target_genotypes = read_target_snps(target, region)
+            target_genotypes = read_target_snps(target_dict) # FIXME reuse self.target_snps
             next_snp_idx = 0
 
             panel_vcf = VCF(panel)
@@ -502,8 +500,8 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                     if var_id in snp_ids:
                         imputed = False
                         var_idx = snp_ids.index(var_id)
-                        genotypes = target_genotypes[var_idx]
-                        # write genotype from there
+                        # FIXME conversion to float required for np.round
+                        genotypes = np.array(target_genotypes[var_idx], dtype=float)
                     else:
                         while next_snp_idx < len(snp_positions) and pos >= snp_positions[next_snp_idx]:
                             next_snp_idx += 1
@@ -522,7 +520,8 @@ def threads_impute(panel, target, map, mut, demography, out, region, mutation_ra
                         genotypes = []
                         # FIXME WIP move out of loop?
                         # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
-                        panel_genotypes = np.array(record.genotypes, dtype=bool)[:, :2].flatten()
+                        #panel_genotypes = np.array(record.genotypes, dtype=bool)[:, :2].flatten()
+                        panel_genotypes = panel_dict[var_id].genotypes # FIXME remove dict lookup when switched to record list
                         carriers = (1 - panel_genotypes).nonzero()[0] if flipped else panel_genotypes.nonzero()[0]
                         for target_idx in range(n_target_haps):
                             # Extract and interpolate posterior
