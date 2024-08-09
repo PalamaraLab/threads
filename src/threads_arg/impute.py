@@ -96,16 +96,6 @@ def parse_demography(demography):
     return list(d[0]), list(d[1])
 
 
-def interpolate_posterior(posterior, array_coords, wgs_coords):
-    n_samples = posterior.shape[1]
-    interpolated = np.empty((n_samples, len(wgs_coords)), dtype=float)
-    interpolated[:] = np.nan
-    for i in range(n_samples):
-        interpolated[i, :] = np.interp(wgs_coords, array_coords, posterior[:, i])
-    assert np.isnan(interpolated).sum() == 0
-    return interpolated
-
-
 def reference_matching(haps_panel, haps_target, cm_pos):
     num_reference = haps_panel.shape[1]
     num_target = haps_target.shape[1]
