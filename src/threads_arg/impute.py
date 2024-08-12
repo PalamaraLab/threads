@@ -13,7 +13,7 @@ from typing import Dict, Tuple, List
 from dataclasses import dataclass
 
 from .fwbw import fwbw
-from .utils import timer_block, log_nth_element
+from .utils import timer_block, TimerTotal, log_nth_element
 
 logger = logging.getLogger(__name__)
 
@@ -478,8 +478,10 @@ class Impute:
         imputation_threads = []
         L = 16
         logger.info("Doing posteriors...")
-        for i, h_target in enumerate(self.target_snps.transpose()): # FIXME keep tdqm?
-            with timer_block(f"impute {i + 1}"):
+        tt_impute = TimerTotal("impute")
+        tt_fwbw = TimerTotal("fwbw")
+        for i, h_target in tqdm(enumerate(self.target_snps.transpose())):
+            with tt_impute:
                 # Imputation thread with divergence matching
                 imputation_thread = bwt.impute(list(h_target), L)
                 imputation_threads.append(imputation_thread)
@@ -491,11 +493,14 @@ class Impute:
                 # Union of the two match sets
                 matched_samples = np.array(list(matched_samples_viterbi.union(matched_samples_matcher)))
 
-            with timer_block(f"fwbw {i + 1}"):
+            with tt_fwbw:
                 posterior = fwbw(self.panel_snps[:, matched_samples], h_target[None, :], recombination_rates, mutation_rate)
-                sparse_posterior = sparsify_posterior(posterior, matched_samples, num_snps=num_snps, num_samples=num_samples_panel)
+                sparse_posterior = sparsify_posterior(posterior, matched_samples, num_snps=self.num_snps, num_samples=num_samples_panel)
 
-                assert sparse_posterior.shape == (num_snps, num_samples_panel)
+                assert sparse_posterior.shape == (self.num_snps, num_samples_panel)
                 posteriors.append(sparse_posterior)
+
+        logger.info(tt_impute)
+        logger.info(tt_fwbw)
 
         return posteriors, imputation_threads

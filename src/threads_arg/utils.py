@@ -149,8 +149,39 @@ def timer_block(desc: str):
     logger.info(f"Starting {desc}...")
     start_time = time.time()
     yield
-    end_time = time.time() - start_time
-    logger.info(f"Finished {desc} (time {end_time:.3f}s)")
+    end_time = time.time()
+    duration = end_time - start_time
+    logger.info(f"Finished {desc} (time {duration:.3f}s)")
+
+
+class TimerTotal:
+    """
+    Tally up repeated timer measurements using `with` blocks to get a string
+    summary of total time.
+
+    Example usage:
+        tt = TimerTotal("foo")
+        for _ in range(5):
+            with tt:
+                time.sleep(.4)
+        print(tt)
+    """
+    def __init__(self, desc: str):
+        self.desc = desc
+        self.durations = []
+        self._start_time = None
+
+    def __enter__(self):
+        self._start_time = time.time()
+
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
+        end_time = time.time()
+        self.durations.append(end_time - self._start_time)
+        self._start_time = None
+
+    def __str__(self):
+        total = sum(self.durations)
+        return f"Total time for {self.desc}: {total:.3f}s"
 
 
 def log_nth_element(desc: str, index: int, N=200):
