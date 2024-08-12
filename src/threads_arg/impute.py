@@ -449,7 +449,8 @@ class Impute:
                             genotypes.append(np.sum(site_posterior, where=record.genotypes))
 
                     genotypes = np.round(genotypes, decimals=3)
-                    assert 0 <= np.max(genotypes) <= 1
+                    assert np.min(genotypes) >= 0
+                    assert np.max(genotypes) <= 1
 
                     vcf_writer.write_site(genotypes, record, imputed, chrom_num)
 
