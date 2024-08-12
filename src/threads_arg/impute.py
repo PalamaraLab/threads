@@ -23,6 +23,9 @@ PROCESS_COUNT = len(os.sched_getaffinity(0))
 
 @dataclass
 class RecordMemo:
+    """
+    Memo of values FIXME allele frequency
+    """
     id: int
     genotypes: None
     pos: None
@@ -61,15 +64,15 @@ class WriterVCF:
         haps1 = genotypes[::2]
         haps2 = genotypes[1::2]
         dosages = haps1 + haps2
-        pos = str(record.POS)
-        snp_id = record.ID
-        ref = record.REF
-        alt = record.ALT
+        pos = str(record.pos)
+        snp_id = record.id
+        ref = record.ref
+        alt = record.alt
+        af = record.af
         assert len(alt) == 1
         alt = alt[0]
         qual = "."
         filter = "PASS"
-        af = int(record.INFO["AC"]) / int(record.INFO["AN"])
         gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
 
         f = self.file
@@ -120,12 +123,14 @@ def site_arg_probability(site_posterior, imputation_thread, mutation_mapping, ca
     if pos < imputation_thread[0].seg_start:
         segment = imputation_thread[0]
     else:
+        # FIXME optimise with binary search?
         seg_idx = 0
         while seg_idx < num_segs - 1 and imputation_thread[seg_idx + 1].seg_start < pos:
             seg_idx += 1
         segment = imputation_thread[seg_idx]
 
     for s_id, height in zip(segment.ids, segment.ages):
+        # FIXME Arni check, possible to optimise by only calculating s_id where=record.genotypes
         if site_posterior[s_id] > 0 and s_id in carriers:
             mut_lower, mut_upper = mutation_mapping.get_boundaries(s_id)
             mut_height = (mut_upper + mut_lower) / 2
@@ -136,6 +141,9 @@ def site_arg_probability(site_posterior, imputation_thread, mutation_mapping, ca
 
 
 class MutationMap:
+    """
+    FIXME docstring
+    """
     def __init__(self, snp, flipped, mapping_str):
         self.boundaries = {}
         self.snp = snp
@@ -163,6 +171,9 @@ class MutationMap:
 
 
 class MutationContainer:
+    """
+    FIXME docstring
+    """
     def __init__(self, mut_path):
         self.mut_dict = {}
         with open(mut_path, 'r') as mutfile:
@@ -196,7 +207,10 @@ def sparsify_posterior(P, matched_samples, num_snps, num_samples):
 
 
 def interpolate_map(vcf_path, map_path, region):
-    # get vcf positions
+    """
+    FIXME docstring
+    Get vcf positions
+    """
     vcf = VCF(vcf_path)
     positions = []
     for record in vcf(region):
@@ -349,30 +363,30 @@ class Impute:
             vcf_writer = WriterVCF(out)
             vcf_writer.write_header(target_samples, chrom_num)
 
-            snp_positions = []
-            snp_ids = []
+            # FIXME remove old open() block
             with open(out, "a") as outfile:
-                for record in VCF(target)(region):
-                    snp_positions.append(record.POS)
-                    snp_ids.append(record.ID)
+                # FIXME replace with faster lookup (dict/set)
+                snp_positions = [record.pos for record in self.target_dict.values()]
+                snp_ids = [record.id for record in self.target_dict.values()]
+                num_snps = len(self.target_dict)
                 next_snp_idx = 0
 
-                panel_vcf = VCF(panel)
                 with timer_block(f"processing records"):
-                    for record in panel_vcf(region):
-                        var_id = record.ID
-                        pos = record.POS
-                        af = int(record.INFO["AC"]) / int(record.INFO["AN"])
-                        flipped = af > 0.5
+                    for record in self.panel_dict.values():
+                        var_id = record.id
+                        pos = record.pos
+                        flipped = record.af > 0.5
                         genotypes = None
                         imputed = True
                         if var_id in snp_ids:
                             imputed = False
-                            var_idx = snp_ids.index(var_id)
+                            var_idx = snp_ids.index(var_id) # FIXME faster lookup
                             # FIXME conversion to float required for np.round
                             genotypes = np.array(self.target_snps[var_idx], dtype=float)
+                            # FIXME remove logging
+                            #logger.info(f"Using genotypes for var_idx {var_idx}")
                         else:
-                            while next_snp_idx < len(snp_positions) and pos >= snp_positions[next_snp_idx]:
+                            while next_snp_idx < num_snps and pos >= snp_positions[next_snp_idx]:
                                 next_snp_idx += 1
                                 # FIXME Work in progress
                                 # Rolling window of cached posteriors; they are computed when needed and dropped
@@ -383,8 +397,6 @@ class Impute:
                                         if cache_window_end_idx >= 0:
                                             if not cached_posteriors_row_arrays[target_idx][cache_window_end_idx] is None:
                                                 cached_posteriors_row_arrays[target_idx][cache_window_end_idx] = None
-                                if next_snp_idx == len(snp_positions):
-                                    break
 
                             mutation_mapping = None
                             if mutation_container.is_mapped(var_id):
@@ -393,17 +405,23 @@ class Impute:
                             genotypes = []
                             # FIXME WIP move out of loop?
                             # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
-                            #panel_genotypes = np.array(record.genotypes, dtype=bool)[:, :2].flatten()
-                            panel_genotypes = self.panel_dict[var_id].genotypes # FIXME remove dict lookup when switched to record list
-                            carriers = (1 - panel_genotypes).nonzero()[0] if flipped else panel_genotypes.nonzero()[0]
+                            carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
+                            # FIXME remove logging
+                            #logger.info(f"Processing n_target_haps {n_target_haps}...")
                             for target_idx in range(n_target_haps):
                                 # Extract and interpolate posterior
                                 site_posterior = None
                                 if next_snp_idx == 0:
+                                    # FIXME remove logging
+                                    #logger.info("Using site posterior from first snp")
                                     site_posterior = cached_posteriors_first[target_idx]
                                 elif next_snp_idx == num_snps:
+                                    # FIXME remove logging
+                                    #logger.info(f"Using site posterior from last snp")
                                     site_posterior = cached_posteriors_last[target_idx]
                                 else:
+                                    # FIXME remove logging
+                                    #logger.info(f"Interpolating between snps {next_snp_idx - 1} and {next_snp_idx}")
                                     ensure_posteriors_cached(target_idx, next_snp_idx)
                                     ensure_posteriors_cached(target_idx, next_snp_idx - 1)
 
@@ -430,7 +448,7 @@ class Impute:
                                     arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
                                     site_posterior = site_posterior * arg_mask
 
-                                genotypes.append(np.sum(site_posterior, where=panel_genotypes))
+                                genotypes.append(np.sum(site_posterior, where=record.genotypes))
 
                         genotypes = np.round(genotypes, decimals=3)
                         assert 0 <= np.max(genotypes) <= 1
@@ -479,7 +497,7 @@ class Impute:
         L = 16
         logger.info("Doing posteriors...")
         for i, h_target in enumerate(self.target_snps.transpose()): # FIXME keep tdqm?
-            with timer_block(f"impute and viterbi {i + 1}"):
+            with timer_block(f"impute {i + 1}"):
                 # Imputation thread with divergence matching
                 imputation_thread = bwt.impute(list(h_target), L)
                 imputation_threads.append(imputation_thread)
