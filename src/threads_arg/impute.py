@@ -13,7 +13,7 @@ from typing import Dict, Tuple, List
 from dataclasses import dataclass
 
 from .fwbw import fwbw
-from .utils import timer_block, TimerTotal, log_nth_element
+from .utils import timer_block, TimerTotal
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def reference_matching(haps_panel, haps_target, cm_pos):
     num_target = haps_target.shape[1]
     matcher = ImputationMatcher(num_reference, num_target, cm_pos, 0.02, 4)
     all_genotypes = np.concatenate([haps_panel, haps_target], axis=1)
-    for g in all_genotypes:
+    for g in tqdm(all_genotypes):
         matcher.process_site(g)
     return matcher.get_matches()
 
@@ -306,8 +306,8 @@ class CachedPosteriorSnps:
         # Rebuild snp data
         target_posteriors = []
         for p in self.posteriors:
-            next_snp_row = p[[snp_idx],:].toarray()
-            target_posteriors.append((next_snp_row / np.sum(next_snp_row)).flatten())
+            snp_row = p[[snp_idx],:].toarray()
+            target_posteriors.append((snp_row / np.sum(snp_row)).flatten())
         self.posteriors_by_snp_idx[snp_idx] = target_posteriors
 
         # Clear out any old data
@@ -375,7 +375,7 @@ class Impute:
             cached_posteriors = CachedPosteriorSnps(posteriors)
 
             with timer_block(f"processing records"):
-                for record in self.panel_dict.values():
+                for record in tqdm(self.panel_dict.values()):
                     var_id = record.id
                     pos = record.pos
                     flipped = record.af > 0.5

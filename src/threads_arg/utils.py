@@ -182,11 +182,3 @@ class TimerTotal:
     def __str__(self):
         total = sum(self.durations)
         return f"Total time for {self.desc}: {total:.3f}s"
-
-
-def log_nth_element(desc: str, index: int, N=200):
-    """
-    Logger helper function that only displays desc on first or Nth iteration
-    """
-    if index == 0 or ((index + 1) % N) == 0:
-        logger.info(f"{desc} {index + 1}...")
