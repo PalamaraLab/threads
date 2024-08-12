@@ -382,9 +382,8 @@ class Impute:
             vcf_writer = WriterVCF(out)
             vcf_writer.write_header(target_samples, chrom_num)
 
-            # FIXME replace with faster lookup (dict/set)
             snp_positions = [record.pos for record in self.target_dict.values()]
-            snp_ids = [record.id for record in self.target_dict.values()]
+            snp_id_indexes = {record.id: i for i, record in enumerate(self.target_dict.values())}
             next_snp_idx = 0
 
             cached_posteriors = CachedPosteriorSnps(posteriors)
@@ -398,9 +397,9 @@ class Impute:
                     imputed = True
 
                     # FIXME discuss with Arni why var_id special case
-                    if var_id in snp_ids: # FIXME faster lookup
+                    if var_id in snp_id_indexes:
                         imputed = False
-                        var_idx = snp_ids.index(var_id) # FIXME faster lookup
+                        var_idx = snp_id_indexes[var_id]
                         # FIXME conversion to float required for np.round
                         genotypes = np.array(self.target_snps[var_idx], dtype=float)
                     else:
