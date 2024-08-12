@@ -206,22 +206,6 @@ def sparsify_posterior(P, matched_samples, num_snps, num_samples):
     return csr_array(matrix)
 
 
-def interpolate_map(vcf_path, map_path, region):
-    """
-    FIXME docstring
-    Get vcf positions
-    """
-    vcf = VCF(vcf_path)
-    positions = []
-    for record in vcf(region):
-        positions.append(record.POS)
-    positions = np.array(positions)
-
-    map_bp, map_cm = read_map_gz(map_path)
-    cm_array = np.interp(positions, map_bp, map_cm)
-    return positions, cm_array
-
-
 def _memoize_nth_record_process(filename, region, proc_idx, proc_max) -> List[Tuple[int, RecordMemo]]:
     """
     Process for for reading a region for a filename for every nth record
@@ -310,8 +294,21 @@ class Impute:
         region: str,
         mutation_rate=1.4e-8
     ):
-        self.panel_dict = _memoize_vcf_region_records(panel, region)
-        self.target_dict = _memoize_vcf_region_records(target, region)
+        with timer_block("memozing VCF panel and region"):
+            self.panel_dict = _memoize_vcf_region_records(panel, region)
+            self.target_dict = _memoize_vcf_region_records(target, region)
+
+        with timer_block("collating snps"):
+            target_variants = set(self.target_dict.keys())
+            self.panel_snps = np.array([record.genotypes for record in self.panel_dict.values() if record.id in target_variants])
+            self.target_snps = np.array([record.genotypes for record in self.target_dict.values()])
+            assert len(self.panel_snps) == len(self.target_snps)
+
+        with timer_block("getting VCF positions"):
+            self.phys_pos_array = np.array([record.pos for record in self.target_dict.values()])
+            map_bp, map_cm = read_map_gz(map)
+            self.cm_pos_array = np.interp(self.phys_pos_array, map_bp, map_cm)
+            self.num_snps = len(self.phys_pos_array)
 
         with timer_block("imputation"):
             target_samples = VCF(target).samples
@@ -351,10 +348,6 @@ class Impute:
                     next_snp_row = posteriors[target_idx][[snp_idx],:].toarray()
                     cached_posteriors_row_arrays[target_idx][snp_idx] = (next_snp_row / np.sum(next_snp_row)).flatten()
 
-            logger.info("Computing snps")
-            phys_pos_array, _ = interpolate_map(target, map, region)
-            num_snps = len(phys_pos_array)
-
             logger.info("Parsing mutations")
             mutation_container = MutationContainer(mut)
 
@@ -366,7 +359,6 @@ class Impute:
             # FIXME replace with faster lookup (dict/set)
             snp_positions = [record.pos for record in self.target_dict.values()]
             snp_ids = [record.id for record in self.target_dict.values()]
-            num_snps = len(self.target_dict)
             next_snp_idx = 0
 
             with timer_block(f"processing records"):
@@ -384,7 +376,7 @@ class Impute:
                         # FIXME remove logging
                         #logger.info(f"Using genotypes for var_idx {var_idx}")
                     else:
-                        while next_snp_idx < num_snps and pos >= snp_positions[next_snp_idx]:
+                        while next_snp_idx < self.num_snps and pos >= snp_positions[next_snp_idx]:
                             next_snp_idx += 1
                             # FIXME Work in progress
                             # Rolling window of cached posteriors; they are computed when needed and dropped
@@ -413,7 +405,7 @@ class Impute:
                                 # FIXME remove logging
                                 #logger.info("Using site posterior from first snp")
                                 site_posterior = cached_posteriors_first[target_idx]
-                            elif next_snp_idx == num_snps:
+                            elif next_snp_idx == self.num_snps:
                                 # FIXME remove logging
                                 #logger.info(f"Using site posterior from last snp")
                                 site_posterior = cached_posteriors_last[target_idx]
@@ -456,20 +448,11 @@ class Impute:
 
 
     def _sparse_posteriors(self, target, map, demography, region, mutation_rate):
-        with timer_block("collating snps"):
-            target_variants = set(self.target_dict.keys())
-            self.panel_snps = np.array([record.genotypes for record in self.panel_dict.values() if record.id in target_variants])
-            self.target_snps = np.array([record.genotypes for record in self.target_dict.values()])
-            assert len(self.panel_snps) == len(self.target_snps)
-
-        phys_pos_array, cm_pos_array = interpolate_map(target, map, region)
-        num_snps = len(phys_pos_array)
-
         sparse_sites = True
         use_hmm = False
         ne_times, ne_sizes = parse_demography(demography)
-        bwt = ThreadsFastLS(phys_pos_array,
-                            cm_pos_array,
+        bwt = ThreadsFastLS(self.phys_pos_array,
+                            self.cm_pos_array,
                             mutation_rate,
                             ne_sizes,
                             ne_times,
@@ -482,11 +465,11 @@ class Impute:
             bwt.insert(h)
 
         with timer_block("reference matching"):
-            ref_matches = reference_matching(self.panel_snps, self.target_snps, cm_pos_array)
+            ref_matches = reference_matching(self.panel_snps, self.target_snps, self.cm_pos_array)
             num_samples_panel = self.panel_snps.shape[1]
 
         mutation_rate = 0.0001
-        cm_sizes = list(cm_pos_array[1:] - cm_pos_array[:-1])
+        cm_sizes = list(self.cm_pos_array[1:] - self.cm_pos_array[:-1])
         cm_sizes = np.array(cm_sizes + [cm_sizes[-1]])
         Ne = 20_000
         recombination_rates = 1 - np.exp(-4 * Ne * 0.01 * cm_sizes / num_samples_panel)
