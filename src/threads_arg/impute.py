@@ -343,21 +343,7 @@ class Impute:
         region: str,
         mutation_rate=1.4e-8
     ):
-        with timer_block("memozing VCF panel and region"):
-            self.panel_dict = _memoize_vcf_region_records(panel, region)
-            self.target_dict = _memoize_vcf_region_records(target, region)
-
-        with timer_block("collating snps"):
-            target_variants = set(self.target_dict.keys())
-            self.panel_snps = np.array([record.genotypes for record in self.panel_dict.values() if record.id in target_variants])
-            self.target_snps = np.array([record.genotypes for record in self.target_dict.values()])
-            assert len(self.panel_snps) == len(self.target_snps)
-
-        with timer_block("getting VCF positions"):
-            self.phys_pos_array = np.array([record.pos for record in self.target_dict.values()])
-            map_bp, map_cm = read_map_gz(map)
-            self.cm_pos_array = np.interp(self.phys_pos_array, map_bp, map_cm)
-            self.num_snps = len(self.phys_pos_array)
+        self._load_records_and_snps(panel, target, map, region)
 
         with timer_block("imputation"):
             target_samples = VCF(target).samples
@@ -451,6 +437,27 @@ class Impute:
                     assert np.max(genotypes) <= 1
 
                     vcf_writer.write_site(genotypes, record, imputed, chrom_num)
+
+
+    def _load_records_and_snps(self, panel: str, target: str, map: str, region: str):
+        """
+        Called on initialisation to preload frequently-used values.
+        """
+        with timer_block("memozing VCF panel and region"):
+            self.panel_dict = _memoize_vcf_region_records(panel, region)
+            self.target_dict = _memoize_vcf_region_records(target, region)
+
+        with timer_block("collating snps"):
+            target_variants = set(self.target_dict.keys())
+            self.panel_snps = np.array([record.genotypes for record in self.panel_dict.values() if record.id in target_variants])
+            self.target_snps = np.array([record.genotypes for record in self.target_dict.values()])
+            assert len(self.panel_snps) == len(self.target_snps)
+
+        with timer_block("getting VCF positions"):
+            self.phys_pos_array = np.array([record.pos for record in self.target_dict.values()])
+            map_bp, map_cm = read_map_gz(map)
+            self.cm_pos_array = np.interp(self.phys_pos_array, map_bp, map_cm)
+            self.num_snps = len(self.phys_pos_array)
 
 
     def _sparse_posteriors(self, demography, mutation_rate):
