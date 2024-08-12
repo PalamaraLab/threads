@@ -363,97 +363,95 @@ class Impute:
             vcf_writer = WriterVCF(out)
             vcf_writer.write_header(target_samples, chrom_num)
 
-            # FIXME remove old open() block
-            with open(out, "a") as outfile:
-                # FIXME replace with faster lookup (dict/set)
-                snp_positions = [record.pos for record in self.target_dict.values()]
-                snp_ids = [record.id for record in self.target_dict.values()]
-                num_snps = len(self.target_dict)
-                next_snp_idx = 0
+            # FIXME replace with faster lookup (dict/set)
+            snp_positions = [record.pos for record in self.target_dict.values()]
+            snp_ids = [record.id for record in self.target_dict.values()]
+            num_snps = len(self.target_dict)
+            next_snp_idx = 0
 
-                with timer_block(f"processing records"):
-                    for record in self.panel_dict.values():
-                        var_id = record.id
-                        pos = record.pos
-                        flipped = record.af > 0.5
-                        genotypes = None
-                        imputed = True
-                        if var_id in snp_ids:
-                            imputed = False
-                            var_idx = snp_ids.index(var_id) # FIXME faster lookup
-                            # FIXME conversion to float required for np.round
-                            genotypes = np.array(self.target_snps[var_idx], dtype=float)
-                            # FIXME remove logging
-                            #logger.info(f"Using genotypes for var_idx {var_idx}")
-                        else:
-                            while next_snp_idx < num_snps and pos >= snp_positions[next_snp_idx]:
-                                next_snp_idx += 1
-                                # FIXME Work in progress
-                                # Rolling window of cached posteriors; they are computed when needed and dropped
-                                # when out of range
-                                for target_idx in range(n_target_haps):
-                                    if not cached_posteriors_row_arrays[target_idx] is None:
-                                        cache_window_end_idx = next_snp_idx - 2
-                                        if cache_window_end_idx >= 0:
-                                            if not cached_posteriors_row_arrays[target_idx][cache_window_end_idx] is None:
-                                                cached_posteriors_row_arrays[target_idx][cache_window_end_idx] = None
-
-                            mutation_mapping = None
-                            if mutation_container.is_mapped(var_id):
-                                mutation_mapping = mutation_container.get_mapping(var_id)
-
-                            genotypes = []
-                            # FIXME WIP move out of loop?
-                            # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
-                            carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
-                            # FIXME remove logging
-                            #logger.info(f"Processing n_target_haps {n_target_haps}...")
+            with timer_block(f"processing records"):
+                for record in self.panel_dict.values():
+                    var_id = record.id
+                    pos = record.pos
+                    flipped = record.af > 0.5
+                    genotypes = None
+                    imputed = True
+                    if var_id in snp_ids:
+                        imputed = False
+                        var_idx = snp_ids.index(var_id) # FIXME faster lookup
+                        # FIXME conversion to float required for np.round
+                        genotypes = np.array(self.target_snps[var_idx], dtype=float)
+                        # FIXME remove logging
+                        #logger.info(f"Using genotypes for var_idx {var_idx}")
+                    else:
+                        while next_snp_idx < num_snps and pos >= snp_positions[next_snp_idx]:
+                            next_snp_idx += 1
+                            # FIXME Work in progress
+                            # Rolling window of cached posteriors; they are computed when needed and dropped
+                            # when out of range
                             for target_idx in range(n_target_haps):
-                                # Extract and interpolate posterior
-                                site_posterior = None
-                                if next_snp_idx == 0:
-                                    # FIXME remove logging
-                                    #logger.info("Using site posterior from first snp")
-                                    site_posterior = cached_posteriors_first[target_idx]
-                                elif next_snp_idx == num_snps:
-                                    # FIXME remove logging
-                                    #logger.info(f"Using site posterior from last snp")
-                                    site_posterior = cached_posteriors_last[target_idx]
+                                if not cached_posteriors_row_arrays[target_idx] is None:
+                                    cache_window_end_idx = next_snp_idx - 2
+                                    if cache_window_end_idx >= 0:
+                                        if not cached_posteriors_row_arrays[target_idx][cache_window_end_idx] is None:
+                                            cached_posteriors_row_arrays[target_idx][cache_window_end_idx] = None
+
+                        mutation_mapping = None
+                        if mutation_container.is_mapped(var_id):
+                            mutation_mapping = mutation_container.get_mapping(var_id)
+
+                        genotypes = []
+                        # FIXME WIP move out of loop?
+                        # FIXME record.genotypes is not an ndarray, so conversion required. Custom version?
+                        carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
+                        # FIXME remove logging
+                        #logger.info(f"Processing n_target_haps {n_target_haps}...")
+                        for target_idx in range(n_target_haps):
+                            # Extract and interpolate posterior
+                            site_posterior = None
+                            if next_snp_idx == 0:
+                                # FIXME remove logging
+                                #logger.info("Using site posterior from first snp")
+                                site_posterior = cached_posteriors_first[target_idx]
+                            elif next_snp_idx == num_snps:
+                                # FIXME remove logging
+                                #logger.info(f"Using site posterior from last snp")
+                                site_posterior = cached_posteriors_last[target_idx]
+                            else:
+                                # FIXME remove logging
+                                #logger.info(f"Interpolating between snps {next_snp_idx - 1} and {next_snp_idx}")
+                                ensure_posteriors_cached(target_idx, next_snp_idx)
+                                ensure_posteriors_cached(target_idx, next_snp_idx - 1)
+
+                                bp_prev = snp_positions[next_snp_idx - 1]
+                                bp_next = snp_positions[next_snp_idx]
+                                assert bp_prev <= pos <= bp_next
+                                prev_wt, next_wt = None, None
+                                if bp_prev == bp_next:
+                                    prev_wt = 1
+                                    next_wt = 0
                                 else:
-                                    # FIXME remove logging
-                                    #logger.info(f"Interpolating between snps {next_snp_idx - 1} and {next_snp_idx}")
-                                    ensure_posteriors_cached(target_idx, next_snp_idx)
-                                    ensure_posteriors_cached(target_idx, next_snp_idx - 1)
+                                    prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
+                                    next_wt = 1 - prev_wt
 
-                                    bp_prev = snp_positions[next_snp_idx - 1]
-                                    bp_next = snp_positions[next_snp_idx]
-                                    assert bp_prev <= pos <= bp_next
-                                    prev_wt, next_wt = None, None
-                                    if bp_prev == bp_next:
-                                        prev_wt = 1
-                                        next_wt = 0
-                                    else:
-                                        prev_wt = (pos - bp_prev) / (bp_next - bp_prev)
-                                        next_wt = 1 - prev_wt
+                                cached_target_idx = cached_posteriors_row_arrays[target_idx]
+                                # FIXME WIP move out of loop, and is np.average better in bulk?
+                                # - e.g. site_posterior = np.average([prev_target, next_target], axis=0, weights=[prev_wt, next_wt])
+                                prev_target = cached_target_idx[next_snp_idx - 1]
+                                next_target = cached_target_idx[next_snp_idx]
+                                site_posterior = prev_wt * prev_target + next_wt * next_target
 
-                                    cached_target_idx = cached_posteriors_row_arrays[target_idx]
-                                    # FIXME WIP move out of loop, and is np.average better in bulk?
-                                    # - e.g. site_posterior = np.average([prev_target, next_target], axis=0, weights=[prev_wt, next_wt])
-                                    prev_target = cached_target_idx[next_snp_idx - 1]
-                                    next_target = cached_target_idx[next_snp_idx]
-                                    site_posterior = prev_wt * prev_target + next_wt * next_target
+                            # FIXME WIP block processing?
+                            if mutation_mapping:
+                                arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
+                                site_posterior = site_posterior * arg_mask
 
-                                # FIXME WIP block processing?
-                                if mutation_mapping:
-                                    arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
-                                    site_posterior = site_posterior * arg_mask
+                            genotypes.append(np.sum(site_posterior, where=record.genotypes))
 
-                                genotypes.append(np.sum(site_posterior, where=record.genotypes))
+                    genotypes = np.round(genotypes, decimals=3)
+                    assert 0 <= np.max(genotypes) <= 1
 
-                        genotypes = np.round(genotypes, decimals=3)
-                        assert 0 <= np.max(genotypes) <= 1
-
-                        vcf_writer.write_site(genotypes, record, imputed, chrom_num)
+                    vcf_writer.write_site(genotypes, record, imputed, chrom_num)
 
 
     def _sparse_posteriors(self, target, map, demography, region, mutation_rate):
