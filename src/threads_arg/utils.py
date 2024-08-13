@@ -142,11 +142,20 @@ def split_list(list, n):
 
 
 @contextmanager
-def timer_block(desc: str):
+def timer_block(desc: str, print_start: bool=True):
     """
-    Context manager block for timing and logging blocks of code
+    Context manager to log a description and time spend inside `with` block.
+
+    By default this prints description at block start and end. Set print_start
+    to false to disable the former print. This is neater for very quick blocks.
+
+    Example usage:
+        with timer_block("expensive op"):
+            sleep(1)
+        # Logger info happens here
     """
-    logger.info(f"Starting {desc}...")
+    if print_start:
+        logger.info(f"Starting {desc}...")
     start_time = time.time()
     yield
     end_time = time.time()
