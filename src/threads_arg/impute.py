@@ -79,6 +79,7 @@ class WriterVCF:
         f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
 
+# FIXME move into class
 def read_map_gz(map_gz):
     """
     Reading in map file for Li-Stephens
@@ -94,21 +95,24 @@ def read_map_gz(map_gz):
     return phys_pos, cm_pos
 
 
+# FIXME move into class
 def parse_demography(demography):
     d = pd.read_table(demography, sep='\s+', header=None)
     return list(d[0]), list(d[1])
 
 
+# FIXME move into class
 def reference_matching(haps_panel, haps_target, cm_pos):
     num_reference = haps_panel.shape[1]
     num_target = haps_target.shape[1]
     matcher = ImputationMatcher(num_reference, num_target, cm_pos, 0.02, 4)
     all_genotypes = np.concatenate([haps_panel, haps_target], axis=1)
-    for g in tqdm(all_genotypes):
+    for g in tqdm(all_genotypes, mininterval=1):
         matcher.process_site(g)
     return matcher.get_matches()
 
 
+# FIXME move into class
 def site_arg_probability(site_posterior, imputation_thread, mutation_mapping, carriers, pos):
     """
     For each target sequence, the LS-fwbw finds out which of the panel sequences
@@ -178,7 +182,7 @@ class MutationContainer:
         self.mut_dict = {}
         with open(mut_path, 'r') as mutfile:
             for line in mutfile:
-                snp, pos, flipped, mapping_str = line.strip().split()
+                snp, _pos, flipped, mapping_str = line.strip().split()
                 self.mut_dict[snp] = MutationMap(snp, int(flipped), mapping_str)
 
     def is_mapped(self, snp):
@@ -189,21 +193,6 @@ class MutationContainer:
 
     def get_mapping(self, snp):
         return self.mut_dict[snp]
-
-
-def sparsify_posterior(P, matched_samples, num_snps, num_samples):
-    """
-    Expand to a compressed n_snps x n_samples matrix
-    """
-    assert P.shape == (num_snps, len(matched_samples))
-    matrix = lil_matrix(np.zeros(shape=(num_snps, num_samples)))
-    P[P <= 1 / num_samples] = 0
-    for i, p in enumerate(P):
-        assert np.sum(p) > 0
-        q = p / np.sum(p)
-        for j in np.nonzero(q)[0]:
-            matrix[i, matched_samples[j]] = q[j]
-    return csr_array(matrix)
 
 
 def _memoize_nth_record_process(filename, region, proc_idx, proc_max) -> List[Tuple[int, RecordMemo]]:
@@ -260,7 +249,7 @@ def _memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> Re
     # Split the expensive parts reading records over available processes.
     # 'imemos' is shorthand for indexed memos, a list of tuples with index and memo
     shortname = os.path.basename(filename)
-    with timer_block(f"memoising VCF {shortname}, region {region} ({cpu_count} CPUs)"):
+    with timer_block(f"memoising VCF {shortname}, region {region} ({cpu_count} CPUs)", False):
         jobs_args = [(filename, region, i, cpu_count) for i in range(cpu_count)]
         with multiprocessing.Pool(processes=cpu_count) as pool:
             imemos = pool.starmap(_memoize_nth_record_process, jobs_args)
@@ -304,14 +293,17 @@ class CachedPosteriorSnps:
             return self.posteriors_by_snp_idx[snp_idx]
 
         # Rebuild snp data
-        target_posteriors = []
-        for p in self.posteriors:
-            snp_row = p[[snp_idx],:].toarray()
-            target_posteriors.append((snp_row / np.sum(snp_row)).flatten())
-        self.posteriors_by_snp_idx[snp_idx] = target_posteriors
+        # FIXME review with Arni - OK with large datasets?
+        col_len = len(self.posteriors)
+        row_len = self.posteriors[0].shape[1]
+        target_posteriors = np.empty(shape=(col_len, row_len), dtype=np.float64)
+        for i, p in enumerate(self.posteriors):
+            posteriors = p[[snp_idx],:].toarray()
+            target_posteriors[i] = posteriors / np.sum(posteriors)
 
-        # Clear out any old data
-        self._remove_eldest()
+        # Cache and clear out-of-date entries
+        self.posteriors_by_snp_idx[snp_idx] = target_posteriors
+        self._remove_oldest()
 
         return target_posteriors
 
@@ -321,7 +313,7 @@ class CachedPosteriorSnps:
             self.recents.remove(snp_idx)
         self.recents.insert(0, snp_idx)
 
-    def _remove_eldest(self):
+    def _remove_oldest(self):
         # Clear anything off the end of the recents list from the cache
         for idx in self.recents[self.max_size:]:
             del self.posteriors_by_snp_idx[idx]
@@ -343,100 +335,44 @@ class Impute:
         region: str,
         mutation_rate=1.4e-8
     ):
-        self._load_records_and_snps(panel, target, map, region)
+        with timer_block("impute"):
+            self._load_records_and_snps(panel, target, map, region)
 
-        with timer_block("imputation"):
-            target_samples = VCF(target).samples
-            target_contigs = VCF(target).seqnames
-            assert len(target_contigs) == 1
-            chrom_num = target_contigs[0]
+            self.target_samples = VCF(target).samples
+            self.target_contigs = VCF(target).seqnames
+            assert len(self.target_contigs) == 1
+            self.chrom_num = self.target_contigs[0]
 
             # 2N as this is a collection of N diploid individuals, i.e. each has two haplotypes
-            n_target_haps = 2 * len(target_samples)
+            self.n_target_haps = 2 * len(self.target_samples)
 
-            with timer_block("compute posteriors"):
-                posteriors, imputation_threads = self._sparse_posteriors(
+            with timer_block("sparse posteriors"):
+                self._sparse_posteriors(
                     demography=demography,
                     mutation_rate=mutation_rate
                 )
 
             logger.info("Parsing mutations")
-            mutation_container = MutationContainer(mut)
+            self.mutation_container = MutationContainer(mut)
 
-            # this will be the memory-heavy bit
+            logger.info("Init iteration")
+            self._init_step_snp()
+            self.posteriors_snp_cache = CachedPosteriorSnps(self.posteriors)
+
             logger.info(f"Writing VCF header in {out}")
-            vcf_writer = WriterVCF(out)
-            vcf_writer.write_header(target_samples, chrom_num)
+            self.vcf_writer = WriterVCF(out)
+            self.vcf_writer.write_header(self.target_samples, self.chrom_num)
 
-            snp_positions = [record.pos for record in self.target_dict.values()]
-            snp_id_indexes = {record.id: i for i, record in enumerate(self.target_dict.values())}
-            next_snp_idx = 0
-
-            cached_posteriors = CachedPosteriorSnps(posteriors)
+            self.tt_posteriors = TimerTotal("interpolate posteriors")
+            self.tt_mutation_mapping = TimerTotal("mutation mapping")
+            self.tt_genotypes = TimerTotal("genotypes")
 
             with timer_block(f"processing records"):
-                for record in tqdm(self.panel_dict.values()):
-                    var_id = record.id
-                    pos = record.pos
-                    flipped = record.af > 0.5
-                    genotypes = None
-                    imputed = True
+                self._process_records_single_cpu()
 
-                    # FIXME discuss with Arni why var_id special case
-                    if var_id in snp_id_indexes:
-                        imputed = False
-                        var_idx = snp_id_indexes[var_id]
-                        # FIXME conversion to float required for np.round
-                        genotypes = np.array(self.target_snps[var_idx], dtype=float)
-                    else:
-                        # Scan for next snp index
-                        while next_snp_idx < self.num_snps and pos >= snp_positions[next_snp_idx]:
-                            next_snp_idx += 1
-
-                        # Extract required posteriors and interpolation weights
-                        if next_snp_idx == 0:
-                            site_posteriors = cached_posteriors[0]
-                        elif next_snp_idx == self.num_snps:
-                            site_posteriors = cached_posteriors[-1]
-                        else:
-                            # Compute weights for position based on snp positions
-                            bp_prev = snp_positions[next_snp_idx - 1]
-                            bp_next = snp_positions[next_snp_idx]
-                            assert bp_prev <= pos <= bp_next
-                            prev_wt = (pos - bp_prev) / (bp_next - bp_prev) if bp_next != bp_prev else 1
-                            next_wt = 1 - prev_wt
-
-                            # Provide quick lookup to prev and next targets
-                            prev_target = cached_posteriors[next_snp_idx - 1]
-                            next_target = cached_posteriors[next_snp_idx]
-                            site_posteriors = None
-
-                        mutation_mapping = None
-                        if mutation_container.is_mapped(var_id):
-                            mutation_mapping = mutation_container.get_mapping(var_id)
-
-                        genotypes = []
-                        carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
-
-                        for target_idx in range(n_target_haps):
-                            # Interpolate posteriors
-                            if site_posteriors:
-                                site_posterior = site_posteriors[target_idx]
-                            else:
-                                site_posterior = prev_wt * prev_target[target_idx] + next_wt * next_target[target_idx]
-
-                            # FIXME WIP block processing?
-                            if mutation_mapping:
-                                arg_mask = site_arg_probability(site_posterior, imputation_threads[target_idx], mutation_mapping, carriers, pos)
-                                site_posterior = site_posterior * arg_mask
-
-                            genotypes.append(np.sum(site_posterior, where=record.genotypes))
-
-                    genotypes = np.round(genotypes, decimals=3)
-                    assert np.min(genotypes) >= 0
-                    assert np.max(genotypes) <= 1
-
-                    vcf_writer.write_site(genotypes, record, imputed, chrom_num)
+            logger.info(self.tt_posteriors)
+            logger.info(self.tt_mutation_mapping)
+            logger.info(self.tt_genotypes)
 
 
     def _load_records_and_snps(self, panel: str, target: str, map: str, region: str):
@@ -447,20 +383,26 @@ class Impute:
             self.panel_dict = _memoize_vcf_region_records(panel, region)
             self.target_dict = _memoize_vcf_region_records(target, region)
 
-        with timer_block("collating snps"):
+        with timer_block("collating snps", False):
             target_variants = set(self.target_dict.keys())
             self.panel_snps = np.array([record.genotypes for record in self.panel_dict.values() if record.id in target_variants])
             self.target_snps = np.array([record.genotypes for record in self.target_dict.values()])
             assert len(self.panel_snps) == len(self.target_snps)
+            self.num_samples_panel = self.panel_snps.shape[1]
+            logger.info(f"Samples panel size {self.num_samples_panel}")
 
-        with timer_block("getting VCF positions"):
+        with timer_block("getting VCF positions", False):
             self.phys_pos_array = np.array([record.pos for record in self.target_dict.values()])
             map_bp, map_cm = read_map_gz(map)
             self.cm_pos_array = np.interp(self.phys_pos_array, map_bp, map_cm)
             self.num_snps = len(self.phys_pos_array)
+            logger.info(f"Pos array snps size {self.num_snps}")
 
 
     def _sparse_posteriors(self, demography, mutation_rate):
+        """
+        FIXME docstring
+        """
         sparse_sites = True
         use_hmm = False
         ne_times, ne_sizes = parse_demography(demography)
@@ -472,48 +414,166 @@ class Impute:
                             sparse_sites,
                             use_hmm=use_hmm)
 
-        logger.info("Building panel...")
-        for h in tqdm(self.panel_snps.transpose()):
-            bwt.insert(h)
+        with timer_block("building panel", False):
+            for h in tqdm(self.panel_snps.transpose(), mininterval=1):
+                bwt.insert(h)
 
         with timer_block("reference matching"):
             ref_matches = reference_matching(self.panel_snps, self.target_snps, self.cm_pos_array)
-            num_samples_panel = self.panel_snps.shape[1]
 
         mutation_rate = 0.0001
         cm_sizes = list(self.cm_pos_array[1:] - self.cm_pos_array[:-1])
         cm_sizes = np.array(cm_sizes + [cm_sizes[-1]])
         Ne = 20_000
-        recombination_rates = 1 - np.exp(-4 * Ne * 0.01 * cm_sizes / num_samples_panel)
+        recombination_rates = 1 - np.exp(-4 * Ne * 0.01 * cm_sizes / self.num_samples_panel)
 
         posteriors = []
         imputation_threads = []
         L = 16
-        logger.info("Doing posteriors...")
-        tt_impute = TimerTotal("impute")
-        tt_fwbw = TimerTotal("fwbw")
-        target_transpose = self.target_snps.transpose()
-        for i, h_target in tqdm(enumerate(target_transpose), total=len(target_transpose)):
-            with tt_impute:
-                # Imputation thread with divergence matching
-                imputation_thread = bwt.impute(list(h_target), L)
-                imputation_threads.append(imputation_thread)
-                matched_samples_viterbi = set([match_id for seg in imputation_thread for match_id in seg.ids])
+        with timer_block(f"posteriors"):
+            tt_impute = TimerTotal("PBWT impute")
+            tt_fwbw = TimerTotal("fwbw")
+            target_transpose = self.target_snps.transpose()
+            # FIXME double-check if total still needed
+            for i, h_target in tqdm(enumerate(target_transpose), total=len(target_transpose), mininterval=1):
+                with tt_impute:
+                    # Imputation thread with divergence matching
+                    imputation_thread = bwt.impute(list(h_target), L)
+                    imputation_threads.append(imputation_thread)
+                    matched_samples_viterbi = set([match_id for seg in imputation_thread for match_id in seg.ids])
 
-                # All locally sampled matches
-                matched_samples_matcher = (ref_matches[num_samples_panel + i])
+                    # All locally sampled matches
+                    matched_samples_matcher = (ref_matches[self.num_samples_panel + i])
 
-                # Union of the two match sets
-                matched_samples = np.array(list(matched_samples_viterbi.union(matched_samples_matcher)))
+                    # Union of the two match sets
+                    matched_samples = np.array(list(matched_samples_viterbi.union(matched_samples_matcher)))
 
-            with tt_fwbw:
-                posterior = fwbw(self.panel_snps[:, matched_samples], h_target[None, :], recombination_rates, mutation_rate)
-                sparse_posterior = sparsify_posterior(posterior, matched_samples, num_snps=self.num_snps, num_samples=num_samples_panel)
+                with tt_fwbw:
+                    posterior = fwbw(self.panel_snps[:, matched_samples], h_target[None, :], recombination_rates, mutation_rate)
+                    sparse_posterior = self._sparsify_posterior(posterior, matched_samples)
+                    posteriors.append(sparse_posterior)
 
-                assert sparse_posterior.shape == (self.num_snps, num_samples_panel)
-                posteriors.append(sparse_posterior)
+            logger.info(tt_impute)
+            logger.info(tt_fwbw)
 
-        logger.info(tt_impute)
-        logger.info(tt_fwbw)
+        self.posteriors = posteriors
+        self.imputation_threads = imputation_threads
 
-        return posteriors, imputation_threads
+
+    def _sparsify_posterior(self, posterior, matched_samples):
+        """
+        Expand to a compressed n_snps x n_samples matrix
+        """
+        assert posterior.shape == (self.num_snps, len(matched_samples))
+        matrix = lil_matrix((self.num_snps, self.num_samples_panel), dtype=np.float64)
+        posterior[posterior <= 1 / self.num_samples_panel] = 0
+        for i, p in enumerate(posterior):
+            assert np.sum(p) > 0
+            q = p / np.sum(p)
+            for j in np.nonzero(q)[0]:
+                matrix[i, matched_samples[j]] = q[j]
+        return csr_array(matrix)
+
+
+    def _init_step_snp(self):
+        """
+        FIXME docstring
+        """
+        self.snp_positions = [record.pos for record in self.target_dict.values()]
+        self.snp_id_indexes = {record.id: i for i, record in enumerate(self.target_dict.values())}
+        self.snp_idx = 0
+
+
+    def _next_step_snp(self, record):
+        """
+        FIXME docstring
+        """
+        pos = record.pos
+        flipped = record.af > 0.5
+        snp_idx = self.snp_idx
+
+        with self.tt_posteriors:
+            # Scan for next snp index
+            while snp_idx < self.num_snps and pos >= self.snp_positions[snp_idx]:
+                snp_idx += 1
+            self.snp_idx = snp_idx
+
+            # Explicit values for first and last entries
+            if snp_idx == 0:
+                return self.posteriors_snp_cache[0], None, None
+            elif snp_idx == self.num_snps:
+                return self.posteriors_snp_cache[-1], None, None
+
+            # Compute weights for position based on snp positions
+            bp_prev = self.snp_positions[snp_idx - 1]
+            bp_next = self.snp_positions[snp_idx]
+            assert bp_prev <= pos <= bp_next
+            prev_wt = (pos - bp_prev) / (bp_next - bp_prev) if bp_next != bp_prev else 1
+            next_wt = 1 - prev_wt
+
+            # Provide quick lookup to prev and next targets
+            prev_target = self.posteriors_snp_cache[snp_idx - 1]
+            next_target = self.posteriors_snp_cache[snp_idx]
+            site_posteriors = prev_wt * prev_target + next_wt * next_target
+
+            if self.mutation_container.is_mapped(record.id):
+                mutation_mapping = self.mutation_container.get_mapping(record.id)
+                carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
+                return site_posteriors, mutation_mapping, carriers
+
+            return site_posteriors, None, None
+
+
+    def _compute_genotypes(self, record, site_posteriors, mutation_mapping, carriers):
+        """
+        FIXME docstring
+        """
+        genotypes = []
+        for target_idx in range(self.n_target_haps):
+            site_posterior = site_posteriors[target_idx]
+            if mutation_mapping:
+                with self.tt_mutation_mapping:
+                    arg_prob = site_arg_probability(
+                        site_posterior,
+                        self.imputation_threads[target_idx],
+                        mutation_mapping,
+                        carriers,
+                        record.pos
+                    )
+                    site_posterior = site_posterior * arg_prob
+
+            with self.tt_genotypes:
+                genotypes.append(np.sum(site_posterior, where=record.genotypes))
+
+        genotypes = np.round(genotypes, decimals=3)
+        # FIXME needed in final version?
+        assert np.min(genotypes) >= 0
+        assert np.max(genotypes) <= 1
+        return genotypes
+
+
+    def _process_records_single_cpu(self):
+        """
+        FIXME docstring
+        """
+        for record in tqdm(self.panel_dict.values(), mininterval=1):
+            genotypes = None
+            imputed = True
+
+            if record.id in self.snp_id_indexes:
+                # FIXME Arni docs
+                imputed = False
+                var_idx = self.snp_id_indexes[record.id]
+                genotypes = np.array(self.target_snps[var_idx], dtype=float)
+            else:
+                # FIXME Arni docs
+                site_posteriors, mutation_mapping, carriers = self._next_step_snp(record)
+
+                genotypes = self._compute_genotypes(
+                    record,
+                    site_posteriors,
+                    mutation_mapping,
+                    carriers
+                )
+
+            self.vcf_writer.write_site(genotypes, record, imputed, self.chrom_num)
