@@ -86,7 +86,7 @@ def read_map_gz(map_gz):
 
     Note that this is in the shapeit5 format not like the other maps we've been using
     """
-    maps = pd.read_table(map_gz, sep='\s+')
+    maps = pd.read_table(map_gz, sep=r"\s+")
     cm_pos = maps.cM.values.astype(np.float64)
     phys_pos = maps.pos.values.astype(np.float64)
     for i in range(1, len(cm_pos)):
@@ -97,7 +97,7 @@ def read_map_gz(map_gz):
 
 # FIXME move into class
 def parse_demography(demography):
-    d = pd.read_table(demography, sep='\s+', header=None)
+    d = pd.read_table(demography, sep=r"\s+", header=None)
     return list(d[0]), list(d[1])
 
 
@@ -108,6 +108,7 @@ def reference_matching(haps_panel, haps_target, cm_pos):
     matcher = ImputationMatcher(num_reference, num_target, cm_pos, 0.02, 4)
     all_genotypes = np.concatenate([haps_panel, haps_target], axis=1)
     for g in tqdm(all_genotypes, mininterval=1):
+        # FIXME indexing by bool is not allowed, either change cpp or array
         matcher.process_site(g)
     return matcher.get_matches()
 
