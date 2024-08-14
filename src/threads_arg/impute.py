@@ -488,6 +488,10 @@ class Impute:
         """
         FIXME docstring
         """
+        site_posteriors = None
+        mutation_mapping = None
+        carriers = None
+
         pos = record.pos
         flipped = record.af > 0.5
         snp_idx = self.snp_idx
@@ -500,28 +504,27 @@ class Impute:
 
             # Explicit values for first and last entries
             if snp_idx == 0:
-                return self.posteriors_snp_cache[0], None, None
+                site_posteriors = self.posteriors_snp_cache[0]
             elif snp_idx == self.num_snps:
-                return self.posteriors_snp_cache[-1], None, None
+                site_posteriors = self.posteriors_snp_cache[-1]
+            else:
+                # Compute weights for position based on snp positions
+                bp_prev = self.snp_positions[snp_idx - 1]
+                bp_next = self.snp_positions[snp_idx]
+                assert bp_prev <= pos <= bp_next
+                prev_wt = (pos - bp_prev) / (bp_next - bp_prev) if bp_next != bp_prev else 1
+                next_wt = 1 - prev_wt
 
-            # Compute weights for position based on snp positions
-            bp_prev = self.snp_positions[snp_idx - 1]
-            bp_next = self.snp_positions[snp_idx]
-            assert bp_prev <= pos <= bp_next
-            prev_wt = (pos - bp_prev) / (bp_next - bp_prev) if bp_next != bp_prev else 1
-            next_wt = 1 - prev_wt
-
-            # Provide quick lookup to prev and next targets
-            prev_target = self.posteriors_snp_cache[snp_idx - 1]
-            next_target = self.posteriors_snp_cache[snp_idx]
-            site_posteriors = prev_wt * prev_target + next_wt * next_target
+                # Provide quick lookup to prev and next targets
+                prev_target = self.posteriors_snp_cache[snp_idx - 1]
+                next_target = self.posteriors_snp_cache[snp_idx]
+                site_posteriors = prev_wt * prev_target + next_wt * next_target
 
             if self.mutation_container.is_mapped(record.id):
                 mutation_mapping = self.mutation_container.get_mapping(record.id)
                 carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
-                return site_posteriors, mutation_mapping, carriers
 
-            return site_posteriors, None, None
+            return site_posteriors, mutation_mapping, carriers
 
 
     def _compute_genotypes(self, record, site_posteriors, mutation_mapping, carriers):
