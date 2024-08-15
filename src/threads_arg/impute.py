@@ -113,7 +113,7 @@ def reference_matching(haps_panel, haps_target, cm_pos):
     return matcher.get_matches()
 
 
-def active_site_arg_probability(
+def active_site_arg_delta(
     active_site_posterior,
     active_indexes,
     imputation_thread,
@@ -128,14 +128,14 @@ def active_site_arg_probability(
     This is described under "Threading-based imputation" in the Methods section
     of the paper.
     """
+    delta = 0
+
     # Find the nearest segment in imputation thread based on position
     seg_idx = bisect_left(imputation_thread[1:], record.pos, key=lambda x: x.seg_start)
     segment = imputation_thread[seg_idx]
 
-    active_arg_probability = np.ones(active_site_posterior.shape)
-
     for s_id, height in zip(segment.ids, segment.ages):
-        # Reject anything that is not active, i.e. not True in record.genotypes
+        # Reject anything that is not active (i.e. not True in record.genotypes)
         # and its index in active_site_posterior array
         if s_id in active_indexes:
             active_idx = active_indexes[s_id]
@@ -144,9 +144,16 @@ def active_site_arg_probability(
                 mut_lower, mut_upper = mutation_mapping.get_boundaries(s_id)
                 mut_height = (mut_upper + mut_lower) / 2
                 lam = 2. / height
-                active_arg_probability[active_idx] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
+                lam_mut = lam * mut_height
+                arg_prob = 1 - np.exp(-lam_mut) * (1 + lam_mut)
 
-    return active_arg_probability
+                # Outside this function, the delta is applied to a pre-computed
+                # sum of active site posteriors, so (arg_prob - 1) effectively
+                # removes this sites contribution from that previously-summed
+                # value in order to re-apply the probability-adjusted version.
+                delta += active_site_posterior[active_idx] * (arg_prob - 1)
+
+    return delta
 
 
 class MutationMap:
@@ -549,23 +556,21 @@ class Impute:
         """
         FIXME docstring
         """
-        genotypes = []
-        for target_idx in range(self.n_target_haps):
-            active_site_posterior = active_site_posteriors[target_idx]
-            if mutation_mapping:
-                with self.tt_mutation_mapping:
-                    arg_prob = active_site_arg_probability(
-                        active_site_posterior,
-                        active_indexes,
-                        self.imputation_threads[target_idx],
-                        mutation_mapping,
-                        carriers,
-                        record
-                    )
-                    active_site_posterior = active_site_posterior * arg_prob
+        def compute_delta(active_site_posterior, i):
+            return active_site_arg_delta(
+                active_site_posterior,
+                active_indexes,
+                self.imputation_threads[i],
+                mutation_mapping,
+                carriers,
+                record
+            )
 
-            with self.tt_genotypes:
-                genotypes.append(np.sum(active_site_posterior))
+        genotypes = np.array([np.sum(asp) for asp in active_site_posteriors])
+        if mutation_mapping:
+            with self.tt_mutation_mapping:
+                deltas = np.array([compute_delta(asp, i) for i, asp in enumerate(active_site_posteriors)])
+                genotypes += deltas
 
         genotypes = np.round(genotypes, decimals=3)
         assert np.min(genotypes) >= 0
