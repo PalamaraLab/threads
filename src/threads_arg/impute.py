@@ -108,7 +108,6 @@ def reference_matching(haps_panel, haps_target, cm_pos):
     matcher = ImputationMatcher(num_reference, num_target, cm_pos, 0.02, 4)
     all_genotypes = np.concatenate([haps_panel, haps_target], axis=1)
     for g in tqdm(all_genotypes, mininterval=1):
-        # FIXME indexing by bool is not allowed, either change cpp or array
         matcher.process_site(g)
     return matcher.get_matches()
 

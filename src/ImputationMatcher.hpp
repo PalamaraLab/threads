@@ -29,7 +29,7 @@ public:
   ImputationMatcher(int _n_ref, int _n_target, const std::vector<double>& _genetic_positions,
                     double _query_interval_size, int _neighborhood_size);
 
-  void process_site(const std::vector<int>& genotype);
+  void process_site(const std::vector<bool>& genotype);
   const std::unordered_map<int, std::unordered_set<int>>& get_matches() const;
   const std::vector<int>& get_sorting() const;
 
