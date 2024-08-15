@@ -213,9 +213,6 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
     std::cerr << "Number of input markers does not match map.\n";
     exit(1);
   }
-  if ((num_samples + 1) % 100 == 0) {
-    std::cout << "Inserting haplotype number " << num_samples + 1 << std::endl;
-  }
   int insert_index = num_samples;
   ID_map[ID] = insert_index;
 
