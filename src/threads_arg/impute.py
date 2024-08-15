@@ -11,6 +11,7 @@ from scipy.sparse import csr_array, lil_matrix
 from datetime import datetime
 from typing import Dict, Tuple, List
 from dataclasses import dataclass
+from bisect import bisect_left
 
 from .fwbw import fwbw
 from .utils import timer_block, TimerTotal
@@ -24,7 +25,7 @@ PROCESS_COUNT = len(os.sched_getaffinity(0))
 @dataclass
 class RecordMemo:
     """
-    Memo of values FIXME allele frequency
+    Memo of values FIXME allele frequency, alt docs
     """
     id: int
     genotypes: None
@@ -112,8 +113,14 @@ def reference_matching(haps_panel, haps_target, cm_pos):
     return matcher.get_matches()
 
 
-# FIXME move into class
-def site_arg_probability(site_posterior, imputation_thread, mutation_mapping, carriers, pos):
+def active_site_arg_probability(
+    active_site_posterior,
+    active_indexes,
+    imputation_thread,
+    mutation_mapping,
+    carriers,
+    record
+):
     """
     For each target sequence, the LS-fwbw finds out which of the panel sequences
     are most closely related to the target, rather than weighing by posterior.
@@ -121,27 +128,25 @@ def site_arg_probability(site_posterior, imputation_thread, mutation_mapping, ca
     This is described under "Threading-based imputation" in the Methods section
     of the paper.
     """
-    arg_probability = np.ones(site_posterior.shape)
-    num_segs = len(imputation_thread)
-    segment = None
-    if pos < imputation_thread[0].seg_start:
-        segment = imputation_thread[0]
-    else:
-        # FIXME optimise with binary search?
-        seg_idx = 0
-        while seg_idx < num_segs - 1 and imputation_thread[seg_idx + 1].seg_start < pos:
-            seg_idx += 1
-        segment = imputation_thread[seg_idx]
+    # Find the nearest segment in imputation thread based on position
+    seg_idx = bisect_left(imputation_thread[1:], record.pos, key=lambda x: x.seg_start)
+    segment = imputation_thread[seg_idx]
+
+    active_arg_probability = np.ones(active_site_posterior.shape)
 
     for s_id, height in zip(segment.ids, segment.ages):
-        # FIXME Arni check, possible to optimise by only calculating s_id where=record.genotypes
-        if site_posterior[s_id] > 0 and s_id in carriers:
-            mut_lower, mut_upper = mutation_mapping.get_boundaries(s_id)
-            mut_height = (mut_upper + mut_lower) / 2
-            lam = 2. / height
-            arg_probability[s_id] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
+        # Reject anything that is not active, i.e. not True in record.genotypes
+        # and its index in active_site_posterior array
+        if s_id in active_indexes:
+            active_idx = active_indexes[s_id]
 
-    return arg_probability
+            if active_site_posterior[active_idx] > 0 and s_id in carriers:
+                mut_lower, mut_upper = mutation_mapping.get_boundaries(s_id)
+                mut_height = (mut_upper + mut_lower) / 2
+                lam = 2. / height
+                active_arg_probability[active_idx] = 1 - np.exp(-lam * mut_height) * (1 + lam * mut_height)
+
+    return active_arg_probability
 
 
 class MutationMap:
@@ -368,7 +373,7 @@ class Impute:
             self.tt_genotypes = TimerTotal("genotypes")
 
             with timer_block(f"processing records"):
-                self._process_records_single_cpu()
+                self._process_and_write()
 
             logger.info(self.tt_posteriors)
             logger.info(self.tt_mutation_mapping)
@@ -496,6 +501,9 @@ class Impute:
         flipped = record.af > 0.5
         snp_idx = self.snp_idx
 
+        def only_active(posteriors):
+            return posteriors[:,record.genotypes]
+
         with self.tt_posteriors:
             # Scan for next snp index
             while snp_idx < self.num_snps and pos >= self.snp_positions[snp_idx]:
@@ -504,9 +512,9 @@ class Impute:
 
             # Explicit values for first and last entries
             if snp_idx == 0:
-                site_posteriors = self.posteriors_snp_cache[0]
+                site_posteriors = only_active(self.posteriors_snp_cache[0])
             elif snp_idx == self.num_snps:
-                site_posteriors = self.posteriors_snp_cache[-1]
+                site_posteriors = only_active(self.posteriors_snp_cache[-1])
             else:
                 # Compute weights for position based on snp positions
                 bp_prev = self.snp_positions[snp_idx - 1]
@@ -516,49 +524,61 @@ class Impute:
                 next_wt = 1 - prev_wt
 
                 # Provide quick lookup to prev and next targets
-                prev_target = self.posteriors_snp_cache[snp_idx - 1]
-                next_target = self.posteriors_snp_cache[snp_idx]
+                prev_target = only_active(self.posteriors_snp_cache[snp_idx - 1])
+                next_target = only_active(self.posteriors_snp_cache[snp_idx])
                 site_posteriors = prev_wt * prev_target + next_wt * next_target
 
             if self.mutation_container.is_mapped(record.id):
                 mutation_mapping = self.mutation_container.get_mapping(record.id)
                 carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
 
-            return site_posteriors, mutation_mapping, carriers
+            active_positions = np.where(record.genotypes)[0]
+            active_indexes = {pos: i for i, pos in enumerate(active_positions)}
+
+            return site_posteriors, mutation_mapping, carriers, active_indexes
 
 
-    def _compute_genotypes(self, record, site_posteriors, mutation_mapping, carriers):
+    def _compute_genotypes(
+        self,
+        record,
+        active_site_posteriors,
+        active_indexes,
+        mutation_mapping,
+        carriers
+    ):
         """
         FIXME docstring
         """
         genotypes = []
         for target_idx in range(self.n_target_haps):
-            site_posterior = site_posteriors[target_idx]
+            active_site_posterior = active_site_posteriors[target_idx]
             if mutation_mapping:
                 with self.tt_mutation_mapping:
-                    arg_prob = site_arg_probability(
-                        site_posterior,
+                    arg_prob = active_site_arg_probability(
+                        active_site_posterior,
+                        active_indexes,
                         self.imputation_threads[target_idx],
                         mutation_mapping,
                         carriers,
-                        record.pos
+                        record
                     )
-                    site_posterior = site_posterior * arg_prob
+                    active_site_posterior = active_site_posterior * arg_prob
 
             with self.tt_genotypes:
-                genotypes.append(np.sum(site_posterior, where=record.genotypes))
+                genotypes.append(np.sum(active_site_posterior))
 
         genotypes = np.round(genotypes, decimals=3)
-        # FIXME needed in final version?
         assert np.min(genotypes) >= 0
         assert np.max(genotypes) <= 1
         return genotypes
 
 
-    def _process_records_single_cpu(self):
+    def _process_and_write(self):
         """
         FIXME docstring
         """
+        tt_write_vcf = TimerTotal("write vcf")
+
         for record in tqdm(self.panel_dict.values(), mininterval=1):
             genotypes = None
             imputed = True
@@ -570,13 +590,17 @@ class Impute:
                 genotypes = np.array(self.target_snps[var_idx], dtype=float)
             else:
                 # FIXME Arni docs
-                site_posteriors, mutation_mapping, carriers = self._next_step_snp(record)
+                active_site_posteriors, mutation_mapping, carriers, active_indexes = self._next_step_snp(record)
 
                 genotypes = self._compute_genotypes(
                     record,
-                    site_posteriors,
+                    active_site_posteriors,
+                    active_indexes,
                     mutation_mapping,
-                    carriers
+                    carriers,
                 )
 
-            self.vcf_writer.write_site(genotypes, record, imputed, self.chrom_num)
+            with tt_write_vcf:
+                self.vcf_writer.write_site(genotypes, record, imputed, self.chrom_num)
+
+        logger.info(tt_write_vcf)
