@@ -12,9 +12,9 @@ def dummy_threading_instructions():
         "samples": np.array([0, 1, 2]),
         "positions": np.array([4, 6, 8, 10, 15]),
         "arg_range": np.array([4, 20]),
-        "mutations": [np.array([4, 6, 10]),
-                      np.array([4, 8, 15]),
-                      np.array([6, 10])]
+        "mutations": [np.array([0, 1, 3]),
+                      np.array([0, 2, 4]),
+                      np.array([1, 3])]
     }
 
 def threading_instructions_are_equal(t1, t2):
@@ -61,11 +61,11 @@ def test_slice():
                     (np.array([4]), np.array([0]), np.array([2.5])),
                     (np.array([4]), np.array([0]), np.array([1.0]))],
         "samples": np.array([0, 1, 2]),
-        "positions": np.array([4, 6]),
+        "positions": np.array([4, 6, 8, 10, 15]),
         "arg_range": np.array([4, 7]),
-        "mutations": [np.array([4, 6]),
-                      np.array([4]),
-                      np.array([6])]
+        "mutations": [np.array([0, 1]),
+                      np.array([0]),
+                      np.array([1])]
     }
     assert threading_instructions_are_equal(threads_arg.utils.slice_threading_instructions(tt, 4, 7), expected)
    
@@ -75,11 +75,11 @@ def test_slice():
                     (np.array([4, 8]), np.array([0, 0]), np.array([2.5, 3.0])),
                     (np.array([4]), np.array([0]), np.array([1.0]))],
         "samples": np.array([0, 1, 2]),
-        "positions": np.array([4, 6, 8]),
+        "positions": np.array([4, 6, 8, 10, 15]),
         "arg_range": np.array([4, 8]),
-        "mutations": [np.array([4, 6]),
-                    np.array([4, 8]),
-                    np.array([6])]
+        "mutations": [np.array([0, 1]),
+                    np.array([0, 2]),
+                    np.array([1])]
     }
     assert threading_instructions_are_equal(threads_arg.utils.slice_threading_instructions(tt, 4, 8), expected)
 
@@ -89,11 +89,11 @@ def test_slice():
                     (np.array([6, 8]), np.array([0, 0]), np.array([2.5, 3.0])),
                     (np.array([6, 10, 15]), np.array([0, 1, 0]), np.array([1.0, 3.0, 6.0]))],
         "samples": np.array([0, 1, 2]),
-        "positions": np.array([6, 8, 10, 15]),
+        "positions": np.array([4, 6, 8, 10, 15]),
         "arg_range": np.array([6, 20]),
-        "mutations": [np.array([6, 10]),
-                    np.array([8, 15]),
-                    np.array([6, 10])]
+        "mutations": [np.array([1, 3]),
+                    np.array([2, 4]),
+                    np.array([1, 3])]
     }
     assert threading_instructions_are_equal(threads_arg.utils.slice_threading_instructions(tt, 6, 20), expected)
 
@@ -103,10 +103,10 @@ def test_slice():
                     (np.array([7, 8]), np.array([0, 0]), np.array([2.5, 3.0])),
                     (np.array([7, 10, 15]), np.array([0, 1, 0]), np.array([1.0, 3.0, 6.0]))],
         "samples": np.array([0, 1, 2]),
-        "positions": np.array([8, 10, 15]),
+        "positions": np.array([4, 6, 8, 10, 15]),
         "arg_range": np.array([7, 19]),
-        "mutations": [np.array([10]),
-                    np.array([8, 15]),
-                    np.array([10])]
+        "mutations": [np.array([3]),
+                    np.array([2, 4]),
+                    np.array([3])]
     }
     assert threading_instructions_are_equal(threads_arg.utils.slice_threading_instructions(tt, 7, 19), expected)

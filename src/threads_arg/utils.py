@@ -18,6 +18,7 @@ import os
 import numpy as np
 import h5py
 import pandas as pd
+import bisect
 import warnings
 
 def decompress_threads(threads):
@@ -79,11 +80,13 @@ def slice_threading_instructions(threading_data, start_pos, end_pos):
     new_threading_instructions = []
     new_mutations = []
     new_arg_range = [start_pos, end_pos]
+    start_idx = bisect.bisect_left(positions, start_pos)
+    end_idx = bisect.bisect_right(positions, end_pos)
     new_samples = threading_data["samples"]
-    new_positions = positions[(start_pos <= positions) & (positions <= end_pos)]
+    new_positions = positions
 
     for muts, (bps, ids, ages) in zip(threading_data["mutations"], threading_data["threads"]):
-        new_mutations.append(muts[(start_pos <= muts) & (muts <= end_pos)])
+        new_mutations.append(muts[(start_idx <= muts) & (muts < end_idx)])
 
         if len(bps) == 0:
             new_threading_instructions.append((np.array([]), np.array([]), np.array([])))

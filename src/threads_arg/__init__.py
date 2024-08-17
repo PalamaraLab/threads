@@ -15,3 +15,4 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from threads_arg_python_bindings import *
+from .utils import slice_threading_instructions, decompress_threads
