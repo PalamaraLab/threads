@@ -197,13 +197,13 @@ public:
   HMM* hmm = nullptr;
 
   // The dynamic reference panel
-  std::vector<std::vector<std::unique_ptr<Node>>> panel;
+  std::vector<std::vector<Node>> panel;
 
 private:
   // To access the linked lists in each column
-  std::vector<std::unique_ptr<Node>> tops;
-  std::vector<std::unique_ptr<Node>> bottoms;
-  std::vector<std::unique_ptr<TracebackState>> traceback_states;
+  std::vector<Node> tops;
+  std::vector<Node> bottoms;
+  std::vector<TracebackState> traceback_states;
 
   // Burn-in quantities
   int trim_pos_start_idx = 0;

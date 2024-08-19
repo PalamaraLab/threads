@@ -115,19 +115,19 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
 
   // Initialize both ends of the linked-list columns
   for (int i = 0; i < num_sites + 1; i++) {
-    tops.emplace_back(std::make_unique<Node>(-1, i, 0));
-    bottoms.emplace_back(std::make_unique<Node>(-1, i, 1));
-    Node* top_i = tops.back().get();
-    Node* bottom_i = bottoms.back().get();
+    tops.emplace_back(-1, i, 0);
+    bottoms.emplace_back(-1, i, 1);
+    Node* top_i = &tops.back();
+    Node* bottom_i = &bottoms.back();
 
     top_i->below = bottom_i;
     bottom_i->above = top_i;
 
     if (i > 0) {
-      tops[i - 1]->w[0] = top_i;
-      tops[i - 1]->w[1] = top_i;
-      bottoms[i - 1]->w[0] = bottom_i;
-      bottoms[i - 1]->w[1] = bottom_i;
+      tops[i - 1].w[0]  = top_i;
+      tops[i - 1].w[1] = top_i;
+      bottoms[i - 1].w[0] = bottom_i;
+      bottoms[i - 1].w[1] = bottom_i;
     }
   }
 
@@ -192,7 +192,7 @@ Node* ThreadsFastLS::extend_node(Node* t, bool g, int i) {
   if (!g && t->w[g]->sample_ID == -1) {
     // Logic is that if we're at the bottom and have a "0" genotype we jump up to last
     // 0-spot in next column
-    t_next = tops[i]->below->w[1];
+    t_next = tops[i].below->w[1];
   }
   else {
     t_next = t->w[g];
@@ -216,11 +216,11 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   int insert_index = num_samples;
   ID_map[ID] = insert_index;
 
-  panel.emplace_back(std::vector<std::unique_ptr<Node>>(num_sites + 1));
+  panel.emplace_back(num_sites + 1);
 
-  Node* t0 = bottoms[0].get();
-  panel[ID_map.at(ID)][0] = std::make_unique<Node>(ID, 0, genotype[0]);
-  Node* z0 = panel[ID_map.at(ID)][0].get();
+  Node* t0 = &bottoms[0];
+  panel[insert_index][0] = Node(ID, 0, genotype[0]);
+  Node* z0 = &panel[insert_index][0];
 
   // Inserts z0 above t0
   t0->insert_above(z0);
@@ -234,9 +234,9 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   for (int k = 0; k < num_sites; k++) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
-    // Add current thingy to panel
-    panel[ID_map.at(ID)][k + 1] = std::make_unique<Node>(ID, k + 1, next_genotype);
-    z_next = panel[ID_map.at(ID)][k + 1].get();
+    // Add current thingy to panel  FIXME
+    panel[insert_index][k + 1] = Node(ID, k + 1, next_genotype);
+    z_next = &panel[insert_index][k + 1];
     tmp = z_k->above;
     while (tmp->sample_ID != -1 && tmp->genotype != g_k) {
       tmp->w[g_k] = z_next;
@@ -262,12 +262,12 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   for (int k = num_sites; k >= 0; k--) {
     z_dtmp = std::min(z_dtmp, k);
     b_dtmp = std::min(b_dtmp, k);
-    z_k = panel[ID_map.at(ID)][k].get();
+    z_k = &panel[insert_index][k];
     int above_ID = z_k->above->sample_ID;
     int below_ID = z_k->below->sample_ID;
     if (above_ID != -1) {
       while (z_dtmp > 0 &&
-             genotype[z_dtmp - 1] == panel[ID_map.at(above_ID)][z_dtmp - 1]->genotype) {
+             genotype[z_dtmp - 1] == panel[ID_map.at(above_ID)][z_dtmp - 1].genotype) {
         z_dtmp--;
       }
     }
@@ -275,7 +275,7 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
     z_k->divergence = z_dtmp;
     if (k > 0 && below_ID != -1) {
       while (b_dtmp > 0 &&
-             genotype[b_dtmp - 1] == panel[ID_map.at(below_ID)][b_dtmp - 1]->genotype) {
+             genotype[b_dtmp - 1] == panel[ID_map.at(below_ID)][b_dtmp - 1].genotype) {
         b_dtmp--;
       }
       // Only set this for real nodes
@@ -285,13 +285,13 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
 }
 
 void ThreadsFastLS::remove(int ID) {
-  Node* s = panel[ID_map.at(ID)][0].get();
+  Node* s = &panel[ID_map.at(ID)][0];
   // The last sequence in the panel
-  int last_ID = panel[num_samples - 1][0]->sample_ID;
+  int last_ID = panel[num_samples - 1][0].sample_ID;
 
   for (int k = 0; k < num_sites; k++) {
     // Get allele
-    bool s_allele = panel[ID_map.at(ID)][k]->genotype;
+    bool s_allele = panel[ID_map.at(ID)][k].genotype;
 
     // Update w-values
     Node* tmp = s->above;
@@ -318,7 +318,7 @@ void ThreadsFastLS::remove(int ID) {
   // If needed, move last sequence to replace the one we just deleted.
   if (ID_map.at(ID) != num_samples - 1) {
     for (int k = 0; k <= num_sites; k++) {
-      // Hope this is correct
+      // Hope this is correct FIXME REVIEW
       panel[ID_map.at(ID)][k] = std::move(panel[num_samples - 1][k]);
     }
     ID_map.at(last_ID) = ID_map.at(ID);
@@ -330,7 +330,7 @@ void ThreadsFastLS::remove(int ID) {
 
 void ThreadsFastLS::print_sorting() const {
   for (int j = 0; j < num_sites + 1; ++j) {
-    Node* node = tops[j].get();
+    const Node* node = &tops[j];
     while (node != nullptr) {
       if (node->sample_ID >= 0) {
         std::cout << node->sample_ID << " ";
@@ -361,10 +361,9 @@ std::pair<TracebackState*, Node*> ThreadsFastLS::fastLS(const std::vector<bool>&
   else {
     std::tie(rho, rho_c) = recombination_penalties_correct();
   }
-  // traceback_states.emplace_back(std::make_unique<TracebackState>(0, -1, nullptr));
-  traceback_states.emplace_back(std::make_unique<TracebackState>(0, nullptr, nullptr));
+  traceback_states.emplace_back(0, nullptr, nullptr);
   std::vector<State> current_states;
-  current_states.emplace_back(bottoms[0].get(), 0, traceback_states.back().get());
+  current_states.emplace_back(&bottoms[0], 0, &traceback_states.back());
 
   // Just like with insertion, we start at the bottom of the first column.
   // z holds the best current score
@@ -436,9 +435,8 @@ std::pair<TracebackState*, Node*> ThreadsFastLS::fastLS(const std::vector<bool>&
     // Add the new recombinant state to the stack (we never enter this clause on the first
     // iteration)
     double recombinant_score = z - rho_c[i] + rho[i];
-    traceback_states.emplace_back(std::make_unique<TracebackState>(
-        i + 1, best_extension.below->above, best_extension.traceback));
-    new_states.emplace_back(bottoms[i + 1].get(), recombinant_score, traceback_states.back().get());
+    traceback_states.emplace_back(i + 1, best_extension.below->above, best_extension.traceback);
+    new_states.emplace_back(&bottoms[i + 1], recombinant_score, &traceback_states.back());
     if (recombinant_score < z) {
       best_extension = new_states.back();
       z = recombinant_score;
@@ -486,12 +484,12 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
       sparse_sites ? recombination_penalties() : recombination_penalties_correct();
 
   // Initialize traceback states
-  traceback_states.emplace_back(std::make_unique<TracebackState>(0, nullptr, nullptr));
+  traceback_states.emplace_back(0, nullptr, nullptr);
   // Initialize the list of current state-pairs
   // For haploids we have a list of states, here we have pairs
   std::vector<StatePair> current_pairs;
-  current_pairs.emplace_back(bottoms[0].get(), bottoms[0].get(), 0, traceback_states.back().get(),
-                             traceback_states.back().get());
+  current_pairs.emplace_back(&bottoms[0], &bottoms[0], 0, &traceback_states.back(),
+                             &traceback_states.back());
 
   // Just like with insertion, we start at the bottom of the first column.
   // z holds the best current score for pairs and individual sequences
@@ -899,19 +897,17 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
           std::abs(new_local_min.at(key_a) - p.score) < 0.0001) {
         already_recombined.insert(key_a);
         // Best a-state, so we recombine b
-        traceback_states.emplace_back(
-            std::make_unique<TracebackState>(i + 1, p.below_b->above, p.traceback_b));
-        rec_pairs.emplace_back(p.below_a, bottoms[i + 1].get(), recombinant_score, p.traceback_a,
-                               traceback_states.back().get());
+        traceback_states.emplace_back(i + 1, p.below_b->above, p.traceback_b);
+        rec_pairs.emplace_back(p.below_a, &bottoms[i + 1], recombinant_score, p.traceback_a,
+                               &traceback_states.back());
       }
       if (!already_recombined.count(key_b) &&
           std::abs(new_local_min.at(key_b) - p.score) < 0.0001) {
         already_recombined.insert(key_b);
         // Best b-state, so we recombine a
-        traceback_states.emplace_back(
-            std::make_unique<TracebackState>(i + 1, p.below_a->above, p.traceback_a));
-        rec_pairs.emplace_back(bottoms[i + 1].get(), p.below_b, recombinant_score,
-                               traceback_states.back().get(), p.traceback_b);
+        traceback_states.emplace_back(i + 1, p.below_a->above, p.traceback_a);
+        rec_pairs.emplace_back(&bottoms[i + 1], p.below_b, recombinant_score,
+                               &traceback_states.back(), p.traceback_b);
       }
     }
 
@@ -920,19 +916,17 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
         *(std::min_element(new_pairs.begin(), new_pairs.end(),
                            [](const auto& p1, const auto& p2) { return p1.score < p2.score; }));
     double double_recombinant_score = z - 2 * rho_c[i] + 2 * rho[i];
-    traceback_states.emplace_back(
-        std::make_unique<TracebackState>(i + 1, best_pair.below_a->above, best_pair.traceback_a));
-    traceback_states.emplace_back(
-        std::make_unique<TracebackState>(i + 1, best_pair.below_b->above, best_pair.traceback_b));
+    traceback_states.emplace_back(i + 1, best_pair.below_a->above, best_pair.traceback_a);
+    traceback_states.emplace_back(i + 1, best_pair.below_b->above, best_pair.traceback_b);
 
     // Insert single recombination states
     for (auto p : rec_pairs) {
       new_pairs.push_back(p);
     }
     // Insert double recombination state
-    new_pairs.emplace_back(bottoms[i + 1].get(), bottoms[i + 1].get(), double_recombinant_score,
-                           traceback_states[traceback_states.size() - 2].get(),
-                           traceback_states.back().get());
+    new_pairs.emplace_back(&bottoms[i + 1], &bottoms[i + 1], double_recombinant_score,
+                           &traceback_states[traceback_states.size() - 2],
+                           &traceback_states.back());
 
     if (double_recombinant_score < z) {
       best_pair = new_pairs.back();
@@ -1081,7 +1075,7 @@ ThreadsFastLS::traceback_impute(std::vector<bool>& genotypes, TracebackState* tb
 bool ThreadsFastLS::extensible_by(State& s, const Node* t_next, const bool g, const int i) {
   int next_above_candidate = t_next->above->sample_ID;
 
-  if (next_above_candidate == -1 || g != panel[ID_map.at(next_above_candidate)][i]->genotype) {
+  if (next_above_candidate == -1 || g != panel[ID_map.at(next_above_candidate)][i].genotype) {
     // This case take care of non-segregating sites with the opposite allele in the panel
     return false;
   }
@@ -1467,7 +1461,7 @@ bool ThreadsFastLS::genotype_interval_match(const int id1, const int id2, const 
     return false;
   }
   for (int i = start; i < end; i++) {
-    if (panel[ID_map.at(id1)][i]->genotype != panel[ID_map.at(id2)][i]->genotype) {
+    if (panel[ID_map.at(id1)][i].genotype != panel[ID_map.at(id2)][i].genotype) {
       return false;
     }
   }
@@ -1481,7 +1475,7 @@ std::pair<int, int> ThreadsFastLS::overflow_region(const std::vector<bool>& geno
   int overlap_end = segment_end;
 
   while (overlap_start > 0) {
-    if (genotypes[overlap_start - 1] == panel[ID_map.at(sample_id)][overlap_start - 1]->genotype) {
+    if (genotypes[overlap_start - 1] == panel[ID_map.at(sample_id)][overlap_start - 1].genotype) {
       overlap_start--;
     }
     else {
@@ -1490,7 +1484,7 @@ std::pair<int, int> ThreadsFastLS::overflow_region(const std::vector<bool>& geno
   }
 
   while (overlap_end < num_sites) {
-    if (genotypes[overlap_end] == panel[ID_map.at(sample_id)][overlap_end]->genotype) {
+    if (genotypes[overlap_end] == panel[ID_map.at(sample_id)][overlap_end].genotype) {
       overlap_end++;
     }
     else {
@@ -1513,8 +1507,8 @@ std::vector<bool> ThreadsFastLS::fetch_het_hom_sites(const int id1, const int id
   }
   std::vector<bool> het_hom_sites(end - start);
   for (int i = start; i < end; i++) {
-    bool g1 = panel[ID_map.at(id1)][i]->genotype;
-    bool g2 = panel[ID_map.at(id2)][i]->genotype;
+    bool g1 = panel[ID_map.at(id1)][i].genotype;
+    bool g2 = panel[ID_map.at(id2)][i].genotype;
     het_hom_sites[i - start] = (g1 != g2);
   }
   return het_hom_sites;
@@ -1534,8 +1528,8 @@ ThreadsFastLS::het_sites_from_thread(const int focal_ID, const std::vector<int> 
     int target_ID = target_IDs[seg_i][0];
     while (segment_start <= physical_positions[site_i] &&
            physical_positions[site_i] < segment_end && site_i < num_sites) {
-      if (panel[ID_map.at(focal_ID)][site_i]->genotype !=
-          panel[ID_map.at(target_ID)][site_i]->genotype) {
+      if (panel[ID_map.at(focal_ID)][site_i].genotype !=
+          panel[ID_map.at(target_ID)][site_i].genotype) {
         het_sites.push_back(static_cast<int>(physical_positions[site_i]));
       }
       site_i++;

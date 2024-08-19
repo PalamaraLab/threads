@@ -23,6 +23,7 @@
 class Node {
 public:
   // Constructors
+  Node() = default;
   Node(int sample_ID, int divergence, bool genotype);
 
   // Node movers-arounders

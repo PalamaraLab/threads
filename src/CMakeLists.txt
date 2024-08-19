@@ -89,7 +89,7 @@ if(PYTHON_BINDINGS)
     target_link_libraries(threads_arg_python_bindings
         PRIVATE
             threads_arg
-            project_warnings
+            # project_warnings disabled for pybind as they are currently noisy
     )
 
     install(TARGETS threads_arg_python_bindings LIBRARY DESTINATION .)

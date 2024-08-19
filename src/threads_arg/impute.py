@@ -428,7 +428,7 @@ class Impute:
 
         with timer_block("building panel", False):
             for h in tqdm(self.panel_snps.transpose(), mininterval=1):
-                bwt.insert(h)
+                bwt.insert(h) # 15%
 
         with timer_block("reference matching"):
             ref_matches = reference_matching(self.panel_snps, self.target_snps, self.cm_pos_array)
@@ -483,7 +483,7 @@ class Impute:
             assert np.sum(p) > 0
             q = p / np.sum(p)
             for j in np.nonzero(q)[0]:
-                matrix[i, matched_samples[j]] = q[j]
+                matrix[i, matched_samples[j]] = q[j] # 15%
         return csr_array(matrix)
 
 
