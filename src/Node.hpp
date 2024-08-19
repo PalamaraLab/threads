@@ -28,6 +28,7 @@ public:
 
   // Node movers-arounders
   void insert_above(Node* node);
+  void assign(int sample_ID, int divergence, bool genotype);
 
   // Output
   friend std::ostream& operator<<(std::ostream& os, const Node& node);

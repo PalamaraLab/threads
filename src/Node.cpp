@@ -18,8 +18,8 @@
 
 #include <iostream>
 
-Node::Node(int _sample_ID, int _divergence, bool _genotype)
-    : sample_ID(_sample_ID), divergence(_divergence), genotype(_genotype) {
+Node::Node(int _sample_ID, int _divergence, bool _genotype) {
+  assign(_sample_ID, _divergence, _genotype);
 }
 
 void Node::insert_above(Node* node) {
@@ -28,6 +28,12 @@ void Node::insert_above(Node* node) {
   above = node;
   node->above = old_above;
   node->below = this;
+}
+
+void Node::assign(int _sample_ID, int _divergence, bool _genotype) {
+  sample_ID = _sample_ID;
+  divergence = _divergence;
+  genotype = _genotype;
 }
 
 std::ostream& operator<<(std::ostream& os, const Node& node) {

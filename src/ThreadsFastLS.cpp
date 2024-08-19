@@ -114,6 +114,8 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
   }
 
   // Initialize both ends of the linked-list columns
+  tops.reserve(num_sites + 1);
+  bottoms.reserve(num_sites + 1);
   for (int i = 0; i < num_sites + 1; i++) {
     tops.emplace_back(-1, i, 0);
     bottoms.emplace_back(-1, i, 1);
@@ -124,7 +126,7 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
     bottom_i->above = top_i;
 
     if (i > 0) {
-      tops[i - 1].w[0]  = top_i;
+      tops[i - 1].w[0] = top_i;
       tops[i - 1].w[1] = top_i;
       bottoms[i - 1].w[0] = bottom_i;
       bottoms[i - 1].w[1] = bottom_i;
@@ -140,6 +142,9 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
   else {
     hmm = nullptr;
   }
+
+  // FIXME experimental hard-coded value to avoid reallocs
+  traceback_states.reserve(10000);
 }
 
 std::tuple<std::vector<double>, std::vector<double>>
@@ -219,7 +224,7 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   panel.emplace_back(num_sites + 1);
 
   Node* t0 = &bottoms[0];
-  panel[insert_index][0] = Node(ID, 0, genotype[0]);
+  panel[insert_index][0].assign(ID, 0, genotype[0]);
   Node* z0 = &panel[insert_index][0];
 
   // Inserts z0 above t0
@@ -235,7 +240,7 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
     // Add current thingy to panel  FIXME
-    panel[insert_index][k + 1] = Node(ID, k + 1, next_genotype);
+    panel[insert_index][k + 1].assign(ID, k + 1, next_genotype);
     z_next = &panel[insert_index][k + 1];
     tmp = z_k->above;
     while (tmp->sample_ID != -1 && tmp->genotype != g_k) {
@@ -318,8 +323,13 @@ void ThreadsFastLS::remove(int ID) {
   // If needed, move last sequence to replace the one we just deleted.
   if (ID_map.at(ID) != num_samples - 1) {
     for (int k = 0; k <= num_sites; k++) {
-      // Hope this is correct FIXME REVIEW
-      panel[ID_map.at(ID)][k] = std::move(panel[num_samples - 1][k]);
+      // Hope this is correct FIXME REVIEW why std::move?
+      //panel[ID_map.at(ID)][k] = std::move(panel[num_samples - 1][k]);
+      panel[ID_map.at(ID)][k].assign(
+        panel[num_samples - 1][k].sample_ID,
+        panel[num_samples - 1][k].divergence,
+        panel[num_samples - 1][k].genotype
+      );
     }
     ID_map.at(last_ID) = ID_map.at(ID);
   }
