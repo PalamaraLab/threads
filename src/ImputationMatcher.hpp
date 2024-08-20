@@ -58,15 +58,4 @@ private:
   std::vector<int> ref_sorting;
 };
 
-// FIXME worth doing in C++? (Check profiler)
-#if 0
-class MutationMap {
-
-};
-
-class MutationContainer {
-
-};
-#endif
-
 #endif // THREADS_ARG_IMPUTATION_MATCHER_HPP
