@@ -20,6 +20,7 @@
 #include "HMM.hpp"
 #include "State.hpp"
 
+#include <deque>
 #include <memory>
 #include <random>
 #include <unordered_map>
@@ -203,7 +204,10 @@ private:
   // To access the linked lists in each column
   std::vector<Node> tops;
   std::vector<Node> bottoms;
-  std::vector<TracebackState> traceback_states;
+
+  // deque is used rather than vector, to avoid reallocs when adding
+  // traceback states, hence changing pointers and internal lookup.
+  std::deque<TracebackState> traceback_states;
 
   // Burn-in quantities
   int trim_pos_start_idx = 0;

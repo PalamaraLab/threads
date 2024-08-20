@@ -142,9 +142,6 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
   else {
     hmm = nullptr;
   }
-
-  // FIXME experimental hard-coded value to avoid reallocs
-  traceback_states.reserve(10000);
 }
 
 std::tuple<std::vector<double>, std::vector<double>>
