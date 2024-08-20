@@ -86,10 +86,10 @@ if(PYTHON_BINDINGS)
         threads_arg_pybind.cpp
     )
 
+    # No project_warnings for python bindings to reduce compiler noise
     target_link_libraries(threads_arg_python_bindings
         PRIVATE
             threads_arg
-            # project_warnings disabled for pybind as they are currently noisy
     )
 
     install(TARGETS threads_arg_python_bindings LIBRARY DESTINATION .)
