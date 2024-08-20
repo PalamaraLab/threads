@@ -205,17 +205,19 @@ Node* ThreadsFastLS::extend_node(Node* t, bool g, int i) {
 void ThreadsFastLS::insert(const std::vector<bool>& genotype) {
   insert(num_samples, genotype);
 }
-void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
 
+void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   if (ID_map.find(ID) != ID_map.end()) {
     std::cerr << "ID " << ID << " is already in the panel.\n";
     exit(1);
   }
+
   if (static_cast<int>(genotype.size()) != num_sites) {
     std::cerr << "Number of input markers does not match map.\n";
     exit(1);
   }
-  int insert_index = num_samples;
+
+  const int insert_index = num_samples;
   ID_map[ID] = insert_index;
 
   panel.emplace_back(num_sites + 1);
@@ -232,11 +234,12 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   Node* tmp;
   Node* t_k;
   Node* t_next;
+
   // Insert new sequence into panel
   for (int k = 0; k < num_sites; k++) {
     bool g_k = genotype[k];
     bool next_genotype = (k == num_sites - 1) ? END_ALLELE : genotype[k + 1];
-    // Add current thingy to panel  FIXME
+    // Add to panel
     panel[insert_index][k + 1].assign(ID, k + 1, next_genotype);
     z_next = &panel[insert_index][k + 1];
     tmp = z_k->above;
