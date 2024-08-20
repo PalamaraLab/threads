@@ -323,13 +323,8 @@ void ThreadsFastLS::remove(int ID) {
   // If needed, move last sequence to replace the one we just deleted.
   if (ID_map.at(ID) != num_samples - 1) {
     for (int k = 0; k <= num_sites; k++) {
-      // Hope this is correct FIXME REVIEW why std::move?
-      //panel[ID_map.at(ID)][k] = std::move(panel[num_samples - 1][k]);
-      panel[ID_map.at(ID)][k].assign(
-        panel[num_samples - 1][k].sample_ID,
-        panel[num_samples - 1][k].divergence,
-        panel[num_samples - 1][k].genotype
-      );
+      const Node& n = panel[num_samples - 1][k];
+      panel[ID_map.at(ID)][k].assign(n.sample_ID, n.divergence, n.genotype);
     }
     ID_map.at(last_ID) = ID_map.at(ID);
   }
