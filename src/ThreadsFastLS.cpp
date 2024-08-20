@@ -113,7 +113,9 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
     exit(1);
   }
 
-  // Initialize both ends of the linked-list columns
+  // Initialize both ends of the linked-list columns. After reserving these
+  // vectors and setting values in loop, no more values may be pushed, otherwise
+  // a realloc will invalidate the contained Node pointers.
   tops.reserve(num_sites + 1);
   bottoms.reserve(num_sites + 1);
   for (int i = 0; i < num_sites + 1; i++) {
@@ -220,6 +222,10 @@ void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
   const int insert_index = num_samples;
   ID_map[ID] = insert_index;
 
+  // Each new std::vector row is a fixed size based on number of sites. After
+  // this point do not add any individial elements to the row (e.g. by making a
+  // call like panel.back().emplace_back()) because resizing the row will
+  // eventually cause a realloc, invalidating the node pointers.
   panel.emplace_back(num_sites + 1);
 
   Node* t0 = &bottoms[0];

@@ -205,8 +205,9 @@ private:
   std::vector<Node> tops;
   std::vector<Node> bottoms;
 
-  // deque is used rather than vector, to avoid reallocs when adding
-  // traceback states, hence changing pointers and internal lookup.
+  // deque is used rather than vector to avoid reallocs which would invalidate
+  // the internal pointers; unlike top/bottom, the number of traceback states
+  // is not known beforehand so cannot be reserved in one go.
   std::deque<TracebackState> traceback_states;
 
   // Burn-in quantities
