@@ -253,6 +253,17 @@ def _memoize_nth_record_process(filename, region, proc_idx, proc_max) -> List[Tu
     return results
 
 
+def _memoize_nth_record_process_star(args):
+    """
+    Unpack star args for _memoize_nth_record_process
+
+    This is required to get tqdm working with a multiprocess pool. The usual way
+    would be with multiprocessing pool starmap(), but this does not work with
+    tqdm. Instead imap() must be used with a shim method to unpack args.
+    """
+    return _memoize_nth_record_process(*args)
+
+
 def _memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> RecordMemoDict:
     """
     Given a VCF filename and region, generate a dictionary of record memos
@@ -264,10 +275,19 @@ def _memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> Re
     with timer_block(f"memoising VCF {shortname}, region {region} ({cpu_count} CPUs)", False):
         jobs_args = [(filename, region, i, cpu_count) for i in range(cpu_count)]
         with multiprocessing.Pool(processes=cpu_count) as pool:
-            imemos = pool.starmap(_memoize_nth_record_process, jobs_args)
+            # To use tqdm with a pool, use imap with shim method to unpack args.
+            imemos = list(tqdm(
+                pool.imap(_memoize_nth_record_process_star, jobs_args),
+                total=len(jobs_args),
+                mininterval=1
+            ))
 
-    # Flatten results (list of lists of tuples) into list of tuples
-    imemos_flattened = [tup for tups in imemos for tup in tups]
+    # Flatten results (list of sub lists of tuples) into list of tuples
+    imemos_flattened = [
+        tup
+        for sub_list in imemos
+        for tup in sub_list
+    ]
 
     # Sort results by record index, the first element in tuple
     imemos_sorted = sorted(imemos_flattened, key=lambda tup: tup[0])
