@@ -40,8 +40,6 @@ RecordMemoDict = Dict[str, RecordMemo]
 class WriterVCF:
     """
     Custom VCF writer for imputation
-
-    FIXME Review with Arni, use this customised version or alternative library
     """
     def __init__(self, filename):
         self.file = open(filename, "w")
@@ -96,14 +94,12 @@ def read_map_gz(map_gz):
     return phys_pos, cm_pos
 
 
-# FIXME move into class
-def parse_demography(demography):
+def _parse_demography(demography):
     d = pd.read_table(demography, sep=r"\s+", header=None)
     return list(d[0]), list(d[1])
 
 
-# FIXME move into class
-def reference_matching(haps_panel, haps_target, cm_pos):
+def _reference_matching(haps_panel, haps_target, cm_pos):
     num_reference = haps_panel.shape[1]
     num_target = haps_target.shape[1]
     matcher = ImputationMatcher(num_reference, num_target, cm_pos, 0.02, 4)
@@ -113,7 +109,7 @@ def reference_matching(haps_panel, haps_target, cm_pos):
     return matcher.get_matches()
 
 
-def active_site_arg_delta(
+def _active_site_arg_delta(
     active_site_posterior,
     active_indexes,
     imputation_thread,
@@ -253,6 +249,17 @@ def _memoize_nth_record_process(filename, region, proc_idx, proc_max) -> List[Tu
     return results
 
 
+def _memoize_nth_record_process_star(args):
+    """
+    Unpack star args for _memoize_nth_record_process
+
+    This is required to get tqdm working with a multiprocess pool. The usual way
+    would be with multiprocessing pool starmap(), but this does not work with
+    tqdm. Instead imap() must be used with a shim method to unpack args.
+    """
+    return _memoize_nth_record_process(*args)
+
+
 def _memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> RecordMemoDict:
     """
     Given a VCF filename and region, generate a dictionary of record memos
@@ -264,10 +271,19 @@ def _memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> Re
     with timer_block(f"memoising VCF {shortname}, region {region} ({cpu_count} CPUs)", False):
         jobs_args = [(filename, region, i, cpu_count) for i in range(cpu_count)]
         with multiprocessing.Pool(processes=cpu_count) as pool:
-            imemos = pool.starmap(_memoize_nth_record_process, jobs_args)
+            # To use tqdm with a pool, use imap with shim method to unpack args.
+            imemos = list(tqdm(
+                pool.imap(_memoize_nth_record_process_star, jobs_args),
+                total=len(jobs_args),
+                mininterval=1
+            ))
 
-    # Flatten results (list of lists of tuples) into list of tuples
-    imemos_flattened = [tup for tups in imemos for tup in tups]
+    # Flatten results (list of sub lists of tuples) into list of tuples
+    imemos_flattened = [
+        tup
+        for sub_list in imemos
+        for tup in sub_list
+    ]
 
     # Sort results by record index, the first element in tuple
     imemos_sorted = sorted(imemos_flattened, key=lambda tup: tup[0])
@@ -417,7 +433,7 @@ class Impute:
         """
         sparse_sites = True
         use_hmm = False
-        ne_times, ne_sizes = parse_demography(demography)
+        ne_times, ne_sizes = _parse_demography(demography)
         bwt = ThreadsFastLS(self.phys_pos_array,
                             self.cm_pos_array,
                             mutation_rate,
@@ -431,7 +447,7 @@ class Impute:
                 bwt.insert(h)
 
         with timer_block("reference matching"):
-            ref_matches = reference_matching(self.panel_snps, self.target_snps, self.cm_pos_array)
+            ref_matches = _reference_matching(self.panel_snps, self.target_snps, self.cm_pos_array)
 
         mutation_rate = 0.0001
         cm_sizes = list(self.cm_pos_array[1:] - self.cm_pos_array[:-1])
@@ -557,7 +573,7 @@ class Impute:
         FIXME docstring
         """
         def compute_delta(active_site_posterior, i):
-            return active_site_arg_delta(
+            return _active_site_arg_delta(
                 active_site_posterior,
                 active_indexes,
                 self.imputation_threads[i],
