@@ -354,7 +354,9 @@ class CachedPosteriorSnps:
 
 class Impute:
     """
-    FIXME
+    Wrapper class for the Threads imputation routine
+
+    See paper for more details.
     """
     def __init__(
         self,
@@ -433,7 +435,8 @@ class Impute:
 
     def _sparse_posteriors(self, demography, mutation_rate):
         """
-        FIXME docstring
+        Compute sparsified Li-Stephens posterior matrices for all targets across
+        the whole chunk
         """
         sparse_sites = True
         use_hmm = False
@@ -510,7 +513,7 @@ class Impute:
 
     def _init_step_snp(self):
         """
-        FIXME docstring
+        Prepare any variables required for stepping through variants
         """
         self.snp_positions = [record.pos for record in self.target_dict.values()]
         self.snp_id_indexes = {record.id: i for i, record in enumerate(self.target_dict.values())}
@@ -519,7 +522,7 @@ class Impute:
 
     def _next_step_snp(self, record):
         """
-        FIXME docstring
+        Interpolate and compute posterior weights for the current variant
         """
         site_posteriors = None
         mutation_mapping = None
@@ -575,7 +578,7 @@ class Impute:
         carriers
     ):
         """
-        FIXME docstring
+        Perform imputation for the current variant
         """
         def compute_delta(active_site_posterior, i):
             return _active_site_arg_delta(
@@ -601,7 +604,7 @@ class Impute:
 
     def _process_and_write(self):
         """
-        FIXME docstring
+        Process the loaded records and write resulting VCF
         """
         tt_write_vcf = TimerTotal("write vcf")
 
