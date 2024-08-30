@@ -186,7 +186,7 @@ class MutationMap:
 
 class MutationContainer:
     """
-    FIXME docstring
+    A container for all MutationMap objects along the genomic chunk
     """
     def __init__(self, mut_path):
         self.mut_dict = {}
