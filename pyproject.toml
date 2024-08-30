@@ -17,6 +17,7 @@ dependencies = [
     "xarray",
     "h5py",
     "pandas",
+    "numba",
     "numpy<2.0",
     "tszip",
     "arg-needle-lib",
