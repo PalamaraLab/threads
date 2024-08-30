@@ -25,7 +25,10 @@ PROCESS_COUNT = len(os.sched_getaffinity(0))
 @dataclass
 class RecordMemo:
     """
-    Memo of values FIXME allele frequency, alt docs
+    Memo of the record fields required for imputation. Cached at the start of
+    the run to avoid repeatedly re-evaluating records and data like allele
+    frequency and genotypes. The latter is particular expensive so is converted
+    from a python list into a numpy bool array.
     """
     id: int
     genotypes: None
