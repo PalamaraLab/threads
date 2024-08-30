@@ -326,7 +326,6 @@ class CachedPosteriorSnps:
             return self.posteriors_by_snp_idx[snp_idx]
 
         # Rebuild snp data
-        # FIXME review with Arni - OK with large datasets?
         col_len = len(self.posteriors)
         row_len = self.posteriors[0].shape[1]
         target_posteriors = np.empty(shape=(col_len, row_len), dtype=np.float64)
@@ -467,7 +466,8 @@ class Impute:
             tt_impute = TimerTotal("PBWT impute")
             tt_fwbw = TimerTotal("fwbw")
             target_transpose = self.target_snps.transpose()
-            # FIXME double-check if total still needed
+
+            # tqdm total required to ensure bar updates correctly
             for i, h_target in tqdm(enumerate(target_transpose), total=len(target_transpose), mininterval=1):
                 with tt_impute:
                     # Imputation thread with divergence matching
@@ -610,12 +610,15 @@ class Impute:
             imputed = True
 
             if record.id in self.snp_id_indexes:
-                # FIXME Arni docs
+                # If this variant is present on the genotyping array, then copy
+                # it directly and note in the output genotypes that it was not
+                # imputed
                 imputed = False
                 var_idx = self.snp_id_indexes[record.id]
                 genotypes = np.array(self.target_snps[var_idx], dtype=float)
             else:
-                # FIXME Arni docs
+                # If this variant is not present on the genotyping array, then
+                # run the Threads imputation routine
                 active_site_posteriors, mutation_mapping, carriers, active_indexes = self._next_step_snp(record)
 
                 genotypes = self._compute_genotypes(
