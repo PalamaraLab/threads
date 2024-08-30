@@ -27,7 +27,6 @@ from cyvcf2 import VCF
 logger = logging.getLogger(__name__)
 
 
-# FIXME review if this is still needed
 def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
     """
     Map mutations to an ARG using a method based on Speidel et al. (2019) and save output to a .mut file to inform imputation.
