@@ -154,7 +154,9 @@ def _active_site_arg_delta(
 
 class MutationMap:
     """
-    FIXME docstring
+    Wrapper for the mapping of a variant to one or more branches in the arg,
+    containing the descendants of the mutations and the boundaries of their
+    mapped edges.
     """
     def __init__(self, snp, flipped, mapping_str):
         self.boundaries = {}
