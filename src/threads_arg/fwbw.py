@@ -1,7 +1,5 @@
-# FIXME review with Pier/Arni to confirm credit attributed correctly
-
-# NB! This is mostly copied from an old version of LSHMM
-# see https://github.com/astheeggeggs/lshmm
+# Code adapted from an implementation of the Li-Stephens algorithm
+# available at: https://github.com/astheeggeggs/lshmm
 import numba
 import numpy as np
 import logging
