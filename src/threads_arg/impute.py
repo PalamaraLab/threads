@@ -78,12 +78,12 @@ class WriterVCF:
         f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
 
-# FIXME move into class
 def read_map_gz(map_gz):
     """
     Reading in map file for Li-Stephens
 
-    Note that this is in the shapeit5 format not like the other maps we've been using
+    Unlike the Threads inference routine, this function uses genetic maps in the
+    SHAPEIT format
     """
     maps = pd.read_table(map_gz, sep=r"\s+")
     cm_pos = maps.cM.values.astype(np.float64)
