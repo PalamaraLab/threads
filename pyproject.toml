@@ -17,12 +17,14 @@ dependencies = [
     "xarray",
     "h5py",
     "pandas",
+    "numba",
     "numpy<2.0",
     "tszip",
     "arg-needle-lib",
     "cyvcf2",
     "ray",
-    "pgenlib==0.83.0"
+    "pgenlib==0.83.0",
+    "tqdm"
 ]
 
 classifiers = [

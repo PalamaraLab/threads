@@ -20,7 +20,8 @@ import tempfile
 
 from pathlib import Path
 
-from threads_arg.__main__ import threads_infer, threads_convert
+from threads_arg.infer import threads_infer
+from threads_arg.convert import threads_convert
 
 BASE_DIR = Path(__file__).parent.parent
 

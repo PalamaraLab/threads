@@ -90,14 +90,14 @@ ImputationMatcher::ImputationMatcher(int _n_ref, int _n_target,
   }
 }
 
-void ImputationMatcher::process_site(const std::vector<int>& genotype) {
+void ImputationMatcher::process_site(const std::vector<bool>& genotype) {
   if (sites_processed >= num_sites) {
     throw std::runtime_error("all sites have already been processed");
   }
 
   int allele_count = 0;
   for (int g : genotype) {
-    if (g == 1) {
+    if (g == true) {
       allele_count++;
     }
   }
@@ -111,7 +111,7 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
     next_query_site_idx++;
     int ref_allele_count = 0;
     for (int i = 0; i < num_reference; i++) {
-      if (genotype.at(i) == 1) {
+      if (genotype.at(i) == true) {
         ref_allele_count++;
       }
     }
@@ -123,11 +123,11 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
     for (int i = 0; i < num_samples; i++) {
       int sample_id = sorting.at(i);
       if (sample_id < num_reference) {
-        if (genotype.at(sample_id) == 1) {
+        if (genotype.at(sample_id) == true) {
           ref_sorting[num_reference - ref_allele_count + ref_counter1] = sample_id;
           ref_counter1++;
         }
-        else if (genotype.at(sample_id) == 0) {
+        else if (genotype.at(sample_id) == false) {
           ref_sorting[ref_counter0] = sample_id;
           ref_counter0++;
         }
@@ -138,10 +138,10 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
       }
       else {
         // Here we do abnormal target-position-finding
-        if (genotype.at(sample_id) == 1) {
+        if (genotype.at(sample_id) == true) {
           target_sort[sample_id] = num_reference - ref_allele_count + ref_counter1;
         }
-        else if (genotype.at(sample_id) == 0) {
+        else if (genotype.at(sample_id) == false) {
           target_sort[sample_id] = ref_counter0;
         }
         else {
@@ -178,11 +178,11 @@ void ImputationMatcher::process_site(const std::vector<int>& genotype) {
   int counter0 = 0;
   int counter1 = 0;
   for (int i = 0; i < num_samples; i++) {
-    if (genotype.at(sorting.at(i)) == 1) {
+    if (genotype.at(sorting.at(i)) == true) {
       next_sorting[num_samples - allele_count + counter1] = sorting.at(i);
       counter1++;
     }
-    else if (genotype.at(sorting.at(i)) == 0) {
+    else if (genotype.at(sorting.at(i)) == false) {
       next_sorting[counter0] = sorting.at(i);
       counter0++;
     }
