@@ -3,6 +3,7 @@ import multiprocessing
 import os
 import numpy as np
 import pandas as pd
+import sys
 
 from tqdm import tqdm
 from cyvcf2 import VCF
@@ -11,7 +12,11 @@ from scipy.sparse import csr_array, lil_matrix
 from datetime import datetime
 from typing import Dict, Tuple, List
 from dataclasses import dataclass
-from bisect import bisect_left
+
+# Use bisect_left to optimise when available (key search only in python >= 3.10)
+BISECT_LEFT_KEY_SEARCH = sys.version_info[:3] >= (3, 10)
+if BISECT_LEFT_KEY_SEARCH:
+    from bisect import bisect_left
 
 from .fwbw import fwbw
 from .utils import timer_block, TimerTotal
@@ -130,7 +135,15 @@ def _active_site_arg_delta(
     delta = 0
 
     # Find the nearest segment in imputation thread based on position
-    seg_idx = bisect_left(imputation_thread[1:], record.pos, key=lambda x: x.seg_start)
+    if BISECT_LEFT_KEY_SEARCH:
+        # Binary search for seg_idx before pos
+        seg_idx = bisect_left(imputation_thread[1:], record.pos, key=lambda x: x.seg_start)
+    else:
+        # When key search not available, fall back to slower linear search
+        num_segs = len(imputation_thread)
+        seg_idx = 0
+        while seg_idx < num_segs - 1 and imputation_thread[seg_idx + 1].seg_start < record.pos:
+            seg_idx += 1
     segment = imputation_thread[seg_idx]
 
     for s_id, height in zip(segment.ids, segment.ages):
