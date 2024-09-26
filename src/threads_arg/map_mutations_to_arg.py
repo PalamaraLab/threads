@@ -20,17 +20,42 @@ import logging
 
 os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
+import arg_needle_lib
 
 from cyvcf2 import VCF
 
 logger = logging.getLogger(__name__)
 
 
-def map_region(argn, input, region, maf):
+def _mapping_string(carrier_sets, edges):
+    if len(edges) == 0:
+        return "NaN"
+    elif len(edges) == 1:
+        return f"-1,{edges[0].child.height:.4f},{edges[0].parent.height:.4f}"
+    else:
+        return ";".join([f"{'.'.join([str(c) for c in carrier_set])},{edge.child.height:.4f},{edge.parent.height:.4f}" for carrier_set, edge in zip(carrier_sets, edges)])
+
+
+def _get_leaves(arg, edge, position):
+    leaves = []
+    _populate_leaves(arg, edge, position - arg.offset, leaves)
+    return leaves
+
+
+def _populate_leaves(arg, edge, position, leaf_list):
+    child = edge.child
+    if arg.is_leaf(child.ID):
+        return leaf_list.append(child.ID)
+    else:
+        for edge in child.child_edges_at(position):
+            _populate_leaves(arg, edge, position, leaf_list)
+
+
+def _map_region(argn, input, region, maf):
     logging.shutdown()
     importlib.reload(logging)
     pid = os.getpid()
-    logging.basicConfig(format=f"%(asctime)s %(levelname)-8s PID {pid} %(message)s", 
+    logging.basicConfig(format=f"%(asctime)s %(levelname)-8s PID {pid} %(message)s",
                         level=logging.INFO,
                         datefmt='%Y-%m-%d %H:%M:%S')
     local_logger = logging.getLogger(__name__)
@@ -89,7 +114,7 @@ def map_region(argn, input, region, maf):
         if len(mapping) == 1:
             all_mappings.append((name, pos, flipped, [[-1]],  mapping))
         else:
-            all_mappings.append((name, pos, flipped, [get_leaves(arg, edge, pos) for edge in mapping],  mapping))
+            all_mappings.append((name, pos, flipped, [_get_leaves(arg, edge, pos) for edge in mapping],  mapping))
 
     n_mapped = sum(1 for m in all_mappings if len(m[4]) > 0)
 
@@ -97,7 +122,7 @@ def map_region(argn, input, region, maf):
     n_relate_mapped = n_mapped - n_parsimoniously_mapped
     return_strings = []
     for name, pos, flipped, carrier_sets, edges in all_mappings:
-        return_strings.append(f"{name}\t{pos}\t{int(flipped)}\t{mapping_string(carrier_sets, edges)}\n")
+        return_strings.append(f"{name}\t{pos}\t{int(flipped)}\t{_mapping_string(carrier_sets, edges)}\n")
 
     end_time = time.time()
     local_logger.info(f"Done region {region} in {end_time - start_time:.2f} (s)")
@@ -123,7 +148,7 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
 
     return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = None, None, None, None
     if actual_num_threads == 1:
-        return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = map_region(argn, input, region, maf)
+        return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = _map_region(argn, input, region, maf)
     else:
         logger.info("Parsing VCF")
         vcf = VCF(input)
@@ -135,7 +160,7 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
         split_positions = split_list(positions, actual_num_threads)
         subregions = [f"{contig}:{pos[0]}-{pos[-1]}" for pos in split_positions]
         ray.init()
-        map_region_remote = ray.remote(map_region)
+        map_region_remote = ray.remote(_map_region)
         results = ray.get([map_region_remote.remote(
             argn, input, subregion, maf
         ) for subregion in subregions])
