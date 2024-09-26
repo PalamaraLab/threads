@@ -103,7 +103,8 @@ def _map_region(argn, input, region, maf):
             hap = 1 - hap
 
         mt = time.time()
-        _, mapping = arg_needle_lib.map_genotype_to_ARG_relate(arg, hap, float(pos - arg.offset), maf_threshold=maf)
+        # FIXME review MAF usage. The tuple result this call has changed meaning, and last MAF argument was dropped
+        mapping, _ = arg_needle_lib.map_genotype_to_ARG_approximate(arg, hap, float(pos - arg.offset))
         map_time += time.time() - mt
 
         if len(mapping) > 0:
