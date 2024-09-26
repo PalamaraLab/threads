@@ -20,7 +20,7 @@ dependencies = [
     "numba",
     "numpy<2.0",
     "tszip",
-    "arg-needle-lib",
+    "arg-needle-lib==1.1.0",
     "cyvcf2",
     "ray",
     "pgenlib==0.83.0",
