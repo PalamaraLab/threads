@@ -1,30 +1,29 @@
 # Installation (rescomp only):
 
-Load everything we'll need
-```
-module load GCC/11.3.0
-module load CMake/3.23.1-GCCcore-11.3.0
-module load git/2.36.0-GCCcore-11.3.0-nodocs
-module load Python/3.10.4-GCCcore-11.3.0
-module load GSL/2.7-GCC-11.3.0
-module load Boost/1.79.0-GCC-11.3.0
-module load pybind11/2.9.2-GCCcore-11.3.0
-```
-
-Fire up and activate a new venv:
-```
-python -m venv venv
-. venv/bin/activate
-
-pip install --upgrade pip setuptools wheel
-pip install cmake ninja
-```
-
-Then install Threads:
-```
+Clone the Threads repo:
+```sh
 git clone https://github.com/PalamaraLab/TDPBWT.git
 cd TDPBWT
+```
+
+Load development modules:
+```sh
+module load Python/3.11.3-GCCcore-12.3.0
+module load Boost/1.82.0-GCC-12.3.0
+module load HDF5/1.14.0-gompi-2023a
+```
+
+Create a new venv, activate and `pip install` to build:
+```sh
+python -m venv venv
+. venv/bin/activate
+pip install --upgrade pip setuptools wheel
 pip install .
+```
+
+For active development use `-e` and `[dev]` to for additional dependencies:
+```sh
+pip install -e .[dev]
 ```
 
 # Usage
@@ -67,9 +66,9 @@ threads infer \
     --num_threads 8 (default: 1)
 ```
 
-`--modality array` can be set for inference from arrays. 
+`--modality array` can be set for inference from arrays.
 
-`--query_interval` and `--match_group_interval` can be raised to save memory for inference over long genomic regions, this will have little impact on accuracy, especially for sparse variants. 
+`--query_interval` and `--match_group_interval` can be raised to save memory for inference over long genomic regions, this will have little impact on accuracy, especially for sparse variants.
 
 The HMM mutation rate can be set with `--mutation_rate`. This defaults to a realistic human rate of `1.4e-8` per site per generation.
 
@@ -84,7 +83,7 @@ threads convert \
     --threads arg.threads \
     --argn arg.argn
 ```
-and 
+and
 ```
 threads convert \
     --threads arg.threads \
