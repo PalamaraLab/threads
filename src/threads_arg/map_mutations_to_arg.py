@@ -14,12 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import importlib
 import os
 import time
 import logging
 
 os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
+import numpy as np
 import arg_needle_lib
 
 from cyvcf2 import VCF
@@ -51,13 +53,14 @@ def _populate_leaves(arg, edge, position, leaf_list):
             _populate_leaves(arg, edge, position, leaf_list)
 
 
-def _map_region(argn, input, region, maf):
+def _map_region(argn, input, region):
     logging.shutdown()
     importlib.reload(logging)
     pid = os.getpid()
     logging.basicConfig(format=f"%(asctime)s %(levelname)-8s PID {pid} %(message)s",
                         level=logging.INFO,
                         datefmt='%Y-%m-%d %H:%M:%S')
+
     local_logger = logging.getLogger(__name__)
     start_time = time.time()
     local_logger.info(f"Starting region {region}...")
@@ -65,7 +68,6 @@ def _map_region(argn, input, region, maf):
     arg.populate_children_and_roots()
 
     # initialize counters etc
-    maf_threshold = maf
     all_mappings = []
     n_attempted = 0
     n_mapped = 0
@@ -80,12 +82,7 @@ def _map_region(argn, input, region, maf):
         an = int(record.INFO.get("AN"))
         af = ac / an
         mac = min(ac, an - ac)
-        maf = min(af, 1 - af)
         flipped = af > 0.5
-
-        # Apply MAF filter
-        if maf > maf_threshold or maf == 0:
-            continue
 
         n_attempted += 1
         if mac <= 4:
@@ -103,7 +100,6 @@ def _map_region(argn, input, region, maf):
             hap = 1 - hap
 
         mt = time.time()
-        # FIXME review MAF usage. The tuple result this call has changed meaning, and last MAF argument was dropped
         mapping, _ = arg_needle_lib.map_genotype_to_ARG_approximate(arg, hap, float(pos - arg.offset))
         map_time += time.time() - mt
 
@@ -130,14 +126,13 @@ def _map_region(argn, input, region, maf):
     return return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped
 
 
-def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
+def threads_map_mutations_to_arg(argn, out, input, region, threads):
     """
     Map mutations to an ARG using a method based on Speidel et al. (2019) and save output to a .mut file to inform imputation.
     """
     logger.info("Starting Threads-map with parameters")
     logger.info(f"argn:    {argn}")
     logger.info(f"out:     {out}")
-    logger.info(f"maf:     {maf}")
     logger.info(f"input:   {input}")
     logger.info(f"region:  {region}")
     logger.info(f"threads: {threads}")
@@ -149,7 +144,7 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
 
     return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = None, None, None, None
     if actual_num_threads == 1:
-        return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = _map_region(argn, input, region, maf)
+        return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = _map_region(argn, input, region)
     else:
         logger.info("Parsing VCF")
         vcf = VCF(input)
@@ -162,9 +157,13 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
         subregions = [f"{contig}:{pos[0]}-{pos[-1]}" for pos in split_positions]
         ray.init()
         map_region_remote = ray.remote(_map_region)
-        results = ray.get([map_region_remote.remote(
-            argn, input, subregion, maf
-        ) for subregion in subregions])
+        results = ray.get([
+            map_region_remote.remote(
+                argn,
+                input,
+                subregion
+            ) for subregion in subregions]
+        )
         ray.shutdown()
         return_strings = []
         n_attempted, n_parsimoniously_mapped, n_relate_mapped = 0, 0, 0
@@ -184,6 +183,7 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
     logger.info(f"Writing mutation mappings to {out}")
     logger.info(f"Done in (s): {time.time()-start_time:.3f}")
 
+    # FIXME move this text to CLI docs
     # Output has columns
     # variant_id: string
     # pos: int (base-pairs)
