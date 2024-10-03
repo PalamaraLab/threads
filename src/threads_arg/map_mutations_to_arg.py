@@ -14,15 +14,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import importlib
 import os
 import time
 import logging
 
 os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
+import numpy as np
 import arg_needle_lib
 
 from cyvcf2 import VCF
+from .utils import split_list
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,7 @@ def _map_region(argn, input, region, maf):
     logging.basicConfig(format=f"%(asctime)s %(levelname)-8s PID {pid} %(message)s",
                         level=logging.INFO,
                         datefmt='%Y-%m-%d %H:%M:%S')
+
     local_logger = logging.getLogger(__name__)
     start_time = time.time()
     local_logger.info(f"Starting region {region}...")
@@ -103,7 +107,6 @@ def _map_region(argn, input, region, maf):
             hap = 1 - hap
 
         mt = time.time()
-        # FIXME review MAF usage. The tuple result this call has changed meaning, and last MAF argument was dropped
         mapping, _ = arg_needle_lib.map_genotype_to_ARG_approximate(arg, hap, float(pos - arg.offset))
         map_time += time.time() - mt
 
