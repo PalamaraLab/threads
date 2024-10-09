@@ -39,22 +39,25 @@ def _mapping_string(carrier_sets, edges):
         return ";".join([f"{'.'.join([str(c) for c in carrier_set])},{edge.child.height:.4f},{edge.parent.height:.4f}" for carrier_set, edge in zip(carrier_sets, edges)])
 
 
-def _get_leaves(arg, edge, position):
+def get_leaf_ids_at(arg, edge, position):
+    """
+    Recurse into all child edges at position to get leave node IDs
+    """
     leaves = []
-    _populate_leaves(arg, edge, position - arg.offset, leaves)
+    _recursive_get_leaf_ids_at(arg, edge, position - arg.offset, leaves)
     return leaves
 
 
-def _populate_leaves(arg, edge, position, leaf_list):
+def _recursive_get_leaf_ids_at(arg, edge, position, leaf_list):
     child = edge.child
     if arg.is_leaf(child.ID):
         return leaf_list.append(child.ID)
     else:
         for edge in child.child_edges_at(position):
-            _populate_leaves(arg, edge, position, leaf_list)
+            _recursive_get_leaf_ids_at(arg, edge, position, leaf_list)
 
 
-def _map_region(argn, input, region, maf):
+def _map_region(argn, input, region, maf_threshold):
     logging.shutdown()
     importlib.reload(logging)
     pid = os.getpid()
@@ -68,14 +71,13 @@ def _map_region(argn, input, region, maf):
     arg = arg_needle_lib.deserialize_arg(argn)
     arg.populate_children_and_roots()
 
-    # initialize counters etc
-    maf_threshold = maf
+    # Initialize counters
     all_mappings = []
     n_attempted = 0
     n_mapped = 0
     n_parsimoniously_mapped = 0
 
-    # iterate over VCF here
+    # Iterate over VCF records
     read_time = 0
     map_time = 0
     vcf = VCF(input)
@@ -118,7 +120,8 @@ def _map_region(argn, input, region, maf):
         if len(mapping) == 1:
             all_mappings.append((name, pos, flipped, [[-1]],  mapping))
         else:
-            all_mappings.append((name, pos, flipped, [_get_leaves(arg, edge, pos) for edge in mapping],  mapping))
+            leaf_ids = [get_leaf_ids_at(arg, edge, pos) for edge in mapping]
+            all_mappings.append((name, pos, flipped, leaf_ids, mapping))
 
     n_mapped = sum(1 for m in all_mappings if len(m[4]) > 0)
 
@@ -136,6 +139,15 @@ def _map_region(argn, input, region, maf):
 def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
     """
     Map mutations to an ARG using a method based on Speidel et al. (2019) and save output to a .mut file to inform imputation.
+
+    Output has the following columns
+    variant_id: string
+    pos: int (base-pairs)
+    flipped: bool
+    mapping_string of the following format:
+      If uniquely mapped, a string "-1,edge_lower,edge_upper"
+      If multiply mapped, strings "leaf_1...leaf_k1,edge1_lower,edge1_upper;...;leaf_1...leafkN,edgeN_lower,edgeN_upper"
+          telling us the range (in generations) of each edge and the leaves it subtends (-1 if all carriers)
     """
     logger.info("Starting Threads-map with parameters")
     logger.info(f"argn:    {argn}")
@@ -187,14 +199,6 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
     logger.info(f"Writing mutation mappings to {out}")
     logger.info(f"Done in (s): {time.time()-start_time:.3f}")
 
-    # Output has columns
-    # variant_id: string
-    # pos: int (base-pairs)
-    # flipped: bool
-    # mapping_string of the following format:
-    #   If uniquely mapped, a string "-1,edge_lower,edge_upper"
-    #   If multiply mapped, strings "leaf_1...leaf_k1,edge1_lower,edge1_upper;...;leaf_1...leafkN,edgeN_lower,edgeN_upper"
-    #       telling us the range (in generations) of each edge and the leaves it subtends (-1 if all carriers)
     with open(out, "w") as outfile:
         for string in return_strings:
             outfile.write(string)
