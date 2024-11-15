@@ -90,5 +90,31 @@ threads convert \
     --tsz arg.tsz
 ```
 
-## Phasing/imputation/variant mapping
-These functions are in an experimental phase and will be released later.
+## Imputation
+Imputation using Threads proceeds in three steps. First, an ARG is inferred from the reference panel, using the `threads infer` procedure described above and converted to `.argn` format using `threads convert`. 
+
+Second, variants carried by the reference panel are assigned edges from within the ARG. This is performed using the `threads map` function, which accepts the following options:
+```
+threads map \
+    --argn path/to/arg.argn \
+    --maf [only variants with MAF below this threshold are mapped, default: 0.02] \
+    --input [panel genotypes in bcf/vcf/vcf.gz format] \
+    --region [region to map, end-inclusive, in "1:234-567"-format] \
+    --num_threads [number of computational threads to request, default: 1] \
+    --out path/to/output.mut
+```
+For imputation, we recommend setting the `--maf` threshold to `10 / N_panel`, where `N_panel` is the number of individuals in the panel. The above writes the mutation mapping to `path/to/output.mut`.
+
+Finally, imputation is performed using the `threads impute` command, which takes the following arguments:
+```
+threads impute \
+    --panel [panel genotypes in bcf/vcf/vcf.gz format] \
+    --target [target genotypes (arrays) in bcf/vcf/vcf.gz format] \
+    --mut [output from "threads map" command above] \
+    --map [path to genetic map] \
+    --mutation_rate [default 1.4e-8] \
+    --demography [demographic history as used by threads infer] \
+    --region [region to map, end-inclusive, in "1:234-567"-format] \
+    --out [path to output.vcf] file \
+```
+Genetic maps may be found e.g. [here](https://github.com/odelaneau/shapeit4/tree/master/maps).
