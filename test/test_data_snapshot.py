@@ -60,10 +60,10 @@ def test_data_snapshot_regression():
         threads_path = Path(tmpdir) / "test_data_snapshot_regression.threads"
         test_data_dir = BASE_DIR / "test" / "data"
         threads_infer(
-            pgen=str(test_data_dir / "N250.pgen"),
-            map_gz=str(test_data_dir / "test_data.map"),
+            pgen=str(test_data_dir / "panel.pgen"),
+            map_gz=str(test_data_dir / "gmap_02.map"),
             recombination_rate=1.3e-8,
-            demography=str(test_data_dir / "Ne10000.demo"),
+            demography=str(test_data_dir / "CEU_unscaled.demo"),
             mutation_rate=1.4e-8,
             query_interval=0.01,
             match_group_interval=0.5,
@@ -75,7 +75,7 @@ def test_data_snapshot_regression():
         )
 
         # Compare against expected snapshot of threads data
-        threads_expected_path = BASE_DIR / "test" / "data" / "expected_N250.threads"
+        threads_expected_path = test_data_dir / "arg.threads"
         _check_hdf_files_match(threads_path, threads_expected_path)
 
         # Convert generated output
@@ -90,5 +90,5 @@ def test_data_snapshot_regression():
         )
 
         # Compare against expected snapshot of argn data
-        convert_expected_path = BASE_DIR / "test" / "data" / "expected_N250.argn"
+        convert_expected_path = test_data_dir / "arg.argn"
         _check_hdf_files_match(argn_path, convert_expected_path)

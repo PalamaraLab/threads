@@ -42,21 +42,21 @@ def test_impute_snapshot_regression():
     Regression check for difference in output from threads impute
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
-        generated_vcf_path = Path(tmp_dir) / "test_impute_snapshot_regression.vcf"
+        generated_vcf_path = Path(tmp_dir) / "test_imputed.vcf"
         data_dir = BASE_DIR / "test" / "data"
 
         start_time = time.perf_counter()
         Impute(
             data_dir / "panel.vcf.gz",
             data_dir / "target.vcf.gz",
-            data_dir / "gmap.gz",
-            data_dir / "mutations.mut",
-            data_dir / "demography.demo",
+            data_dir / "gmap_04.map",
+            data_dir / "mapping.mut",
+            data_dir / "CEU_unscaled.demo",
             generated_vcf_path,
-            "1:5000000-5500000"
+            "1:400000-600000"
         )
 
         end_time = time.perf_counter()
         print(f"Impute ran in {end_time - start_time}s")
 
-        _check_vcf_files_match(data_dir / "impute_expected.vcf", generated_vcf_path)
+        _check_vcf_files_match(data_dir / "imputed.vcf", generated_vcf_path)
