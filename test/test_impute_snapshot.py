@@ -48,7 +48,7 @@ def _check_files_match(expected_path, generated_path, line_compare_fn):
 
 def test_map_snapshot_regression():
     """
-    Regression check for for map FIXME
+    Regression check for for deterministic mapping generation
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
         data_dir = BASE_DIR / "test" / "data"
@@ -60,7 +60,7 @@ def test_map_snapshot_regression():
             maf=0.01,
             input=str(data_dir / "panel.vcf.gz"),
             region="1:400000-600000",
-            threads=1
+            num_threads=1
         )
         end_time = time.perf_counter()
         print(f"Map ran in {end_time - start_time}s")

@@ -181,7 +181,7 @@ class MutationMap:
         self.mapped = mapping_str != "NaN"
         self.uniquely_mapped = self.mapped and len(mapping_str.split(";")) == 1
         if self.mapped:
-            for mut in mapping_str.split(";"): # FIXME review performance as part of mapping PR
+            for mut in mapping_str.split(";"):
                 ids, lower, upper = mut.split(",")
                 for sample_id in ids.split("."):
                     self.boundaries[int(sample_id)] = (float(lower), float(upper))
