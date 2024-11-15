@@ -20,21 +20,56 @@ import time
 from pathlib import Path
 
 from threads_arg.impute import Impute
+from threads_arg.map_mutations_to_arg import threads_map_mutations_to_arg
 
 BASE_DIR = Path(__file__).parent.parent
 
 
-def _check_vcf_files_match(expected_vcf_path, generated_vcf_path):
-    expected = open(expected_vcf_path)
-    generated = open(generated_vcf_path)
+def _line_assert_eq(line, lhs, rhs):
+    assert(lhs == rhs)
+
+
+def _line_assert_eq_ignore_date(line, lhs, rhs):
+    if line == 3:
+        assert(lhs[0:10] == "##fileDate")
+    else:
+        assert(lhs == rhs)
+
+
+def _check_files_match(expected_path, generated_path, line_compare_fn):
+    expected = open(expected_path)
+    generated = open(generated_path)
 
     for i, lhs in enumerate(expected):
         line = i + 1
         rhs = generated.readline()
-        if line == 3:
-            assert(lhs[0:10] == "##fileDate")
-        else:
-            assert(lhs == rhs)
+        line_compare_fn(line, lhs, rhs)
+
+
+def test_map_snapshot_regression():
+    """
+    Regression check for for map FIXME
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        data_dir = BASE_DIR / "test" / "data"
+        generated_mut_path = Path(tmp_dir) / "test_mapping.mut"
+        start_time = time.perf_counter()
+        threads_map_mutations_to_arg(
+            argn=str(data_dir / "arg.argn"),
+            out=str(generated_mut_path),
+            maf=0.01,
+            input=str(data_dir / "panel.vcf.gz"),
+            region="1:400000-600000",
+            threads=1
+        )
+        end_time = time.perf_counter()
+        print(f"Map ran in {end_time - start_time}s")
+
+        _check_files_match(
+            expected_path=str(data_dir / "mapping.mut"),
+            generated_path=str(generated_mut_path),
+            line_compare_fn=_line_assert_eq
+        )
 
 
 def test_impute_snapshot_regression():
@@ -59,4 +94,8 @@ def test_impute_snapshot_regression():
         end_time = time.perf_counter()
         print(f"Impute ran in {end_time - start_time}s")
 
-        _check_vcf_files_match(data_dir / "imputed.vcf", generated_vcf_path)
+        _check_files_match(
+            expected_path=str(data_dir / "imputed.vcf"),
+            generated_path=str(generated_vcf_path),
+            line_compare_fn=_line_assert_eq_ignore_date
+        )
