@@ -113,19 +113,5 @@ def impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-
     goodbye()
 
 
-@click.command()
-@click.argument("mode", type=click.Choice(["infer", "convert", "map"]))
-@click.option("--argn", help="Path to .argn file with results")
-@click.option("--out", help="Where to save results")
-@click.option("--maf", type=float, default=0.02, help="Don't map stuff with MAF above this")
-@click.option("--input", type=str, help="Path to bcf/vcf with genotypes to map. Most have AC/AN fields")
-@click.option("--region", type=str, help="Of format chr:start-end (both inclusive)")
-@click.option("--threads", type=int, help="Of format chr:start-end (both inclusive)", default=1)
-def map_mutations_to_arg(argn, out, maf, input, region, threads):
-    from .map_mutations_to_arg import threads_map_mutations_to_arg
-    threads_map_mutations_to_arg(argn, out, maf, input, region, threads)
-    goodbye()
-
-
 if __name__ == "__main__":
     main()
