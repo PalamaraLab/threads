@@ -136,7 +136,7 @@ def _map_region(argn, input, region, maf_threshold):
     return return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped
 
 
-def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
+def threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads):
     """
     Map mutations to an ARG using a method based on Speidel et al. (2019) and save output to a .mut file to inform imputation.
 
@@ -155,12 +155,12 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, threads):
     logger.info(f"maf:     {maf}")
     logger.info(f"input:   {input}")
     logger.info(f"region:  {region}")
-    logger.info(f"threads: {threads}")
+    logger.info(f"threads: {num_threads}")
     logger.info("WARNING: Threads-map is experimental.")
     start_time = time.time()
 
-    actual_num_threads = min(len(os.sched_getaffinity(0)), threads)
-    logger.info(f"Requested {threads} threads, found {actual_num_threads}.")
+    actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)
+    logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
 
     return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = None, None, None, None
     if actual_num_threads == 1:
