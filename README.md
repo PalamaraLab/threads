@@ -1,30 +1,29 @@
 # Installation (rescomp only):
 
-Load everything we'll need
-```
-module load GCC/11.3.0
-module load CMake/3.23.1-GCCcore-11.3.0
-module load git/2.36.0-GCCcore-11.3.0-nodocs
-module load Python/3.10.4-GCCcore-11.3.0
-module load GSL/2.7-GCC-11.3.0
-module load Boost/1.79.0-GCC-11.3.0
-module load pybind11/2.9.2-GCCcore-11.3.0
-```
-
-Fire up and activate a new venv:
-```
-python -m venv venv
-. venv/bin/activate
-
-pip install --upgrade pip setuptools wheel
-pip install cmake ninja
-```
-
-Then install Threads:
-```
+Clone the Threads repo:
+```sh
 git clone https://github.com/PalamaraLab/TDPBWT.git
 cd TDPBWT
+```
+
+Load development modules:
+```sh
+module load Python/3.11.3-GCCcore-12.3.0
+module load Boost/1.82.0-GCC-12.3.0
+module load HDF5/1.14.0-gompi-2023a
+```
+
+Create a new venv, activate and `pip install` to build:
+```sh
+python -m venv venv
+. venv/bin/activate
+pip install --upgrade pip setuptools wheel
 pip install .
+```
+
+For active development use `-e` and `[dev]` to for additional dependencies:
+```sh
+pip install -e .[dev]
 ```
 
 # Usage
@@ -67,9 +66,9 @@ threads infer \
     --num_threads 8 (default: 1)
 ```
 
-`--modality array` can be set for inference from arrays. 
+`--modality array` can be set for inference from arrays.
 
-`--query_interval` and `--match_group_interval` can be raised to save memory for inference over long genomic regions, this will have little impact on accuracy, especially for sparse variants. 
+`--query_interval` and `--match_group_interval` can be raised to save memory for inference over long genomic regions, this will have little impact on accuracy, especially for sparse variants.
 
 The HMM mutation rate can be set with `--mutation_rate`. This defaults to a realistic human rate of `1.4e-8` per site per generation.
 
@@ -84,12 +83,38 @@ threads convert \
     --threads arg.threads \
     --argn arg.argn
 ```
-and 
+and
 ```
 threads convert \
     --threads arg.threads \
     --tsz arg.tsz
 ```
 
-## Phasing/imputation/variant mapping
-These functions are in an experimental phase and will be released later.
+## Imputation
+Imputation using Threads proceeds in three steps. First, an ARG is inferred from the reference panel, using the `threads infer` procedure described above and converted to `.argn` format using `threads convert`. 
+
+Second, variants carried by the reference panel are assigned edges from within the ARG. This is performed using the `threads map` function, which accepts the following options:
+```
+threads map \
+    --argn path/to/arg.argn \
+    --maf [only variants with MAF below this threshold are mapped, default: 0.02] \
+    --input [panel genotypes in bcf/vcf/vcf.gz format] \
+    --region [region to map, end-inclusive, in "1:234-567"-format] \
+    --num_threads [number of computational threads to request, default: 1] \
+    --out path/to/output.mut
+```
+For imputation, we recommend setting the `--maf` threshold to `10 / N_panel`, where `N_panel` is the number of individuals in the panel. The above writes the mutation mapping to `path/to/output.mut`.
+
+Finally, imputation is performed using the `threads impute` command, which takes the following arguments:
+```
+threads impute \
+    --panel [panel genotypes in bcf/vcf/vcf.gz format] \
+    --target [target genotypes (arrays) in bcf/vcf/vcf.gz format] \
+    --mut [output from "threads map" command above] \
+    --map [path to genetic map] \
+    --mutation_rate [default 1.4e-8] \
+    --demography [demographic history as used by threads infer] \
+    --region [region to map, end-inclusive, in "1:234-567"-format] \
+    --out [path to output.vcf] file \
+```
+Genetic maps may be found e.g. [here](https://github.com/odelaneau/shapeit4/tree/master/maps).
