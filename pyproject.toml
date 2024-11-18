@@ -10,7 +10,7 @@ readme = "README_PyPI.md"
 authors = [
     { name = "Threads Developers" }
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 dependencies = [
     "click",
@@ -20,7 +20,7 @@ dependencies = [
     "numba",
     "numpy<2.0",
     "tszip",
-    "arg-needle-lib",
+    "arg-needle-lib==1.1.1",
     "cyvcf2",
     "ray",
     "pgenlib==0.83.0",
@@ -31,7 +31,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
