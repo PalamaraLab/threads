@@ -18,12 +18,12 @@ dependencies = [
     "h5py",
     "pandas",
     "numba",
-    "numpy<2.0",
+    "numpy",
     "tszip",
     "arg-needle-lib==1.1.1",
     "cyvcf2",
     "ray",
-    "pgenlib==0.83.0",
+    "pgenlib",
     "tqdm"
 ]
 
