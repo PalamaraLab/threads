@@ -20,6 +20,7 @@ import h5py
 import pandas as pd
 import warnings
 import logging
+import pgenlib
 import time
 
 from contextlib import contextmanager
@@ -29,26 +30,30 @@ logger = logging.getLogger(__name__)
 def decompress_threads(threads):
     f = h5py.File(threads, "r")
 
-    samples, thread_starts = f["samples"][:, 0], f["samples"][:, 1]
+    samples, thread_starts, het_starts = f["samples"][:, 0], f["samples"][:, 1], f["samples"][:, 2]
     positions = f['positions'][...]
     flat_ids, flat_bps = f['thread_targets'][:, :-1], f['thread_targets'][:, -1]
     flat_ages = f['thread_ages'][...]
+    flat_hets = f['het_sites'][...]
+
     try:
         arg_range = f['arg_range'][...]
     except KeyError:
         arg_range = [np.nan, np.nan]
 
     threading_instructions = []
-    for i, start in enumerate(thread_starts):
+    for i, (start, het_start) in enumerate(zip(thread_starts, het_starts)):
         if i == len(thread_starts) - 1:
             ids = flat_ids[start:]
             bps = flat_bps[start:]
             ages = flat_ages[start:]
+            hets = flat_hets[het_start:]
         else:
             ids = flat_ids[start:thread_starts[i + 1]]
             bps = flat_bps[start:thread_starts[i + 1]]
             ages = flat_ages[start:thread_starts[i + 1]]
-        threading_instructions.append((bps, ids, ages))
+            hets = flat_hets[het_start:het_starts[i + 1]]
+        threading_instructions.append((bps, ids, ages, hets))
     return {
         "threads": threading_instructions,
         "samples": samples,
@@ -191,3 +196,39 @@ class TimerTotal:
     def __str__(self):
         total = sum(self.durations)
         return f"Total time for {self.desc}: {total:.3f}s"
+
+def iterate_pgen(pgen, callback, start_idx=None, end_idx=None, **kwargs):
+    """
+    Wrapper to iterate over each site in a .pgen with a callback,
+    batching to reduce memory usage and read time
+    """
+    # Initialize read batching
+    reader = pgenlib.PgenReader(pgen.encode())
+    num_samples = reader.get_raw_sample_ct()
+    num_sites = reader.get_variant_ct()
+    if start_idx is None:
+        start_idx = 0
+    if end_idx is None:
+        end_idx = num_sites
+    M = end_idx - start_idx
+
+    BATCH_SIZE = int(4e7 // num_samples)
+    n_batches = int(np.ceil(M / BATCH_SIZE))
+    # Get singleton filter for the matching step
+    alleles_out = None
+    phased_out = None
+    i = 0
+    for b in range(n_batches):
+        b_start = b * BATCH_SIZE + start_idx
+        b_end = min(end_idx, (b+1) * BATCH_SIZE)
+        g_size = b_end - b_start
+        alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
+        phasepresent_out = np.empty((g_size, num_samples), dtype=np.uint8)
+        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phasepresent_out)
+        if np.any(phasepresent_out == 0):
+            raise RuntimeError("Unphased variants are currently not supported.")
+        for g in alleles_out:
+            callback(i, g, **kwargs)
+            i += 1
+    # Make sure we processed as many things as wanted to
+    assert i == M
