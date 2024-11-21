@@ -29,72 +29,47 @@ import numpy as np
 from threads_arg import (
     ThreadsLowMem,
     Matcher,
-    ViterbiPath
+    ViterbiPath,
+    ThreadingInstructions,
+    AgeEstimator,
+    ConsistencyWrapper
 )
 from .utils import (
     interpolate_map,
     parse_demography,
     get_map_from_bim,
-    split_list
+    split_list,
+    iterate_pgen
 )
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
-def serialize_paths(paths, positions, out, start=None, end=None):
-    """
-    Compress a list of paths across input positions
-    """
-    samples = [i for i in range(len(paths))]
-    num_threads = len(samples)
-    num_sites = len(positions)
+def serialize_instructions(instructions, out):
+    # breakpoint()
+    num_threads = instructions.num_samples
+    num_sites = instructions.num_sites
+    positions = instructions.positions
+    start = instructions.start
+    end = instructions.end
+    samples = list(range(num_threads))
+    
+    all_starts = instructions.all_starts()
+    all_targets = instructions.all_targets()
+    all_tmrcas = instructions.all_tmrcas()
+    all_mismatches = instructions.all_mismatches()
 
-    region_start = positions[0] if start == None else max(positions[0], start)
-    region_end = positions[-1] + 1 if end == None else min(positions[-1] + 1, end + 1)
+    thread_starts = np.cumsum([0] + [len(starts) for starts in all_starts[:-1]])
+    mut_starts = np.cumsum([0] + [len(mismatches) for mismatches in all_mismatches[:-1]])
 
-    thread_starts = []
-    mut_starts = []
-    thread_start = 0
-    mut_start = 0
-    all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
+    flat_starts = [start for starts in all_starts for start in starts]
+    flat_tmrcas = [tmrca for tmrcas in all_tmrcas for tmrca in tmrcas]
+    flat_targets = [target for targets in all_targets for target in targets]
+    flat_mismatches = [mismatch for mismatches in all_mismatches for mismatch in mismatches]
 
-    for i, path in enumerate(paths):
-        path.map_positions(positions.astype(int))
-        bps, ids, ages = path.dump_data_in_range(region_start, region_end)
-        het_site_indices = np.array(path.het_sites, dtype=int)
-        het_sites = positions[het_site_indices]
-        het_indices_out = list(het_site_indices[(region_start <= het_sites) * (het_sites < region_end)])
-        if i > 0:
-            try:
-                assert bps[0] == region_start
-                if start is not None:
-                    assert bps[0] >= start
-                assert len(np.unique(bps)) == len(bps)
-                assert bps[-1] <= positions[-1]
-            except AssertionError:
-                logger.info("Error serializing a segment with the following data:")
-                logger.info(f"bps[0] {bps[0]}")
-                logger.info(f"region_start {region_start}")
-                logger.info(f"len(np.unique(bps)) {len(np.unique(bps))}")
-                logger.info(f"len(bps) {len(bps)}")
-                logger.info(f"bps[-1] {bps[-1]}")
-                logger.info(f"positions[-1] {positions[-1]}")
-
-        all_bps += bps
-        all_ids += ids
-        all_ages += ages
-        all_het_sites += het_indices_out
-        thread_starts.append(thread_start)
-        mut_starts.append(mut_start)
-        thread_start += len(bps)
-        mut_start += len(het_indices_out)
-
-    num_stitches = len(all_bps)
-    num_mutations = len(all_het_sites)
-
-    assert len(all_bps) == len(all_ids) == len(all_ages)
-    assert len(paths) == len(samples)
+    num_stitches = len(flat_starts)
+    num_mutations = len(flat_mismatches)
 
     f = h5py.File(out, "w")
     f.attrs['datetime_created'] = datetime.now().isoformat()
@@ -117,20 +92,105 @@ def serialize_paths(paths, positions, out, start=None, end=None):
     dset_samples[:, 0] = samples
     dset_samples[:, 1] = thread_starts
     dset_samples[:, 2] = mut_starts
+
+    dset_targets[:, 0] = flat_targets
+    dset_targets[:, 1] = flat_starts
+
     dset_pos[:] = positions
-
-    dset_targets[:, 0] = all_ids
-
-    dset_targets[:, 1] = all_bps
-
-    dset_ages[:] = all_ages
-
-    dset_het_s[:] = all_het_sites
-
-    dset_range[:] = [region_start, region_end]
+    dset_ages[:] = flat_tmrcas
+    dset_het_s[:] = flat_mismatches
+    dset_range[:] = [start, end]
 
     f.close()
 
+# def serialize_paths(paths, positions, out, start=None, end=None):
+#     """
+#     Compress a list of paths across input positions
+#     """
+#     samples = [i for i in range(len(paths))]
+#     num_threads = len(samples)
+#     num_sites = len(positions)
+
+#     region_start = positions[0] if start == None else max(positions[0], start)
+#     region_end = positions[-1] + 1 if end == None else min(positions[-1] + 1, end + 1)
+
+#     thread_starts = []
+#     mut_starts = []
+#     thread_start = 0
+#     mut_start = 0
+#     all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
+
+#     for i, path in enumerate(paths):
+#         path.map_positions(positions.astype(int))
+#         bps, ids, ages = path.dump_data_in_range(region_start, region_end)
+#         het_site_indices = np.array(path.het_sites, dtype=int)
+#         het_sites = positions[het_site_indices]
+#         het_indices_out = list(het_site_indices[(region_start <= het_sites) * (het_sites < region_end)])
+#         if i > 0:
+#             try:
+#                 assert bps[0] == region_start
+#                 if start is not None:
+#                     assert bps[0] >= start
+#                 assert len(np.unique(bps)) == len(bps)
+#                 assert bps[-1] <= positions[-1]
+#             except AssertionError:
+#                 logger.info("Error serializing a segment with the following data:")
+#                 logger.info(f"bps[0] {bps[0]}")
+#                 logger.info(f"region_start {region_start}")
+#                 logger.info(f"len(np.unique(bps)) {len(np.unique(bps))}")
+#                 logger.info(f"len(bps) {len(bps)}")
+#                 logger.info(f"bps[-1] {bps[-1]}")
+#                 logger.info(f"positions[-1] {positions[-1]}")
+
+#         all_bps += bps
+#         all_ids += ids
+#         all_ages += ages
+#         all_het_sites += het_indices_out
+#         thread_starts.append(thread_start)
+#         mut_starts.append(mut_start)
+#         thread_start += len(bps)
+#         mut_start += len(het_indices_out)
+
+#     num_stitches = len(all_bps)
+#     num_mutations = len(all_het_sites)
+
+#     assert len(all_bps) == len(all_ids) == len(all_ages)
+#     assert len(paths) == len(samples)
+
+#     f = h5py.File(out, "w")
+#     f.attrs['datetime_created'] = datetime.now().isoformat()
+
+#     compression_opts = 9
+#     dset_samples = f.create_dataset("samples", (num_threads, 3), dtype=int, compression='gzip',
+#                                     compression_opts=compression_opts)
+#     dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
+#                                     compression_opts=compression_opts)
+#     # First L columns are random samples for imputation
+#     dset_targets = f.create_dataset("thread_targets", (num_stitches, 2), dtype=int, compression='gzip',
+#                                     compression_opts=compression_opts)
+#     dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
+#                                     compression_opts=compression_opts)
+#     dset_het_s = f.create_dataset("het_sites", (num_mutations), dtype=int, compression='gzip',
+#                                     compression_opts=compression_opts)
+#     dset_range = f.create_dataset("arg_range", (2), dtype=np.double, compression='gzip',
+#                                   compression_opts=compression_opts)
+
+#     dset_samples[:, 0] = samples
+#     dset_samples[:, 1] = thread_starts
+#     dset_samples[:, 2] = mut_starts
+#     dset_pos[:] = positions
+
+#     dset_targets[:, 0] = all_ids
+
+#     dset_targets[:, 1] = all_bps
+
+#     dset_ages[:] = all_ages
+
+#     dset_het_s[:] = all_het_sites
+
+#     dset_range[:] = [region_start, region_end]
+
+#     f.close()
 
 def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_positions, demography, mu, sample_batch, s_match_group, match_cm_positions, max_sample_batch_size, num_threads, thread_id):
     """Parallelized ARG inference sub-routine"""
@@ -179,6 +239,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
             TLM.initialize_viterbi(s_match_group, match_cm_positions)
         else:
             TLM.initialize_viterbi([[s[k] for k in sample_index_subset] for s in s_match_group], match_cm_positions)
+        
         M = reader.get_variant_ct()
         BATCH_SIZE = int(4e7 // num_samples_hap)
         n_batches = int(np.ceil(M / BATCH_SIZE))
@@ -191,6 +252,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
         # Iterate across the genotypes and run Li-Stephens inference
         for b in range(n_batches):
+            # TODO: also pass this through "iterate_pgen"
             # Read genotypes and check for phase
             b_start = b * BATCH_SIZE
             b_end = min(M, (b+1) * BATCH_SIZE)
@@ -222,6 +284,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
         # Construct paths
         TLM.traceback()
 
+        # TODO: pass this through "iterate_pgen"
         # Add heterozygous sites to each path segment
         for b in range(n_batches):
             b_start = b * BATCH_SIZE
@@ -250,7 +313,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, data_consistent, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logger.info(f"Starting Threads-infer with the following parameters:")
@@ -260,6 +323,8 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, q
     logger.info(f"  region:                {region}")
     logger.info(f"  demography:            {demography}")
     logger.info(f"  mutation_rate:         {mutation_rate}")
+    logger.info(f"  allele_ages:           {allele_ages}")
+    logger.info(f"  data_consistent:       {data_consistent}")
     logger.info(f"  query_interval:        {query_interval}")
     logger.info(f"  match_group_interval:  {match_group_interval}")
     logger.info(f"  num_threads:           {num_threads}")
@@ -281,30 +346,25 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, q
     reader = pgenlib.PgenReader(pgen.encode())
     num_samples = reader.get_raw_sample_ct()
     num_sites = reader.get_variant_ct()
+    assert num_sites == len(physical_positions)
     logger.info(f"Will build an ARG on {2 * num_samples} haplotypes using {num_sites} sites")
     if max_sample_batch_size is None:
         max_sample_batch_size = 2 * num_samples
 
     # Initialize read batching
-    M = len(physical_positions)
-    assert num_sites == M
-    BATCH_SIZE = int(4e7 // num_samples)
-    n_batches = int(np.ceil(M / BATCH_SIZE))
+    # M = len(physical_positions)
+    # BATCH_SIZE = int(4e7 // num_samples)
+    # n_batches = int(np.ceil(M / BATCH_SIZE))
 
     logger.info("Finding singletons")
     # Get singleton filter for the matching step
     alleles_out = None
     phased_out = None
-    ac_mask = np.zeros(genetic_positions.shape, dtype=bool)
-    for b in range(n_batches):
-        b_start = b * BATCH_SIZE
-        b_end = min(M, (b+1) * BATCH_SIZE)
-        g_size = b_end - b_start
-        alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
-        phased_out = np.empty((g_size, num_samples), dtype=np.uint8)
-        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
-        # Filter out unphased variants and singletons
-        ac_mask[b_start:b_end] = (alleles_out.sum(axis=1) > 1) * ~np.any(phased_out == 0, axis=1)
+    ac_mask = []
+    # ac_mask = np.zeros(genetic_positions.shape, dtype=bool)
+    iterate_pgen(pgen, lambda i, g: ac_mask.append(1 < g.sum() < 2 * num_samples))
+    ac_mask = np.array(ac_mask, dtype=bool)
+    assert ac_mask.shape == genetic_positions.shape
 
     logger.info("Running PBWT matching")
 
@@ -318,18 +378,11 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, q
     MIN_MATCHES = 4
     neighborhood_size = 4
     matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
-
-    # Matching step
-    for b in range(n_batches):
-        b_start = b * BATCH_SIZE
-        b_end = min(M, (b+1) * BATCH_SIZE)
-        g_size = b_end - b_start
-        batch_mask = ac_mask[b_start:b_end]
-        alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
-        phased_out = np.empty((g_size, num_samples), dtype=np.uint8)
-        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
-        for g in alleles_out[batch_mask]:
+    def matcher_callback(i, g, mask, matcher):
+        if mask[i]:
             matcher.process_site(g)
+    iterate_pgen(pgen, matcher_callback, mask=ac_mask, matcher=matcher)
+
     # Add top matches from adjacent sites to each match-chunk
     matcher.propagate_adjacent_matches()
 
@@ -393,7 +446,47 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, q
 
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results):
             paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
-    logger.info(f"Writing to {out}")
+    
+    # Inference is done, now we slice up the threading instructions and keep only the region requested
+    region_start = physical_positions[0] if out_start is None else max(physical_positions[0], out_start)
+    region_end = physical_positions[-1] + 1 if out_end is None else min(physical_positions[-1] + 1, out_end + 1)
+    instructions = ThreadingInstructions(paths, int(region_start), int(region_end), physical_positions.astype(int))
+
+
+    if data_consistent:
+        logger.info("Starting data-consistency post-processing")
+        allele_age_data = None
+        start_idx = np.searchsorted(physical_positions, region_start)
+        end_idx = np.searchsorted(physical_positions, region_end, side="right")
+
+        if allele_ages is None:
+            logger.info(f"Inferring allele ages from data")
+            age_estimator = AgeEstimator(instructions)
+            iterate_pgen(pgen, lambda i, g: age_estimator.process_site(g), start_idx=start_idx, end_idx=end_idx)
+            allele_age_estimates = age_estimator.get_inferred_ages()
+            assert len(allele_age_estimates) == len(instructions.positions)
+        else:
+            allele_age_estimates = []
+            with open(allele_ages, "r") as agefile:
+                for line in agefile:
+                    allele_age_estimates.append(float(line.strip()))
+            try:
+                assert len(allele_age_estimates) == len(instructions.positions)
+            except AssertionError:
+                raise RuntimeError(f"Allele age estimates do not match markers in the region requested, expected {len(instructions.positions)} age estimates.")
+        # start the consistifying
+        # with open("ages.tmp", "w") as agefile:
+        #     for pos, age in zip(physical_positions, allele_age_estimates):
+        #         agefile.write(f"{pos}\t{age}\n")
+        cw = ConsistencyWrapper(instructions, allele_age_estimates)
+        iterate_pgen(pgen, lambda i, g: cw.process_site(g), start_idx=start_idx, end_idx=end_idx)
+        consistent_instructions = cw.get_consistent_instructions()
+        logger.info(f"Writing to {out}")
+        serialize_instructions(consistent_instructions, out)
+    else:
+        logger.info(f"Writing to {out}")
+        serialize_instructions(instructions, out)
+
     # Save results
-    serialize_paths(paths, physical_positions.astype(int), out, start=out_start, end=out_end)
     logger.info(f"Done in (s): {time.time() - start_time}")
+

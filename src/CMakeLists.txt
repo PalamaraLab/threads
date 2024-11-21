@@ -39,6 +39,9 @@ set(threads_arg_src
     Matcher.cpp
     ViterbiLowMem.cpp
     ThreadsLowMem.cpp
+    ThreadingInstructions.cpp
+    DataConsistency.cpp
+    AlleleAges.cpp
 )
 
 set(threads_arg_hdr
@@ -53,6 +56,9 @@ set(threads_arg_hdr
     Matcher.hpp
     ViterbiLowMem.hpp
     ThreadsLowMem.hpp
+    ThreadingInstructions.hpp
+    DataConsistency.hpp
+    AlleleAges.hpp
 )
 
 add_library(threads_arg STATIC

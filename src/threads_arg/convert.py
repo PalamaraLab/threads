@@ -48,7 +48,7 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False, random_seed
             logger.info(f"Sequence {i + 1}...")
         arg.add_sample(str(i))
         if i > 0:
-            section_starts, thread_ids, thread_heights = t
+            section_starts, thread_ids, thread_heights, _ = t
             if len(thread_ids.shape) == 2:
                 thread_ids = thread_ids[:, 0]
             thread_heights += thread_heights * rng.normal(0.0, noise, len(thread_heights))
@@ -94,9 +94,9 @@ def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
         arg = threads_to_arg(decompressed_threads, noise=0.0, max_n=max_n, verify=verify, random_seed=random_seed)
     except:
         # arg_needle_lib does not allow polytomies
-        logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
+        logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-6...")
         try:
-            arg = threads_to_arg(decompressed_threads, noise=1e-5, max_n=max_n, verify=verify, random_seed=random_seed)
+            arg = threads_to_arg(decompressed_threads, noise=1e-6, max_n=max_n, verify=verify, random_seed=random_seed)
         except:# tskit.LibraryError:
             logger.info(f"Conflicting branches, retrying with noise=1e-3...")
             arg = threads_to_arg(decompressed_threads, noise=1e-3, max_n=max_n, verify=verify, random_seed=random_seed)

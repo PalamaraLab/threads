@@ -46,6 +46,8 @@ def main():
 @click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed.")
 @click.option("--demography", required=True, help="Path to input genotype.")
 @click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array).")
+@click.option("--data_consistent", is_flag=True, default=False, help="If specified, Threads performs a post-processing step to ensure the inferred ARG contains an edge matching each input mutation.")
+@click.option("--allele_ages", default=None, help="Allele ages used for post-processing with the --data_consistent option, otherwise ignored. If not specified, allele ages are inferred automatically.")
 @click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM.")
 @click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM.")
 @click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate.")
@@ -53,9 +55,9 @@ def main():
 @click.option("--region", help="Region of genome for which ARG is output. The full genotype is still used for inference.")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
-def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, data_consistent, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     from .infer import threads_infer
-    threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
+    threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, data_consistent, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
     goodbye()
 
 
@@ -76,7 +78,7 @@ def phase(scaffold, argn, ts, unphased, out):
 @click.option("--argn", default=None, help="Path to an output .argn file.")
 @click.option("--tsz", default=None, help="Path to an output .tsz file.")
 @click.option("--max_n", default=None, help="How many samples to thread.", type=int)
-@click.option("--random-seed", default=None, help="Seed for noise generation.", type=int)
+@click.option("--random-seed", default=130222, help="Seed for noise generation.", type=int)
 @click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG.")
 def convert(threads, argn, tsz, max_n, random_seed, verify):
     from .convert import threads_convert
