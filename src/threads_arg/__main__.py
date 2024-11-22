@@ -52,7 +52,7 @@ def main():
 @click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM.")
 @click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate.")
 @click.option("--num_threads", type=int, default=1, help="Number of computational threads to request.")
-@click.option("--region", help="Region of genome for which ARG is output. The full genotype is still used for inference.")
+@click.option("--region", default=None, help="Region of genome for which ARG is output. The full genotype is still used for inference.")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
 def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, data_consistent, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
@@ -60,8 +60,7 @@ def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, data_cons
     threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, data_consistent, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
     goodbye()
 
-
-@click.command()
+@main.command()
 @click.option("--scaffold", required=True, help="Path to vcf containing phased scaffold of common variants")
 @click.option("--argn", help="Path to reference ARG in .argn format")
 @click.option("--ts", help="Path to reference ARG in .ts format")
@@ -71,7 +70,6 @@ def phase(scaffold, argn, ts, unphased, out):
     from .phase import threads_phase
     threads_phase(scaffold, argn, ts, unphased, out)
     goodbye()
-
 
 @main.command()
 @click.option("--threads", required=True, help="Path to an input .threads file.")
@@ -85,12 +83,31 @@ def convert(threads, argn, tsz, max_n, random_seed, verify):
     threads_convert(threads, argn, tsz, max_n, random_seed, verify)
     goodbye()
 
+@main.command()
+@click.option("--threads", required=True, help="Path to an input .threads file.")
+@click.option("--pgen", required=True, help="Path to an input .pgen file.")
+@click.option("--region", help="Region in 123-456 format, defaults to the whole ARG.")
+@click.option("--out", required=True, help="Path to output.")
+def allele_ages(threads, pgen, region, out):
+    from .allele_ages import estimate_allele_ages
+    estimate_allele_ages(threads, pgen, region, out)
+    goodbye()
+
+@main.command()
+@click.option("--threads", required=True, help="Path to an input .threads file.")
+@click.option("--pgen", required=True, help="Path to an input .pgen file.")
+@click.option("--region", default=None, help="Region in 123-456 format, defaults to the whole ARG.")
+@click.option("--allele_ages", default=None, help="Path to file containing allele ages to fit to. If not specified, will automatically infer allele ages.")
+@click.option("--out", required=True, help="Path to output .threads file.")
+def fit_to_data(threads, pgen, region, allele_ages, out):
+    from .data_consistency import fit_to_data
+    fit_to_data(threads, pgen, region, allele_ages, out)
+    goodbye()
 
 @main.command()
 def map():
     print("threads map implementation coming soon")
     goodbye()
-
 
 @main.command()
 @click.option("--panel", required=True, help="pgen array panel")

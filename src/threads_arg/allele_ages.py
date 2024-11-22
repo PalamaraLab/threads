@@ -1,37 +1,66 @@
-# import threads_arg
-# import pgenlib
-# import numpy as np
+# This file is part of the Threads software suite.
+# Copyright (C) 2024 Threads Developers.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# def estimate_allele_ages(instructions, physical_positions, pgen, start_idx, end_idx):
-#     # NB! this code is largely copied from the infer() function, 
-#     # consider writing a batched readier that does this consistently
-#     age_estimator = threads_arg.AgeEstimator(instructions)
+import logging
+import numpy as np
 
-#     reader = pgenlib.PgenReader(pgen.encode())
-#     num_samples = reader.get_raw_sample_ct()
-#     num_sites = reader.get_variant_ct()
-#     assert physical_positions == num_sites
-#     site_indicator = (start <= physical_positions) & (physical_positions <= end)
+from threads_arg import AgeEstimator
+from .serialization import load_instructions
+from .utils import iterate_pgen, read_positions_and_ids
 
-#     # Initialize read batching
-#     M = len(physical_positions)
-#     assert num_sites == M
-#     BATCH_SIZE = int(4e7 // num_samples)
-#     n_batches = int(np.ceil(M / BATCH_SIZE))
+def estimate_allele_ages(threads, pgen, region, out):
+    logging.info("Starting allele age estimation with the following parameters:")
+    logging.info(f"threads:  {threads}")
+    logging.info(f"pgen:     {pgen}")
+    logging.info(f"region:   {region}")
+    logging.info(f"out:      {out}")
+    # Read threading instructions
+    instructions = load_instructions(threads)
 
-#     logger.info("Finding singletons")
-#     # Get singleton filter for the matching step
-#     alleles_out = None
-#     phased_out = None
-#     site_counter = 0
-#     for b in range(n_batches):
-#         b_start = b * BATCH_SIZE
-#         b_end = min(M, (b+1) * BATCH_SIZE)
-#         g_size = b_end - b_start
-#         alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
-#         phased_out = np.empty((g_size, num_samples), dtype=np.uint8)
-#         reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
-#         # Filter out unphased variants and singletons
-#         for g in alleles_out:
-#             age_estimator.process_site(g)
-#     return age_estimator.get_inferred_ages
+    # Find the intersection of ARG/pgen/requested regions
+    if region is not None:
+        region_start = int(region.split(":")[-1].split("-")[0])
+        region_end = int(region.split(":")[-1].split("-")[1])
+    else:
+        region_start = -np.inf
+        region_end = np.inf
+    arg_start = instructions.start
+    arg_end = instructions.end
+
+    positions, ids = read_positions_and_ids(pgen)
+
+    pgen_start = positions[0]
+    pgen_end = positions[-1] + 1
+
+    allele_age_start = max([arg_start, region_start, pgen_start])
+    allele_age_end = min([arg_end, region_end, pgen_end])
+
+    start_idx = np.searchsorted(positions, allele_age_start)
+    end_idx = np.searchsorted(positions, allele_age_end, side="right")
+    logging.info(f"Will estimate the age of {end_idx - start_idx} variants")
+
+    # Initialize the age estimator
+    age_estimator = AgeEstimator(instructions)
+
+    # Do the age estimation
+    iterate_pgen(pgen, lambda i, g: age_estimator.process_site(g), start_idx=start_idx, end_idx=end_idx)
+    allele_age_estimates = age_estimator.get_inferred_ages()
+
+    # Write results to file
+    with open(out, "w") as outfile:
+        for allele_age, snp_id in zip(allele_age_estimates, ids[start_idx:end_idx]):
+            outfile.write(f"{snp_id}\t{allele_age}\n")
+

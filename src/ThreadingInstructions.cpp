@@ -1,3 +1,19 @@
+// This file is part of the Threads software suite.
+// Copyright (C) 2024 Threads Developers.
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 #include "ThreadingInstructions.hpp"
 #include <limits>
 #include <iostream>
@@ -56,11 +72,11 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ThreadingInstruct
     num_sites = positions.size();
 }
 
-ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& paths, const int _start, const int _end, const std::vector<int>& _positions) :
+ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& paths, const int _start, const int _end, const std::vector<int>& all_positions) :
     start(_start), end(_end) {
     num_samples = paths.size();
 
-    for (auto pos : _positions) {
+    for (auto pos : all_positions) {
         if (start <= pos && pos < end) {
             positions.push_back(pos);
         } 
@@ -75,15 +91,28 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
     std::vector<double> tmrcas;
     for (auto path : paths) {
         std::vector<int> mismatches;
-        path.map_positions(positions);
+        path.map_positions(all_positions);
         std::tie(starts, targets, tmrcas) = path.dump_data_in_range(start, end);
         for (auto het_idx : path.het_sites) {
-            int het_pos = positions.at(het_idx);
+            int het_pos = all_positions.at(het_idx);
             if ((start <= het_pos) && (het_pos < end)) { 
                 mismatches.push_back(het_idx);
             }
         }
         instructions.push_back(ThreadingInstruction(starts, tmrcas, targets, mismatches));
+    }
+}
+
+ThreadingInstructions::ThreadingInstructions(const std::vector<std::vector<int>>& starts,
+                        const std::vector<std::vector<double>>& tmrcas,
+                        const std::vector<std::vector<int>>& targets,
+                        const std::vector<std::vector<int>>& mismatches,
+                        const std::vector<int>& _positions, int _start, int _end) :
+    positions(_positions), start(_start), end(_end) {
+    num_samples = starts.size();
+    num_sites = positions.size();
+    for (int i = 0; i < num_samples; i++) {
+        instructions.push_back(ThreadingInstruction(starts.at(i), tmrcas.at(i), targets.at(i), mismatches.at(i)));
     }
 }
 

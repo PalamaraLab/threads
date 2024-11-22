@@ -45,7 +45,7 @@ public:
   dump_data_in_range(int start_idx, int end_idx);
   void reverse();
   int size() const;
-  void map_positions(std::vector<int>& positions);
+  void map_positions(const std::vector<int>& positions);
 
 public:
   double score = 0.0;
