@@ -83,7 +83,7 @@ void ViterbiPath::append(int segment_start, int sample_id, double height,
   het_sites.insert(het_sites.end(), new_het_sites.begin(), new_het_sites.end());
 }
 
-void ViterbiPath::map_positions(std::vector<int>& positions) {
+void ViterbiPath::map_positions(const std::vector<int>& positions) {
   bp_starts.reserve(size());
   for (auto s : segment_starts) {
     bp_starts.push_back(positions.at(s));

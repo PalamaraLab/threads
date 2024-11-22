@@ -22,20 +22,20 @@ import arg_needle_lib
 
 import numpy as np
 
-from .utils import decompress_threads
+from .serialization import decompress_threads
 
 logger = logging.getLogger(__name__)
 
 
-def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False, random_seed=0):
+def threads_to_arg(instructions, noise=0.0, max_n=None, verify=False, random_seed=0):
     """
     Assemble threading instructions into an ARG
     """
-    threading_instructions = thread_dict['threads']
-    pos = thread_dict['positions']
-    N = max_n if max_n is not None else np.max(thread_dict['samples'].astype(int)) + 1
+    # threading_instructions = thread_dict['threads']
+    # pos = thread_dict['positions']
+    N = max_n if max_n is not None else np.max(instructions.num_samples) + 1
     logger.info(f"Will thread {N} haploids")
-    arg_start, arg_end = thread_dict['arg_range']
+    arg_start, arg_end = instructions.start, instructions.end
     # "+ 2" so we can include mutations on the last site, ARG is end-inclusive, we're not.
     arg = arg_needle_lib.ARG(0, arg_end - arg_start + 2, reserved_samples=N)
     arg.set_offset(int(arg_start))
@@ -43,27 +43,21 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False, random_seed
     rng = np.random.default_rng(seed=random_seed)
 
     # How this should work:
-    for i, t in enumerate(threading_instructions[:N]):
-        if i % 1000 == 0:
-            logger.info(f"Sequence {i + 1}...")
+    for i, (section_starts, thread_ids, thread_heights) in enumerate(zip(instructions.all_starts(), instructions.all_targets(), instructions.all_tmrcas())):
+        if i == N:
+            break
         arg.add_sample(str(i))
         if i > 0:
-            section_starts, thread_ids, thread_heights, _ = t
-            if len(thread_ids.shape) == 2:
-                thread_ids = thread_ids[:, 0]
+            thread_heights = np.array(thread_heights)
             thread_heights += thread_heights * rng.normal(0.0, noise, len(thread_heights))
 
             # arg will throw exception if there is a collision in heights. In this instance,
             # the caller will increase the amount of noise to offset further and try again.
             arg_starts = [s - arg.offset for s in section_starts]
-            try:
-                if arg_starts[-1] >= arg.end:
-                    arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1])
-                else:
-                    arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights)
-            except ValueError:
-                import pdb
-                pdb.set_trace()
+            if arg_starts[-1] >= arg.end:
+                arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1])
+            else:
+                arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights)
     logger.info(f"Done threading")
 
     if verify:

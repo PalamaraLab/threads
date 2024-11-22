@@ -62,7 +62,13 @@ public:
     std::vector<std::vector<int>> all_mismatches();
     std::vector<int> positions;
     ThreadingInstructions(const std::vector<ThreadingInstruction>& _instructions, const std::vector<int>& _positions);
-    ThreadingInstructions(const std::vector<ViterbiPath>& paths, const int start, const int end, const std::vector<int>& _positions);
+    ThreadingInstructions(const std::vector<ViterbiPath>& paths, const int start, const int end, const std::vector<int>& all_positions);
+    ThreadingInstructions(const std::vector<std::vector<int>>& starts,
+                          const std::vector<std::vector<double>>& tmrcas,
+                          const std::vector<std::vector<int>>& targets,
+                          const std::vector<std::vector<int>>& mismatches,
+                          const std::vector<int>& _positions, int _start, int _end);
+
 public:
     int start;
     int end;

@@ -16,7 +16,6 @@
 
 import os
 import numpy as np
-import h5py
 import pandas as pd
 import warnings
 import logging
@@ -26,41 +25,6 @@ import time
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
-
-def decompress_threads(threads):
-    f = h5py.File(threads, "r")
-
-    samples, thread_starts, het_starts = f["samples"][:, 0], f["samples"][:, 1], f["samples"][:, 2]
-    positions = f['positions'][...]
-    flat_ids, flat_bps = f['thread_targets'][:, :-1], f['thread_targets'][:, -1]
-    flat_ages = f['thread_ages'][...]
-    flat_hets = f['het_sites'][...]
-
-    try:
-        arg_range = f['arg_range'][...]
-    except KeyError:
-        arg_range = [np.nan, np.nan]
-
-    threading_instructions = []
-    for i, (start, het_start) in enumerate(zip(thread_starts, het_starts)):
-        if i == len(thread_starts) - 1:
-            ids = flat_ids[start:]
-            bps = flat_bps[start:]
-            ages = flat_ages[start:]
-            hets = flat_hets[het_start:]
-        else:
-            ids = flat_ids[start:thread_starts[i + 1]]
-            bps = flat_bps[start:thread_starts[i + 1]]
-            ages = flat_ages[start:thread_starts[i + 1]]
-            hets = flat_hets[het_start:het_starts[i + 1]]
-        threading_instructions.append((bps, ids, ages, hets))
-    return {
-        "threads": threading_instructions,
-        "samples": samples,
-        "positions": positions,
-        "arg_range": arg_range
-    }
-
 
 def read_map_gz(map_gz):
     """
@@ -110,6 +74,29 @@ def interpolate_map(map_gz, pgen):
             cm_out[i] = cm_out[i-1] + 1e-5
     return cm_out, physical_positions
 
+def read_positions_and_ids(pgen):
+    pvar = pgen.replace("pgen", "pvar")
+    bim = pgen.replace("pgen", "bim")
+
+    ids, positions = [], []
+    if os.path.isfile(bim):
+        with open(bim, "r") as bimfile:
+            for line in bimfile:
+                data = line.split()
+                ids.append(data[2])
+                positions.append(int(data[3]))
+    elif os.path.isfile(pvar):
+        with open(pvar, "r") as pvarfile:
+            for line in pvarfile:
+                if line.startswith("#"):
+                    continue
+                else:
+                    data = line.split()
+                    ids.append(data[2])
+                    positions.append(int(data[1]))
+    else:
+        raise RuntimeError(f"Can't find {bim} or {pvar}")
+    return positions, ids
 
 def get_map_from_bim(pgen, rho):
     pvar = pgen.replace("pgen", "pvar")

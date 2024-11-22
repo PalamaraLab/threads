@@ -131,6 +131,10 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
   py::class_<ThreadingInstructions>(m, "ThreadingInstructions")
       .def(py::init<const std::vector<ViterbiPath>, const int, const int, const std::vector<int>&>(), "initialize",
            py::arg("paths"), py::arg("start"), py::arg("end"), py::arg("positions"))
+      .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
+           const std::vector<std::vector<int>>&, const std::vector<int>&, int, int>(),
+           "Initialize", py::arg("starts"), py::arg("tmrcas"), py::arg("targets"), py::arg("mismatches"),
+           py::arg("positions"),  py::arg("start"),  py::arg("end"))
       .def_readonly("positions", &ThreadingInstructions::positions)
       .def_readonly("num_sites", &ThreadingInstructions::num_sites)
       .def_readonly("num_samples", &ThreadingInstructions::num_samples)

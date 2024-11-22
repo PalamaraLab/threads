@@ -1,3 +1,19 @@
+// This file is part of the Threads software suite.
+// Copyright (C) 2024 Threads Developers.
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 #include "DataConsistency.hpp"
 #include <limits>
 #include <iostream>
@@ -28,7 +44,7 @@ InstructionConverter::InstructionConverter(ThreadingInstruction _instructions, s
 
 void InstructionConverter::break_segment(double new_lower_bound, double new_upper_bound, int position, int new_target) {
     double threads_tmrca = instructions.tmrcas.at(current_segment);
-    double epsilon = std::min(1e-1, (current_upper_bound - current_lower_bound) / 2);
+    double epsilon = std::min(threads_tmrca / 1000, (current_upper_bound - current_lower_bound) / 2);
 
     if (threads_tmrca >= current_upper_bound) {
         threads_tmrca = current_upper_bound - epsilon;
@@ -153,6 +169,9 @@ ConsistencyWrapper::ConsistencyWrapper(const std::vector<std::vector<int>>& star
 
 void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
     double allele_age = allele_ages.at(sites_processed);
+    if (allele_age == 0) {
+        allele_age = 1e-3;
+    }
     std::size_t position = physical_positions.at(sites_processed);
     int counter = 0;
     int first_carrier = -1;

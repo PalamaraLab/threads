@@ -17,7 +17,6 @@
 import os
 import gc
 import time
-import h5py
 import logging
 import pgenlib
 import importlib
@@ -41,156 +40,10 @@ from .utils import (
     split_list,
     iterate_pgen
 )
-from datetime import datetime
+from .serialization import serialize_instructions
 
 logger = logging.getLogger(__name__)
 
-
-def serialize_instructions(instructions, out):
-    # breakpoint()
-    num_threads = instructions.num_samples
-    num_sites = instructions.num_sites
-    positions = instructions.positions
-    start = instructions.start
-    end = instructions.end
-    samples = list(range(num_threads))
-    
-    all_starts = instructions.all_starts()
-    all_targets = instructions.all_targets()
-    all_tmrcas = instructions.all_tmrcas()
-    all_mismatches = instructions.all_mismatches()
-
-    thread_starts = np.cumsum([0] + [len(starts) for starts in all_starts[:-1]])
-    mut_starts = np.cumsum([0] + [len(mismatches) for mismatches in all_mismatches[:-1]])
-
-    flat_starts = [start for starts in all_starts for start in starts]
-    flat_tmrcas = [tmrca for tmrcas in all_tmrcas for tmrca in tmrcas]
-    flat_targets = [target for targets in all_targets for target in targets]
-    flat_mismatches = [mismatch for mismatches in all_mismatches for mismatch in mismatches]
-
-    num_stitches = len(flat_starts)
-    num_mutations = len(flat_mismatches)
-
-    f = h5py.File(out, "w")
-    f.attrs['datetime_created'] = datetime.now().isoformat()
-
-    compression_opts = 9
-    dset_samples = f.create_dataset("samples", (num_threads, 3), dtype=int, compression='gzip',
-                                    compression_opts=compression_opts)
-    dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
-                                    compression_opts=compression_opts)
-    # First L columns are random samples for imputation
-    dset_targets = f.create_dataset("thread_targets", (num_stitches, 2), dtype=int, compression='gzip',
-                                    compression_opts=compression_opts)
-    dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
-                                    compression_opts=compression_opts)
-    dset_het_s = f.create_dataset("het_sites", (num_mutations), dtype=int, compression='gzip',
-                                    compression_opts=compression_opts)
-    dset_range = f.create_dataset("arg_range", (2), dtype=np.double, compression='gzip',
-                                  compression_opts=compression_opts)
-
-    dset_samples[:, 0] = samples
-    dset_samples[:, 1] = thread_starts
-    dset_samples[:, 2] = mut_starts
-
-    dset_targets[:, 0] = flat_targets
-    dset_targets[:, 1] = flat_starts
-
-    dset_pos[:] = positions
-    dset_ages[:] = flat_tmrcas
-    dset_het_s[:] = flat_mismatches
-    dset_range[:] = [start, end]
-
-    f.close()
-
-# def serialize_paths(paths, positions, out, start=None, end=None):
-#     """
-#     Compress a list of paths across input positions
-#     """
-#     samples = [i for i in range(len(paths))]
-#     num_threads = len(samples)
-#     num_sites = len(positions)
-
-#     region_start = positions[0] if start == None else max(positions[0], start)
-#     region_end = positions[-1] + 1 if end == None else min(positions[-1] + 1, end + 1)
-
-#     thread_starts = []
-#     mut_starts = []
-#     thread_start = 0
-#     mut_start = 0
-#     all_bps, all_ids, all_ages, all_het_sites = [], [], [], []
-
-#     for i, path in enumerate(paths):
-#         path.map_positions(positions.astype(int))
-#         bps, ids, ages = path.dump_data_in_range(region_start, region_end)
-#         het_site_indices = np.array(path.het_sites, dtype=int)
-#         het_sites = positions[het_site_indices]
-#         het_indices_out = list(het_site_indices[(region_start <= het_sites) * (het_sites < region_end)])
-#         if i > 0:
-#             try:
-#                 assert bps[0] == region_start
-#                 if start is not None:
-#                     assert bps[0] >= start
-#                 assert len(np.unique(bps)) == len(bps)
-#                 assert bps[-1] <= positions[-1]
-#             except AssertionError:
-#                 logger.info("Error serializing a segment with the following data:")
-#                 logger.info(f"bps[0] {bps[0]}")
-#                 logger.info(f"region_start {region_start}")
-#                 logger.info(f"len(np.unique(bps)) {len(np.unique(bps))}")
-#                 logger.info(f"len(bps) {len(bps)}")
-#                 logger.info(f"bps[-1] {bps[-1]}")
-#                 logger.info(f"positions[-1] {positions[-1]}")
-
-#         all_bps += bps
-#         all_ids += ids
-#         all_ages += ages
-#         all_het_sites += het_indices_out
-#         thread_starts.append(thread_start)
-#         mut_starts.append(mut_start)
-#         thread_start += len(bps)
-#         mut_start += len(het_indices_out)
-
-#     num_stitches = len(all_bps)
-#     num_mutations = len(all_het_sites)
-
-#     assert len(all_bps) == len(all_ids) == len(all_ages)
-#     assert len(paths) == len(samples)
-
-#     f = h5py.File(out, "w")
-#     f.attrs['datetime_created'] = datetime.now().isoformat()
-
-#     compression_opts = 9
-#     dset_samples = f.create_dataset("samples", (num_threads, 3), dtype=int, compression='gzip',
-#                                     compression_opts=compression_opts)
-#     dset_pos = f.create_dataset("positions", (num_sites), dtype=int, compression='gzip',
-#                                     compression_opts=compression_opts)
-#     # First L columns are random samples for imputation
-#     dset_targets = f.create_dataset("thread_targets", (num_stitches, 2), dtype=int, compression='gzip',
-#                                     compression_opts=compression_opts)
-#     dset_ages = f.create_dataset("thread_ages", (num_stitches), dtype=np.double, compression='gzip',
-#                                     compression_opts=compression_opts)
-#     dset_het_s = f.create_dataset("het_sites", (num_mutations), dtype=int, compression='gzip',
-#                                     compression_opts=compression_opts)
-#     dset_range = f.create_dataset("arg_range", (2), dtype=np.double, compression='gzip',
-#                                   compression_opts=compression_opts)
-
-#     dset_samples[:, 0] = samples
-#     dset_samples[:, 1] = thread_starts
-#     dset_samples[:, 2] = mut_starts
-#     dset_pos[:] = positions
-
-#     dset_targets[:, 0] = all_ids
-
-#     dset_targets[:, 1] = all_bps
-
-#     dset_ages[:] = all_ages
-
-#     dset_het_s[:] = all_het_sites
-
-#     dset_range[:] = [region_start, region_end]
-
-#     f.close()
 
 def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_positions, demography, mu, sample_batch, s_match_group, match_cm_positions, max_sample_batch_size, num_threads, thread_id):
     """Parallelized ARG inference sub-routine"""
@@ -309,7 +162,6 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     end_time = time.time()
     local_logger.info(f"Thread {thread_id}: HMMs done in (s) {end_time - start_time:.1f}")
     return seg_starts, match_ids, heights, hetsites
-
 
 
 # Implementation is separated from Click entrypoint for use in tests
@@ -452,10 +304,8 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, d
     region_end = physical_positions[-1] + 1 if out_end is None else min(physical_positions[-1] + 1, out_end + 1)
     instructions = ThreadingInstructions(paths, int(region_start), int(region_end), physical_positions.astype(int))
 
-
     if data_consistent:
         logger.info("Starting data-consistency post-processing")
-        allele_age_data = None
         start_idx = np.searchsorted(physical_positions, region_start)
         end_idx = np.searchsorted(physical_positions, region_end, side="right")
 
@@ -474,10 +324,8 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, d
                 assert len(allele_age_estimates) == len(instructions.positions)
             except AssertionError:
                 raise RuntimeError(f"Allele age estimates do not match markers in the region requested, expected {len(instructions.positions)} age estimates.")
-        # start the consistifying
-        # with open("ages.tmp", "w") as agefile:
-        #     for pos, age in zip(physical_positions, allele_age_estimates):
-        #         agefile.write(f"{pos}\t{age}\n")
+        
+        # Start the consistifying
         cw = ConsistencyWrapper(instructions, allele_age_estimates)
         iterate_pgen(pgen, lambda i, g: cw.process_site(g), start_idx=start_idx, end_idx=end_idx)
         consistent_instructions = cw.get_consistent_instructions()
