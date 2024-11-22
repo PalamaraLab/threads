@@ -64,7 +64,9 @@ threads infer \
     --max_sample_batch_size (default: None) \
     --mutation_rate (default: 1.4e-8) \
     --region 1234-56789 (default: whole region, end-inclusive) \
-    --num_threads 8 (default: 1)
+    --num_threads 8 (default: 1) \
+    --data_consistent (default: False)
+    --allele_ages (default: None)
 ```
 
 `--modality array` can be set for inference from arrays. 
@@ -75,7 +77,11 @@ The HMM mutation rate can be set with `--mutation_rate`. This defaults to a real
 
 Specifying a `--region start-end` means the output ARG is truncated to those base-pair coordinates (end-inclusive). The whole input set will still be used for inference.
 
-Parallelism can be enabled by specifying `--num_threads`
+Parallelism can be enabled by specifying `--num_threads`.
+
+By specifying `--data_consistent`, the inferred threading instructions are manipulated post-hoc to ensure that each input mutation is uniquely represented by an edge in the ARG. This may lead to more fragmented ARGs.
+
+If `--data_consistent` is specified and a file with two columns, a SNP ID and an allele age, is provided with `--allele_ages`, the ARG is altered in a way that makes it consistent with those mutations. If `--allele_ages` is not specified, allele ages are automatically inferred.
 
 ## ARG conversion
 `.threads` files can be converted to `.argn` and `.tsz` using
@@ -93,3 +99,23 @@ threads convert \
 
 ## Phasing/imputation/variant mapping
 These functions are in an experimental phase and will be released later.
+
+## Allele age estimation
+Threads can be used to infer the age of any set of genotypes overlapping the genomic region covered by the ARG using the command `threads allele-ages`:
+```
+threads allele-ages --threads input.threads \
+    --pgen input.pgen \
+    --region 1:234-567 (Optional) \
+    --out output_4/allele.ages
+```
+
+## Data consistency
+The manipulation of threading instructions performed using the `--data_consistent` flag in `threads infer` can be performed separately using the command `threads fit-to-data`:
+```
+threads fit-to-data --threads input.threads \
+    --pgen input.pgen \
+    --allele_ages input.ages (Optional) \
+    --region 1:234-567 (Optional) \
+    --out output_4/allele.ages
+```
+The threading instructions can be made to fit to any genotypes provided with the `input.pgen`.
