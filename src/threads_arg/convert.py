@@ -88,9 +88,9 @@ def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
         arg = threads_to_arg(instructions, noise=0.0, max_n=max_n, verify=verify, random_seed=random_seed)
     except:
         # arg_needle_lib does not allow polytomies
-        logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-6...")
+        logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
         try:
-            arg = threads_to_arg(instructions, noise=1e-6, max_n=max_n, verify=verify, random_seed=random_seed)
+            arg = threads_to_arg(instructions, noise=1e-5, max_n=max_n, verify=verify, random_seed=random_seed)
         except:# tskit.LibraryError:
             logger.info(f"Conflicting branches, retrying with noise=1e-3...")
             arg = threads_to_arg(instructions, noise=1e-3, max_n=max_n, verify=verify, random_seed=random_seed)

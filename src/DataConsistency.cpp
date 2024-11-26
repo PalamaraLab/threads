@@ -44,17 +44,19 @@ InstructionConverter::InstructionConverter(ThreadingInstruction _instructions, s
 
 void InstructionConverter::break_segment(double new_lower_bound, double new_upper_bound, int position, int new_target) {
     double threads_tmrca = instructions.tmrcas.at(current_segment);
-    double epsilon = std::min(threads_tmrca / 1000, (current_upper_bound - current_lower_bound) / 2);
 
     if (threads_tmrca >= current_upper_bound) {
+        // Just below the current upper bound
+        double epsilon = std::min(current_upper_bound / 1000, (current_upper_bound - current_lower_bound) / 2);
         threads_tmrca = current_upper_bound - epsilon;
     } else if (threads_tmrca <= current_lower_bound) {
+        // Just above the current lower bound
+        double epsilon = std::min(current_lower_bound / 1000, (current_upper_bound - current_lower_bound) / 2);
         threads_tmrca = current_lower_bound + epsilon;
     }
 
     if ((threads_tmrca <= current_lower_bound) || (current_upper_bound <= threads_tmrca)) {
-        std::cout << "new: " << threads_tmrca << " cub: " << current_upper_bound  << " clb: " << current_lower_bound << "\n";  
-        throw std::runtime_error("!!!");
+        throw std::runtime_error("Threading time exceeds allowed bounds, this is not allowed.");
     }
 
     new_tmrcas.push_back(threads_tmrca);
@@ -169,7 +171,8 @@ ConsistencyWrapper::ConsistencyWrapper(const std::vector<std::vector<int>>& star
 
 void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
     double allele_age = allele_ages.at(sites_processed);
-    if (allele_age == 0) {
+    // An age of 0 shouldn't happen, but just in case, we interpret it as just really small
+    if (allele_age <= 0) {
         allele_age = 1e-3;
     }
     std::size_t position = physical_positions.at(sites_processed);
