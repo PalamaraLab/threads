@@ -1,16 +1,16 @@
 # This file is part of the Threads software suite.
 # Copyright (C) 2024 Threads Developers.
-# 
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -60,10 +60,10 @@ def test_data_snapshot_regression():
         threads_path = Path(tmpdir) / "test_data_snapshot_regression.threads"
         test_data_dir = BASE_DIR / "test" / "data"
         threads_infer(
-            pgen=str(test_data_dir / "N250.pgen"),
-            map_gz=str(test_data_dir / "test_data.map"),
+            pgen=str(test_data_dir / "panel.pgen"),
+            map_gz=str(test_data_dir / "gmap_02.map"),
             recombination_rate=1.3e-8,
-            demography=str(test_data_dir / "Ne10000.demo"),
+            demography=str(test_data_dir / "CEU_unscaled.demo"),
             mutation_rate=1.4e-8,
             query_interval=0.01,
             match_group_interval=0.5,
@@ -77,7 +77,7 @@ def test_data_snapshot_regression():
         )
 
         # Compare against expected snapshot of threads data
-        threads_expected_path = BASE_DIR / "test" / "data" / "expected_N250.threads"
+        threads_expected_path = test_data_dir / "arg.threads"
         _check_hdf_files_match(threads_path, threads_expected_path)
 
         # Convert generated output
@@ -92,5 +92,5 @@ def test_data_snapshot_regression():
         )
 
         # Compare against expected snapshot of argn data
-        convert_expected_path = BASE_DIR / "test" / "data" / "expected_N250.argn"
+        convert_expected_path = test_data_dir / "arg.argn"
         _check_hdf_files_match(argn_path, convert_expected_path)
