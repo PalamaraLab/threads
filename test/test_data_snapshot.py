@@ -70,6 +70,8 @@ def test_data_snapshot_regression():
             mode="wgs",
             num_threads=1,
             region=None,
+            fit_to_data=False,
+            allele_ages=None,
             max_sample_batch_size=None,
             out=str(threads_path)
         )
