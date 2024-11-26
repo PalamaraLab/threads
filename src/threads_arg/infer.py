@@ -165,7 +165,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, data_consistent, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logger.info(f"Starting Threads-infer with the following parameters:")
@@ -176,7 +176,7 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, d
     logger.info(f"  demography:            {demography}")
     logger.info(f"  mutation_rate:         {mutation_rate}")
     logger.info(f"  allele_ages:           {allele_ages}")
-    logger.info(f"  data_consistent:       {data_consistent}")
+    logger.info(f"  fit_to_data:           {fit_to_data}")
     logger.info(f"  query_interval:        {query_interval}")
     logger.info(f"  match_group_interval:  {match_group_interval}")
     logger.info(f"  num_threads:           {num_threads}")
@@ -304,7 +304,7 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, d
     region_end = physical_positions[-1] + 1 if out_end is None else min(physical_positions[-1] + 1, out_end + 1)
     instructions = ThreadingInstructions(paths, int(region_start), int(region_end), physical_positions.astype(int))
 
-    if data_consistent:
+    if fit_to_data:
         logger.info("Starting data-consistency post-processing")
         start_idx = np.searchsorted(physical_positions, region_start)
         end_idx = np.searchsorted(physical_positions, region_end, side="right")

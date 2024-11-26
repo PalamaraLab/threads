@@ -65,7 +65,7 @@ threads infer \
     --mutation_rate (default: 1.4e-8) \
     --region 1234-56789 (default: whole region, end-inclusive) \
     --num_threads 8 (default: 1) \
-    --data_consistent (default: False)
+    --fit_to_data (default: False)
     --allele_ages (default: None)
 ```
 
@@ -79,9 +79,9 @@ Specifying a `--region start-end` means the output ARG is truncated to those bas
 
 Parallelism can be enabled by specifying `--num_threads`.
 
-By specifying `--data_consistent`, the inferred threading instructions are manipulated post-hoc to ensure that each input mutation is uniquely represented by an edge in the ARG. This may lead to more fragmented ARGs.
+By specifying `--fit_to_data`, the inferred threading instructions are manipulated post-hoc to ensure that each input mutation is uniquely represented by an edge in the ARG. This may lead to more fragmented ARGs.
 
-If `--data_consistent` is specified and a file with two columns, a SNP ID and an allele age, is provided with `--allele_ages`, the ARG is altered in a way that makes it consistent with those mutations. If `--allele_ages` is not specified, allele ages are automatically inferred.
+If `--fit_to_data` is specified and a file with two columns, a SNP ID and an allele age, is provided with `--allele_ages`, the ARG is altered in a way that makes it consistent with those mutations. If `--allele_ages` is not specified, allele ages are automatically inferred. If `--fit_to_data` is not specified, this option is ignored.
 
 ## ARG conversion
 `.threads` files can be converted to `.argn` and `.tsz` using
@@ -110,7 +110,7 @@ threads allele-ages --threads input.threads \
 ```
 
 ## Data consistency
-The manipulation of threading instructions performed using the `--data_consistent` flag in `threads infer` can be performed separately using the command `threads fit-to-data`:
+The manipulation of threading instructions performed using the `--fit_to_data` flag in `threads infer` can be performed separately using the command `threads fit-to-data`:
 ```
 threads fit-to-data --threads input.threads \
     --pgen input.pgen \
