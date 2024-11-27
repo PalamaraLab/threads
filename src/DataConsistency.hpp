@@ -28,6 +28,7 @@ private:
     std::vector<int> new_targets;
     void break_segment(double new_lower_bound, double new_upper_bound, int position, int new_target);
 public:
+    std::vector<int> new_mismatches;
     InstructionConverter(ThreadingInstruction instructions, std::size_t _instruction_index, std::size_t start_position);
     void process_site(std::vector<int>& genotypes, std::size_t position, double allele_age);
     void increment_site(std::size_t position);
