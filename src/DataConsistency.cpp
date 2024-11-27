@@ -133,7 +133,7 @@ ThreadingInstruction InstructionConverter::parse_converted_instructions() {
         throw std::runtime_error("Haven't processed all segments in a set of instructions");
     }
     break_segment(-1, -1, -1, -1);
-    return ThreadingInstruction(new_starts, new_tmrcas, new_targets, instructions.mismatches);
+    return ThreadingInstruction(new_starts, new_tmrcas, new_targets, new_mismatches);
 }
 
 ConsistencyWrapper::ConsistencyWrapper(const std::vector<std::vector<int>>& starts,
@@ -206,6 +206,10 @@ void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
             converter.update_target(0., allele_age, position, new_target);
         }
         converter.evaluate_bounds(genotypes, position, allele_age);
+
+        if (counter > 0 && genotypes.at(converter.current_target) != genotypes.at(counter)) {
+            converter.new_mismatches.push_back(counter);
+        }
         counter++;
     }
     sites_processed++;
