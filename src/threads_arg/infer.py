@@ -250,12 +250,12 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logger.info(f"Starting Threads-infer with the following parameters:")
     logger.info(f"  pgen:                  {pgen}")
-    logger.info(f"  map_gz:                {map_gz}")
+    logger.info(f"  map:                   {map}")
     logger.info(f"  recombination_rate:    {recombination_rate}")
     logger.info(f"  region:                {region}")
     logger.info(f"  demography:            {demography}")
@@ -267,9 +267,9 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, q
     logger.info(f"  out:                   {out}")
 
     # Initialize region, genetic map, and genotype reader
-    if map_gz is not None:
-        logger.info(f"Using recombination rates from {map_gz}")
-        genetic_positions, physical_positions = interpolate_map(map_gz, pgen)
+    if map is not None:
+        logger.info(f"Using recombination rates from {map}")
+        genetic_positions, physical_positions = interpolate_map(map, pgen)
     else:
         logger.info(f"Using constant recombination rate of {recombination_rate}")
         genetic_positions, physical_positions = get_map_from_bim(pgen, recombination_rate)

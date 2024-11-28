@@ -42,7 +42,7 @@ def main():
 
 @main.command()
 @click.option("--pgen", required=True, help="Path to input genotypes in pgen format.")
-@click.option("--map_gz", default=None, help="Path to input genotype map with columns chromosome, snp, cM-position, bp-position.")
+@click.option("--map", required=True, help="Path to genotype map in SHAPEIT format")
 @click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed.")
 @click.option("--demography", required=True, help="Path to input genotype.")
 @click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array).")
@@ -53,9 +53,9 @@ def main():
 @click.option("--region", help="Region of genome for which ARG is output. The full genotype is still used for inference.")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
 @click.option("--out")
-def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def infer(pgen, map, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     from .infer import threads_infer
-    threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
+    threads_infer(pgen, map, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
     goodbye()
 
 
@@ -101,7 +101,7 @@ def map(argn, out, maf, input, region, threads):
 @click.option("--panel", required=True, help="pgen array panel")
 @click.option("--target", required=True, help="pgen array targets")
 @click.option("--mut", required=True, help="pgen array targets")
-@click.option("--map", required=True, help="Path to genotype map")
+@click.option("--map", required=True, help="Path to genotype map in SHAPEIT format")
 @click.option("--mutation_rate", type=float, help="Per-site-per-generation SNP mutation rate.", default=1.4e-8)
 @click.option("--demography", required=True, help="Path to file containing demographic history.")
 @click.option("--out", required=True, help="Path to output .vcf file.")

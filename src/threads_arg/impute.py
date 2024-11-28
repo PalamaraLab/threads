@@ -19,7 +19,7 @@ if BISECT_LEFT_KEY_SEARCH:
     from bisect import bisect_left
 
 from .fwbw import fwbw
-from .utils import timer_block, TimerTotal
+from .utils import timer_block, TimerTotal, read_map_file
 
 logger = logging.getLogger(__name__)
 
@@ -84,22 +84,6 @@ class WriterVCF:
 
         f = self.file
         f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
-
-
-def read_map_gz(map_gz):
-    """
-    Reading in map file for Li-Stephens
-
-    Unlike the Threads inference routine, this function uses genetic maps in the
-    SHAPEIT format
-    """
-    maps = pd.read_table(map_gz, sep=r"\s+")
-    cm_pos = maps.cM.values.astype(np.float64)
-    phys_pos = maps.pos.values.astype(np.float64)
-    for i in range(1, len(cm_pos)):
-        if cm_pos[i] <= cm_pos[i-1]:
-            cm_pos[i] = cm_pos[i-1] + 1e-5
-    return phys_pos, cm_pos
 
 
 def _parse_demography(demography):
@@ -440,7 +424,7 @@ class Impute:
 
         with timer_block("getting VCF positions", False):
             self.phys_pos_array = np.array([record.pos for record in self.target_dict.values()])
-            map_bp, map_cm = read_map_gz(map)
+            map_bp, map_cm = read_map_file(map)
             self.cm_pos_array = np.interp(self.phys_pos_array, map_bp, map_cm)
             self.num_snps = len(self.phys_pos_array)
             logger.info(f"Pos array snps size {self.num_snps}")
