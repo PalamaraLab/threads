@@ -31,8 +31,6 @@ def threads_to_arg(instructions, noise=0.0, max_n=None, verify=False, random_see
     """
     Assemble threading instructions into an ARG
     """
-    # threading_instructions = thread_dict['threads']
-    # pos = thread_dict['positions']
     N = max_n if max_n is not None else np.max(instructions.num_samples)
     logger.info(f"Will thread {N} haploids")
     arg_start, arg_end = instructions.start, instructions.end
@@ -91,7 +89,7 @@ def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
         logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
         try:
             arg = threads_to_arg(instructions, noise=1e-5, max_n=max_n, verify=verify, random_seed=random_seed)
-        except:# tskit.LibraryError:
+        except:
             logger.info(f"Conflicting branches, retrying with noise=1e-3...")
             arg = threads_to_arg(instructions, noise=1e-3, max_n=max_n, verify=verify, random_seed=random_seed)
     if argn is not None:

@@ -19,6 +19,7 @@
 
 #include "ThreadingInstructions.hpp"
 #include <iostream>
+#include <limits>
 #include <vector>
 
 class InstructionConverter {
@@ -37,16 +38,16 @@ public:
 
     ThreadingInstruction parse_converted_instructions();
 public:
-    std::size_t sites_processed;
-    std::size_t num_segments; // Number of segments in this set of instructions
+    std::size_t sites_processed = 0;
+    std::size_t num_segments = 0; // Number of segments in this set of instructions
     ThreadingInstruction instructions; // The instructions object
-    std::size_t instruction_index;  // Index of these instructions in the big set of all instructions
-    std::size_t current_segment;  // Index of the current segment in the data traversal
-    std::size_t converted_segment_start;
-    std::size_t next_segment_start;
-    double current_lower_bound;
-    double current_upper_bound;
-    int current_target;
+    std::size_t instruction_index = 0;  // Index of these instructions in the big set of all instructions
+    std::size_t current_segment = 0;  // Index of the current segment in the data traversal
+    std::size_t converted_segment_start = 0;
+    std::size_t next_segment_start = 0;
+    double current_lower_bound = 0;
+    double current_upper_bound = std::numeric_limits<double>::max();
+    int current_target = 0;
 };
 
 class ConsistencyWrapper {
@@ -71,9 +72,9 @@ public:
 public:
     std::vector<double> allele_ages;
     std::vector<int> physical_positions;
-    std::size_t sites_processed;
-    std::size_t num_sites;
-    std::size_t num_samples;
+    std::size_t sites_processed = 0;
+    std::size_t num_sites = 0;
+    std::size_t num_samples = 0;
     std::vector<InstructionConverter> instruction_converters;
 };
 

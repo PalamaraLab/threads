@@ -159,5 +159,3 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("process_site", &AgeEstimator::process_site)
       .def("get_inferred_ages", &AgeEstimator::get_inferred_ages);
 }
-
-// (const std::vector<ViterbiPath>& paths, const int start, const int end, const std::vector<int>& _positions);

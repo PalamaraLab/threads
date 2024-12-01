@@ -83,7 +83,7 @@ def read_positions_and_ids(pgen):
         with open(bim, "r") as bimfile:
             for line in bimfile:
                 data = line.split()
-                ids.append(data[2])
+                ids.append(data[1])
                 positions.append(int(data[3]))
     elif os.path.isfile(pvar):
         with open(pvar, "r") as pvarfile:

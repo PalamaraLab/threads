@@ -23,16 +23,16 @@
 
 class AgeEstimator {
 private:
-    int sites_processed;
-    int num_sites;
-    int num_samples;
+    int sites_processed = 0;
+    int num_sites = 0;
+    int num_samples = 0;
     std::vector<int> positions;
     std::vector<ThreadingInstructionIterator> threading_iterators;
 public:
     AgeEstimator(ThreadingInstructions& instructions);
     void process_site(const std::vector<int>& genotypes);
     void increment_site();
-    std::vector<double> get_inferred_ages();
+    const std::vector<double> get_inferred_ages();
 public:
     std::vector<double> estimated_ages;
 };

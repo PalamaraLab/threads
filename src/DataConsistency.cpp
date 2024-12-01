@@ -23,10 +23,7 @@
 InstructionConverter::InstructionConverter(ThreadingInstruction _instructions, std::size_t _instruction_index, std::size_t start_position) :
     instructions(_instructions), instruction_index(_instruction_index) {
     num_segments = instructions.num_segments;
-    current_segment = 0;
     converted_segment_start = start_position;
-    current_lower_bound = 0;
-    current_upper_bound = std::numeric_limits<double>::max();
     if (instruction_index == 0) {
         current_target = -1;
     } else {
@@ -38,8 +35,6 @@ InstructionConverter::InstructionConverter(ThreadingInstruction _instructions, s
     } else {
         next_segment_start = std::numeric_limits<int>::max();
     }
-
-    // NB we have empty instructions for idx 0, what to do there?
 }
 
 void InstructionConverter::break_segment(double new_lower_bound, double new_upper_bound, int position, int new_target) {
@@ -107,6 +102,10 @@ void InstructionConverter::evaluate_bounds(std::vector<int>& genotypes, std::siz
     double local_upper_bound = std::numeric_limits<double>::max();
     double local_lower_bound = 0;
 
+    // If 1/1, both are carriers and must coalsce below the mutation.
+    // If 0/1 or 1/0, only one is a carrier and these lineages must coalesce
+    // above the mutation.
+    // If 0/0, this mutation does not provide any information on this coalescence event.
     if (gt_focal == 1 && gt_target == 1) {
         local_upper_bound = allele_age;
     } else if (gt_focal == 1 || gt_target == 1) {
@@ -132,6 +131,8 @@ ThreadingInstruction InstructionConverter::parse_converted_instructions() {
         std::cout << current_segment << " should be " << instructions.num_segments - 1 << "\n";
         throw std::runtime_error("Haven't processed all segments in a set of instructions");
     }
+    // Wrapping up, so we break up and save the current segment, setting
+    // The "-1"s are unused placeholders.
     break_segment(-1, -1, -1, -1);
     return ThreadingInstruction(new_starts, new_tmrcas, new_targets, new_mismatches);
 }
@@ -165,8 +166,6 @@ ConsistencyWrapper::ConsistencyWrapper(const std::vector<std::vector<int>>& star
     }
 
     std::cout << "Will convert " << num_samples << " threading instructions across " << num_sites << " sites.\n";
-
-    sites_processed = 0;
 }
 
 void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
