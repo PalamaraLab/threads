@@ -33,8 +33,6 @@ ThreadingInstruction::ThreadingInstruction(const std::vector<int> _starts,
 
 ThreadingInstructionIterator::ThreadingInstructionIterator(ThreadingInstruction& _instruction) :
     instruction(_instruction) {
-    current_segment = 0;
-    sites_processed = 0;
     if (instruction.num_segments == 0) {
         current_tmrca = 0;
         current_target = -1;

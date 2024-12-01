@@ -22,8 +22,6 @@
 
 AgeEstimator::AgeEstimator(ThreadingInstructions& instructions)
     {
-    sites_processed = 0;
-    num_sites = instructions.num_sites;
     num_samples = instructions.num_samples;
     positions = instructions.positions;
     for (auto& instruction : instructions.instructions) {
@@ -42,10 +40,10 @@ void AgeEstimator::increment_site() {
 void AgeEstimator::process_site(const std::vector<int>& genotypes) {
     // Find carrier clusters
     // Algorithm: find paths in the marginal threading tree consisting only of carriers
-    // Index those by start (highest index)
+    // Index those by "start" (highest index)
     std::unordered_map<int, int> path_lengths;
     std::vector<int> max_path_starts;
-    int max_path_len;
+    int max_path_len = 0;
     for (int i = 0; i < genotypes.size(); i++) {
         if (i == 0) {
             path_lengths[i] = genotypes.at(i);
@@ -136,16 +134,9 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
     }
 
     estimated_ages.push_back(allele_age);
-
     increment_site();
 }
 
-
-std::vector<double> AgeEstimator::get_inferred_ages() {
-    if (sites_processed != num_sites) {
-        std::cout << sites_processed << "should be " << num_sites << "\n";
-        // std::cout << num_sites << "\n";
-        throw std::runtime_error("Haven't processed all sites yet.");
-    }
+const std::vector<double> AgeEstimator::get_inferred_ages() {
     return estimated_ages;
 }

@@ -29,7 +29,7 @@ public:
     std::vector<double> tmrcas;
     std::vector<int> targets;
     std::vector<int> mismatches;
-    std::size_t num_segments;
+    std::size_t num_segments = 0;
     ThreadingInstruction(
         const std::vector<int> _starts,
         const std::vector<double> _tmrcas,
@@ -41,13 +41,13 @@ class ThreadingInstructionIterator {
 // This is a container for iterating through a ThreadingInstruction object site-by-site
 private:
     ThreadingInstruction& instruction;
-    int sites_processed;
-    int next_segment_start;
+    int sites_processed = 0;
+    int next_segment_start = 0;
 public:
-    int num_sites;
-    int current_segment;
-    int current_target;
-    double current_tmrca;
+    int num_sites = 0;
+    int current_segment = 0;
+    int current_target = 0;
+    double current_tmrca = 0;
 public:
     void increment_site(const int pos);
     ThreadingInstructionIterator(ThreadingInstruction& _instruction);

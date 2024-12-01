@@ -105,7 +105,6 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
         # Iterate across the genotypes and run Li-Stephens inference
         for b in range(n_batches):
-            # TODO: also pass this through "iterate_pgen"
             # Read genotypes and check for phase
             b_start = b * BATCH_SIZE
             b_end = min(M, (b+1) * BATCH_SIZE)
@@ -139,15 +138,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
         # TODO: pass this through "iterate_pgen"
         # Add heterozygous sites to each path segment
-        for b in range(n_batches):
-            b_start = b * BATCH_SIZE
-            b_end = min(M, (b+1) * BATCH_SIZE)
-            g_size = b_end - b_start
-            alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
-            phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
-            reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
-            for g in alleles_out:
-                TLM.process_site_hets(g)
+        iterate_pgen(pgen, lambda i, g: TLM.process_site_hets(g))
 
         # Add coalescence time to each segment
         TLM.date_segments()
@@ -203,23 +194,16 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, f
     if max_sample_batch_size is None:
         max_sample_batch_size = 2 * num_samples
 
-    # Initialize read batching
-    # M = len(physical_positions)
-    # BATCH_SIZE = int(4e7 // num_samples)
-    # n_batches = int(np.ceil(M / BATCH_SIZE))
-
     logger.info("Finding singletons")
     # Get singleton filter for the matching step
     alleles_out = None
     phased_out = None
     ac_mask = []
-    # ac_mask = np.zeros(genetic_positions.shape, dtype=bool)
     iterate_pgen(pgen, lambda i, g: ac_mask.append(1 < g.sum() < 2 * num_samples))
     ac_mask = np.array(ac_mask, dtype=bool)
     assert ac_mask.shape == genetic_positions.shape
 
     logger.info("Running PBWT matching")
-
     # There are four params here to mess with:
     #   - query interval
     #   - match group size
