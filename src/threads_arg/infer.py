@@ -294,12 +294,13 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, f
         end_idx = np.searchsorted(physical_positions, region_end, side="right")
 
         if allele_ages is None:
-            logger.info(f"Inferring allele ages from data")
+            logger.info("Inferring allele ages from data")
             age_estimator = AgeEstimator(instructions)
             iterate_pgen(pgen, lambda i, g: age_estimator.process_site(g), start_idx=start_idx, end_idx=end_idx)
             allele_age_estimates = age_estimator.get_inferred_ages()
             assert len(allele_age_estimates) == len(instructions.positions)
         else:
+            logger.info(f"Reading allele ages from {allele_ages}")
             allele_age_estimates = []
             with open(allele_ages, "r") as agefile:
                 for line in agefile:
@@ -310,6 +311,7 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, f
                 raise RuntimeError(f"Allele age estimates do not match markers in the region requested, expected {len(instructions.positions)} age estimates.")
         
         # Start the consistifying
+        logger.info(f"Post-processing threading instructions to fit to data")
         cw = ConsistencyWrapper(instructions, allele_age_estimates)
         iterate_pgen(pgen, lambda i, g: cw.process_site(g), start_idx=start_idx, end_idx=end_idx)
         consistent_instructions = cw.get_consistent_instructions()
