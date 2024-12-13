@@ -24,7 +24,7 @@ import time
 import warnings
 
 from contextlib import contextmanager
-from typing import Tuple
+from typing import Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ def split_list(list, n):
     return sublists
 
 
-def parse_region_string(region: str) -> Tuple[str | None, int, int]:
+def parse_region_string(region: str) -> Tuple[Union[str, None], int, int]:
     """
     Convert "tag:start-end" or "start-end" string into a (str | None, int, int)
     3-tuple. The format of tag is either "chr[1-22]" or just "[1-22]". If the
