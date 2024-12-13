@@ -41,17 +41,17 @@ def main():
 
 
 @main.command()
-@click.option("--pgen", required=True, help="Path to input genotypes in pgen format.")
+@click.option("--pgen", required=True, help="Path to input genotypes in pgen format")
 @click.option("--map", required=True, help="Path to genotype map in SHAPEIT format")
-@click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed.")
-@click.option("--demography", required=True, help="Path to input genotype.")
-@click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array).")
-@click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM.")
-@click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM.")
-@click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate.")
-@click.option("--num_threads", type=int, default=1, help="Number of computational threads to request.")
-@click.option("--region", help="Region of genome for which ARG is output. The full genotype is still used for inference.")
-@click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
+@click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed")
+@click.option("--demography", required=True, help="Path to input genotype")
+@click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array)")
+@click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM")
+@click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM")
+@click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate")
+@click.option("--num_threads", type=int, default=1, help="Number of computational threads to request")
+@click.option("--region", help="Region of genome in tag:start-end format for which ARG is output. The full genotype is still used for inference")
+@click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread", default=None, type=int) 
 @click.option("--out")
 def infer(pgen, map, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     from .infer import threads_infer
@@ -72,15 +72,13 @@ def phase(scaffold, argn, ts, unphased, out):
 
 
 @main.command()
-@click.option("--threads", required=True, help="Path to an input .threads file.")
-@click.option("--argn", default=None, help="Path to an output .argn file.")
-@click.option("--tsz", default=None, help="Path to an output .tsz file.")
-@click.option("--max_n", default=None, help="How many samples to thread.", type=int)
-@click.option("--random-seed", default=None, help="Seed for noise generation.", type=int)
-@click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG.")
+@click.option("--threads", required=True, help="Path to an input .threads file")
+@click.option("--argn", default=None, help="Path to an output .argn file")
+@click.option("--tsz", default=None, help="Path to an output .tsz file")
+@click.option("--max_n", default=None, help="How many samples to thread", type=int)
+@click.option("--random-seed", default=None, help="Seed for noise generation", type=int)
+@click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG")
 def convert(threads, argn, tsz, max_n, random_seed, verify):
-    from .convert import threads_convert
-    threads_convert(threads, argn, tsz, max_n, random_seed, verify)
     goodbye()
 
 
