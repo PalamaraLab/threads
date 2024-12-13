@@ -10,7 +10,7 @@ from cyvcf2 import VCF
 from threads_arg import ThreadsFastLS, ImputationMatcher
 from scipy.sparse import csr_array, lil_matrix
 from datetime import datetime
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Union
 from dataclasses import dataclass
 
 # Use bisect_left to optimise when available (key search only in python >= 3.10)
@@ -47,10 +47,13 @@ RecordMemoDict = Dict[str, RecordMemo]
 
 class WriterVCF:
     """
-    Custom VCF writer for imputation
+    Custom VCF writer for imputation. Writes to stdout if filename is None
     """
-    def __init__(self, filename):
-        self.file = open(filename, "w")
+    def __init__(self, filename: Union[str, None]):
+        if filename:
+            self.file = open(filename, "w")
+        else:
+            self.file = sys.stdout
 
     def write_header(self, samples, contig):
         f = self.file
@@ -81,7 +84,6 @@ class WriterVCF:
         qual = "."
         filter = "PASS"
         gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
-
         f = self.file
         f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
@@ -362,10 +364,29 @@ class Impute:
         map: str,
         mut: str,
         demography: str,
-        out: str,
+        out: Union[str, None],
         region: str,
         mutation_rate=1.4e-8
     ):
+        # If out is not specified then the generated file goes to stdout. These
+        # changes ensure that progress bars and logger is not also printed.
+        if not out:
+            def disabled_tqdm(it, *_args, **_kvargs):
+                return it
+            global tqdm
+            tqdm = disabled_tqdm
+            logging.disable(logging.INFO)
+
+        logger.info(f"Starting Threads-impute with parameters")
+        logger.info(f"  panel:         {panel}")
+        logger.info(f"  target:        {target}")
+        logger.info(f"  map:           {map}")
+        logger.info(f"  mut:           {mut}")
+        logger.info(f"  demography:    {demography}")
+        logger.info(f"  out:           {out or 'STDOUT'}")
+        logger.info(f"  region:        {region}")
+        logger.info(f"  mutation_rate: {mutation_rate}")
+
         with timer_block("impute"):
             self._load_records_and_snps(panel, target, map, region)
 
@@ -390,7 +411,7 @@ class Impute:
             self._init_step_snp()
             self.posteriors_snp_cache = CachedPosteriorSnps(self.posteriors)
 
-            logger.info(f"Writing VCF header in {out}")
+            logger.info(f"Writing VCF header to {out or 'STDOUT'}")
             self.vcf_writer = WriterVCF(out)
             self.vcf_writer.write_header(self.target_samples, self.chrom_num)
 

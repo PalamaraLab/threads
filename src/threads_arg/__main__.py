@@ -99,14 +99,25 @@ def map(argn, out, maf, input, region, threads):
 @click.option("--target", required=True, help="pgen array targets")
 @click.option("--mut", required=True, help="pgen array targets")
 @click.option("--map", required=True, help="Path to genotype map in SHAPEIT format")
-@click.option("--mutation_rate", type=float, help="Per-site-per-generation SNP mutation rate.", default=1.4e-8)
-@click.option("--demography", required=True, help="Path to file containing demographic history.")
-@click.option("--out", required=True, help="Path to output .vcf file.")
-@click.option("--region", required=True, type=str)
-def impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
+@click.option("--mutation_rate", type=float, help="Per-site-per-generation SNP mutation rate", default=1.4e-8)
+@click.option("--demography", required=True, help="Path to file containing demographic history")
+@click.option("--out", help="Path to output .vcf file", default=None)
+@click.option("--stdout", help="Redirect output to stdout (will disable logging)", is_flag=True)
+@click.option("--region", required=True, type=str, help="Region in chr:start-end format (start and end inclusive)")
+def impute(panel, target, map, mut, demography, out, stdout, region, mutation_rate=1.4e-8):
+    # --stdout flag is mutually exclusive to --out flag. It is used only here to
+    # confirm the user wants to redirect (potentially a lot of data) to stdout.
+    # The Impute class does not use this variable, instead 'out' is just None.
+    if (stdout and out) or not (stdout or out):
+        print("Either --out or --stdout must be specified", file=sys.stderr)
+        exit(1)
+
     from .impute import Impute
     Impute(panel, target, map, mut, demography, out, region, mutation_rate)
-    goodbye()
+
+    # Do not print anything in stdout mode, to keep output clean.
+    if not stdout:
+        goodbye()
 
 
 if __name__ == "__main__":
