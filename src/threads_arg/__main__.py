@@ -75,10 +75,9 @@ def phase(scaffold, argn, ts, unphased, out):
 @click.option("--threads", required=True, help="Path to an input .threads file")
 @click.option("--argn", default=None, help="Path to an output .argn file")
 @click.option("--tsz", default=None, help="Path to an output .tsz file")
-@click.option("--max_n", default=None, help="How many samples to thread", type=int)
-@click.option("--random-seed", default=None, help="Seed for noise generation", type=int)
-@click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG")
-def convert(threads, argn, tsz, max_n, random_seed, verify):
+def convert(threads, argn, tsz):
+    from .convert import threads_convert
+    threads_convert(threads, argn, tsz)
     goodbye()
 
 
