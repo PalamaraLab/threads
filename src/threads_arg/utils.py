@@ -18,11 +18,13 @@ import os
 import numpy as np
 import h5py
 import pandas as pd
-import warnings
 import logging
+import re
 import time
+import warnings
 
 from contextlib import contextmanager
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -58,28 +60,32 @@ def decompress_threads(threads):
     }
 
 
-def read_map_file(map_file):
+def read_map_file(map_file, expected_chromosome=None) -> Tuple[np.ndarray, np.ndarray, str]:
     """
     Reading in map file for Li-Stephens using genetic maps in the SHAPEIT format
     """
     maps = pd.read_table(map_file, sep=r"\s+")
     cm_pos = maps.cM.values.astype(np.float64)
     phys_pos = maps.pos.values.astype(np.float64)
+    chromosomes = np.unique(maps.chr.values.astype(str))
+
+    # Currently we only allow for processing one chromosome at a time
+    if len(chromosomes) > 1:
+        raise RuntimeError(f"Found multiple chromosomes in {map_file}. Threads limits to one.")
+
+    if expected_chromosome:
+        if str(expected_chromosome) != chromosomes[0]:
+            raise RuntimeError(f"Expected chromosome {expected_chromosome} not found in {map_file}")
 
     # Add an epsilon value to avoid div zero errors. A few decimal places is
     # enough to distinguish each cM, so 1e-5 does not skew results.
     for i in range(1, len(cm_pos)):
         if cm_pos[i] <= cm_pos[i-1]:
             cm_pos[i] = cm_pos[i-1] + 1e-5
-    return phys_pos, cm_pos
+    return phys_pos, cm_pos, chromosomes[0]
 
 
-def interpolate_map(map_file, pgen_file):
-    """
-    Read map file in SHAPEIT format to interpolate read pgen positions to cM
-    """
-    phys_pos, cm_pos = read_map_file(map_file)
-
+def _read_pgen_physical_positions(pgen_file):
     pvar = pgen_file.replace("pgen", "pvar")
     bim = pgen_file.replace("pgen", "bim")
     physical_positions = None
@@ -88,8 +94,18 @@ def interpolate_map(map_file, pgen_file):
     elif os.path.isfile(pvar):
         physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(np.float64)
     else:
-        raise RuntimeError(f"Can't find {bim} or {pvar}")
+        raise RuntimeError(f"Can't find {bim} or {pvar} for {pgen_file}")
 
+    return physical_positions
+
+
+def make_recombination_from_map_and_pgen(map_file, pgen_file, expected_chrom):
+    """
+    Interpolate pgen to cM positons from map file in SHAPEIT and pgen variants
+    """
+    phys_pos, cm_pos, _chrom = read_map_file(map_file, expected_chrom)
+
+    physical_positions = _read_pgen_physical_positions(pgen_file)
     cm_out = np.interp(physical_positions, phys_pos, cm_pos)
 
     if physical_positions.max() > phys_pos.max() or physical_positions.min() < phys_pos.min():
@@ -102,19 +118,12 @@ def interpolate_map(map_file, pgen_file):
     return cm_out, physical_positions
 
 
-def get_map_from_bim(pgen_file, rho):
-    pvar = pgen_file.replace("pgen", "pvar")
-    bim = pgen_file.replace("pgen", "bim")
-    cm_out = None
-    physical_positions = None
-    if os.path.isfile(bim):
-        physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(int)
-        cm_out = rho * 100 * physical_positions
-    elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(int)
-        cm_out = rho * 100 * physical_positions
-    else:
-        raise RuntimeError(f"Can't find {bim} or {pvar}")
+def make_constant_recombination_from_pgen(pgen_file, rho):
+    """
+    Read pgen variant file and generate a constant recombination using rho
+    """
+    physical_positions = _read_pgen_physical_positions(pgen_file)
+    cm_out = rho * 100 * physical_positions
 
     for i in range(1, len(cm_out)):
         if cm_out[i] <= cm_out[i-1]:
@@ -135,6 +144,30 @@ def split_list(list, n):
         si = (d+1)*(i if i < r else r) + d*(0 if i < r else i - r)
         sublists.append(list[si:si+(d+1 if i < r else d)])
     return sublists
+
+
+def parse_region_string(region: str) -> Tuple[str | None, int, int]:
+    """
+    Convert "tag:start-end" or "start-end" string into a (str | None, int, int)
+    3-tuple. The format of tag is either "chr[1-22]" or just "[1-22]". If the
+    tag is omitted then the returned 3-tuple's first value is None.
+    """
+    match = re.match(r"((chr)?(\d+):)?(\d+)-(\d+)", region)
+    if not match:
+        raise RuntimeError(f"Invalid region string '{region}'")
+
+    tag = match[3]
+    if tag:
+        tag = int(match[3])
+        if tag < 1 or tag > 22:
+            raise RuntimeError(f"Invalid chromosome {tag} not between 1 and 22")
+
+    start = int(match[4])
+    end = int(match[5])
+    if end < start:
+        raise RuntimeError(f"Invalid range: end {end} less than start {start}")
+
+    return tag, start, end
 
 
 @contextmanager
