@@ -149,14 +149,13 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads):
       If multiply mapped, strings "leaf_1...leaf_k1,edge1_lower,edge1_upper;...;leaf_1...leafkN,edgeN_lower,edgeN_upper"
           telling us the range (in generations) of each edge and the leaves it subtends (-1 if all carriers)
     """
-    logger.info("Starting Threads-map with parameters")
-    logger.info(f"argn:    {argn}")
-    logger.info(f"out:     {out}")
-    logger.info(f"maf:     {maf}")
-    logger.info(f"input:   {input}")
-    logger.info(f"region:  {region}")
-    logger.info(f"threads: {num_threads}")
-    logger.info("WARNING: Threads-map is experimental.")
+    logger.info(f"Starting Threads-map with parameters")
+    logger.info(f"  argn:    {argn}")
+    logger.info(f"  out:     {out}")
+    logger.info(f"  maf:     {maf}")
+    logger.info(f"  input:   {input}")
+    logger.info(f"  region:  {region}")
+    logger.info(f"  threads: {num_threads}")
     start_time = time.time()
 
     actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)

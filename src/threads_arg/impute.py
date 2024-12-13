@@ -424,7 +424,7 @@ class Impute:
 
         with timer_block("getting VCF positions", False):
             self.phys_pos_array = np.array([record.pos for record in self.target_dict.values()])
-            map_bp, map_cm = read_map_file(map)
+            map_bp, map_cm, _chrom = read_map_file(map)
             self.cm_pos_array = np.interp(self.phys_pos_array, map_bp, map_cm)
             self.num_snps = len(self.phys_pos_array)
             logger.info(f"Pos array snps size {self.num_snps}")

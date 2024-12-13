@@ -86,11 +86,11 @@ def convert(threads, argn, tsz):
 @click.option("--out", help="Path to output .mut file")
 @click.option("--maf", type=float, default=0.02, help="Do not store entries with MAF above this")
 @click.option("--input", type=str, help="Path to bcf/vcf with genotypes to map with AC/AN fields")
-@click.option("--region", type=str, help="Of format chr:start-end (both inclusive)")
+@click.option("--region", type=str, help="Region in chr:start-end format (start and end inclusive)")
 @click.option("--num_threads", type=int, help="Number of computational threads to request", default=1)
 def map(argn, out, maf, input, region, threads):
     from .map_mutations_to_arg import threads_map_mutations_to_arg
-    threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads)
+    threads_map_mutations_to_arg(argn, out, maf, input, region, threads)
     goodbye()
 
 
