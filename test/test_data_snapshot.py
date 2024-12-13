@@ -90,10 +90,7 @@ def test_data_snapshot_regression():
         threads_convert(
             threads=str(threads_path),
             argn=str(argn_path),
-            tsz=None,
-            max_n=None,
-            random_seed=1234,
-            verify=False
+            tsz=None
         )
 
         # Compare against expected snapshot of argn data
