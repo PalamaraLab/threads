@@ -148,26 +148,26 @@ def split_list(list, n):
 
 def parse_region_string(region: str) -> Tuple[Union[str, None], int, int]:
     """
-    Convert "tag:start-end" or "start-end" string into a (str | None, int, int)
-    3-tuple. The format of tag is either "chr[1-22]" or just "[1-22]". If the
-    tag is omitted then the returned 3-tuple's first value is None.
+    Convert "chr:start-end" or "start-end" string into a (str | None, int, int)
+    3-tuple. The format of chr is either "chr[1-22]" or just "[1-22]". If the
+    chr is omitted then the returned 3-tuple's first value is None.
     """
     match = re.match(r"((chr)?(\d+):)?(\d+)-(\d+)", region)
     if not match:
         raise RuntimeError(f"Invalid region string '{region}'")
 
-    tag = match[3]
-    if tag:
-        tag = int(match[3])
-        if tag < 1 or tag > 22:
-            raise RuntimeError(f"Invalid chromosome {tag} not between 1 and 22")
+    chr = match[3]
+    if chr:
+        chr = int(match[3])
+        if chr < 1 or chr > 22:
+            raise RuntimeError(f"Invalid chromosome {chr} not between 1 and 22")
 
     start = int(match[4])
     end = int(match[5])
     if end < start:
         raise RuntimeError(f"Invalid range: end {end} less than start {start}")
 
-    return tag, start, end
+    return chr, start, end
 
 
 @contextmanager
