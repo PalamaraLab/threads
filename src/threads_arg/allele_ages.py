@@ -61,6 +61,5 @@ def estimate_allele_ages(threads, pgen, region, out):
 
     # Write results to file
     with open(out, "w") as outfile:
-        for allele_age, snp_id in zip(allele_age_estimates, ids[start_idx:end_idx]):
-            outfile.write(f"{snp_id}\t{allele_age}\n")
-
+        for allele_age, pos, snp_id in zip(allele_age_estimates, positions[start_idx:end_idx], ids[start_idx:end_idx]):
+            outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")

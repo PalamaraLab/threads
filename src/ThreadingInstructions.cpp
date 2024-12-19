@@ -93,7 +93,7 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
         std::tie(starts, targets, tmrcas) = path.dump_data_in_range(start, end);
         for (auto het_idx : path.het_sites) {
             int het_pos = all_positions.at(het_idx);
-            if ((start <= het_pos) && (het_pos < end)) { 
+            if ((start <= het_pos) && (het_pos < end)) {
                 mismatches.push_back(het_idx);
             }
         }

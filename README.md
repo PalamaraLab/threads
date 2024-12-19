@@ -80,7 +80,8 @@ Parallelism can be enabled by specifying `--num_threads`.
 
 By specifying `--fit_to_data`, the inferred threading instructions are manipulated post-hoc to ensure that each input mutation is uniquely represented by an edge in the ARG. This may lead to more fragmented ARGs.
 
-If `--fit_to_data` is specified and a file with two columns, a SNP ID and an allele age, is provided with `--allele_ages`, the ARG is altered in a way that makes it consistent with those mutations. If `--allele_ages` is not specified, allele ages are automatically inferred. If `--fit_to_data` is not specified, this option is ignored.
+If `--fit_to_data` the ARG is altered in a way that makes it consistent with those mutations. 
+If `--allele_ages` is specified it must point to a file with three columns: SNP id, position and allele age, with no header and the ARG is made to be consistent with these allele ages. If `--allele_ages` is not specified, allele ages are automatically inferred. If `--fit_to_data` is not specified, the `--allele_ages` option is ignored.
 
 ## ARG conversion
 `.threads` files can be converted to `.argn` and `.tsz` using
@@ -107,6 +108,8 @@ threads allele-ages --threads input.threads \
     --region 1:234-567 (Optional) \
     --out output_4/allele.ages
 ```
+
+The output is a file with three columns: SNP id, position, age.
 
 ## Data consistency
 The manipulation of threading instructions performed using the `--fit_to_data` flag in `threads infer` can be performed separately using the command `threads fit-to-data`:

@@ -131,7 +131,7 @@ ThreadingInstruction InstructionConverter::parse_converted_instructions() {
         std::cout << current_segment << " should be " << instructions.num_segments - 1 << "\n";
         throw std::runtime_error("Haven't processed all segments in a set of instructions");
     }
-    // Wrapping up, so we break up and save the current segment, setting
+    // Wrapping up, so we break up and save the current segment.
     // The "-1"s are unused placeholders.
     break_segment(-1, -1, -1, -1);
     return ThreadingInstruction(new_starts, new_tmrcas, new_targets, new_mismatches);
