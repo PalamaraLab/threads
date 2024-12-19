@@ -24,6 +24,7 @@ import importlib
 os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
 import numpy as np
+import pandas as pd
 
 from threads_arg import (
     ThreadsLowMem,
@@ -38,7 +39,8 @@ from .utils import (
     parse_demography,
     get_map_from_bim,
     split_list,
-    iterate_pgen
+    iterate_pgen,
+    read_positions_and_ids
 )
 from .serialization import serialize_instructions
 
@@ -302,16 +304,17 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, f
         else:
             logger.info(f"Reading allele ages from {allele_ages}")
             allele_age_estimates = []
-            with open(allele_ages, "r") as agefile:
-                for line in agefile:
-                    allele_age_estimates.append(float(line.strip()))
+            _, ids = read_positions_and_ids(pgen)
+            age_table = pd.read_table(allele_ages, header=None, names=["SNP", "POS", "AGE"])
+            age_table = age_table[age_table["SNP"].astype(str).isin(ids)]
+            allele_age_estimates = age_table["AGE"].values
             try:
-                assert len(allele_age_estimates) == len(instructions.positions)
+                assert age_table.shape[0] == len(instructions.positions) == len(allele_age_estimates)
             except AssertionError:
                 raise RuntimeError(f"Allele age estimates do not match markers in the region requested, expected {len(instructions.positions)} age estimates.")
-        
+
         # Start the consistifying
-        logger.info(f"Post-processing threading instructions to fit to data")
+        logger.info("Post-processing threading instructions to fit to data")
         cw = ConsistencyWrapper(instructions, allele_age_estimates)
         iterate_pgen(pgen, lambda i, g: cw.process_site(g), start_idx=start_idx, end_idx=end_idx)
         consistent_instructions = cw.get_consistent_instructions()
