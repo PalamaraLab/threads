@@ -26,6 +26,13 @@ from threads_arg.convert import threads_convert
 BASE_DIR = Path(__file__).parent.parent
 
 
+def assert_allclose_msg(dataset_name, dset_gen, dset_ref):
+    msg = f"Detected diff in '{dataset_name}' dataset:\n"
+    msg += f"Generated:\n{np.array(dset_gen)}\n"
+    msg += f"Expected:\n{np.array(dset_ref)}\n"
+    return msg
+
+
 def _check_hdf_files_match(generated: Path, expected: Path):
     """
     Check that contents of generated hdf file matches those of expected file
@@ -45,7 +52,7 @@ def _check_hdf_files_match(generated: Path, expected: Path):
             dset_ref = exp_file[dataset_name]
 
             assert dset_gen.shape == dset_ref.shape
-            assert np.allclose(dset_gen, dset_ref)
+            assert np.allclose(dset_gen, dset_ref), assert_allclose_msg(dataset_name, dset_gen, dset_ref)
 
 
 def test_data_snapshot_regression():
@@ -61,7 +68,7 @@ def test_data_snapshot_regression():
         test_data_dir = BASE_DIR / "test" / "data"
         threads_infer(
             pgen=str(test_data_dir / "panel.pgen"),
-            map_gz=str(test_data_dir / "gmap_02.map"),
+            map=str(test_data_dir / "gmap_02.map"),
             recombination_rate=1.3e-8,
             demography=str(test_data_dir / "CEU_unscaled.demo"),
             mutation_rate=1.4e-8,
@@ -83,10 +90,7 @@ def test_data_snapshot_regression():
         threads_convert(
             threads=str(threads_path),
             argn=str(argn_path),
-            tsz=None,
-            max_n=None,
-            random_seed=1234,
-            verify=False
+            tsz=None
         )
 
         # Compare against expected snapshot of argn data

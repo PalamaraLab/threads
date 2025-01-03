@@ -18,13 +18,16 @@ import os
 import numpy as np
 import h5py
 import pandas as pd
-import warnings
 import logging
+import re
 import time
+import warnings
 
 from contextlib import contextmanager
+from typing import Tuple, Union
 
 logger = logging.getLogger(__name__)
+
 
 def decompress_threads(threads):
     f = h5py.File(threads, "r")
@@ -57,46 +60,55 @@ def decompress_threads(threads):
     }
 
 
-def read_map_gz(map_gz):
+def read_map_file(map_file, expected_chromosome=None) -> Tuple[np.ndarray, np.ndarray, str]:
     """
-    Reading in map file (columns 0: chrom, 1: SNP, 2: cM-pos, 3: bp)
+    Reading in map file for Li-Stephens using genetic maps in the SHAPEIT format
     """
-    if (map_gz[:-3] == ".gz") :
-        maps = pd.read_table(map_gz, header=None, compression='gzip')
-    else:
-        maps = pd.read_table(map_gz, header=None)
-    cm_pos = maps[2].values.astype(np.float64)
-    phys_pos = maps[3].values.astype(np.float64)
+    maps = pd.read_table(map_file, sep=r"\s+")
+    cm_pos = maps.cM.values.astype(np.float64)
+    phys_pos = maps.pos.values.astype(np.float64)
+    chromosomes = np.unique(maps.chr.values.astype(str))
+
+    # Currently we only allow for processing one chromosome at a time
+    if len(chromosomes) > 1:
+        raise RuntimeError(f"Found multiple chromosomes in {map_file}. Threads limits to one.")
+
+    if expected_chromosome:
+        if str(expected_chromosome) != chromosomes[0]:
+            raise RuntimeError(f"Expected chromosome {expected_chromosome} not found in {map_file}")
+
+    # Add an epsilon value to avoid div zero errors. A few decimal places is
+    # enough to distinguish each cM, so 1e-5 does not skew results.
     for i in range(1, len(cm_pos)):
         if cm_pos[i] <= cm_pos[i-1]:
             cm_pos[i] = cm_pos[i-1] + 1e-5
-    return cm_pos, phys_pos
+    return phys_pos, cm_pos, chromosomes[0]
 
 
-def interpolate_map(map_gz, pgen):
-    """
-    Reading in map file (format has columns [chrom, SNP, cM-pos, bp])
-    """
-    if (map_gz[:-3] == ".gz") :
-        maps = pd.read_table(map_gz, header=None, compression='gzip', sep="\\s+")
-    else:
-        maps = pd.read_table(map_gz, header=None, sep="\\s+")
-    cm_pos_map = maps[2].values.astype(np.float64)
-    phys_pos_map = maps[3].values.astype(np.float64)
-    pvar = pgen.replace("pgen", "pvar")
-    bim = pgen.replace("pgen", "bim")
-
+def _read_pgen_physical_positions(pgen_file):
+    pvar = pgen_file.replace("pgen", "pvar")
+    bim = pgen_file.replace("pgen", "bim")
     physical_positions = None
     if os.path.isfile(bim):
         physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(np.float64)
     elif os.path.isfile(pvar):
         physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(np.float64)
     else:
-        raise RuntimeError(f"Can't find {bim} or {pvar}")
+        raise RuntimeError(f"Can't find {bim} or {pvar} for {pgen_file}")
 
-    cm_out = np.interp(physical_positions, phys_pos_map, cm_pos_map)
+    return physical_positions
 
-    if physical_positions.max() > phys_pos_map.max() or physical_positions.min() < phys_pos_map.min():
+
+def make_recombination_from_map_and_pgen(map_file, pgen_file, expected_chrom):
+    """
+    Interpolate pgen to cM positons from map file in SHAPEIT and pgen variants
+    """
+    phys_pos, cm_pos, _chrom = read_map_file(map_file, expected_chrom)
+
+    physical_positions = _read_pgen_physical_positions(pgen_file)
+    cm_out = np.interp(physical_positions, phys_pos, cm_pos)
+
+    if physical_positions.max() > phys_pos.max() or physical_positions.min() < phys_pos.min():
         warnings.warn("Warning: Found variants outside map range. Consider trimming input genotypes.")
 
     # We may get complaints in the model where the recombination rate is 0
@@ -106,19 +118,12 @@ def interpolate_map(map_gz, pgen):
     return cm_out, physical_positions
 
 
-def get_map_from_bim(pgen, rho):
-    pvar = pgen.replace("pgen", "pvar")
-    bim = pgen.replace("pgen", "bim")
-    cm_out = None
-    physical_positions = None
-    if os.path.isfile(bim):
-        physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(int)
-        cm_out = rho * 100 * physical_positions
-    elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(int)
-        cm_out = rho * 100 * physical_positions
-    else:
-        raise RuntimeError(f"Can't find {bim} or {pvar}")
+def make_constant_recombination_from_pgen(pgen_file, rho):
+    """
+    Read pgen variant file and generate a constant recombination using rho
+    """
+    physical_positions = _read_pgen_physical_positions(pgen_file)
+    cm_out = rho * 100 * physical_positions
 
     for i in range(1, len(cm_out)):
         if cm_out[i] <= cm_out[i-1]:
@@ -139,6 +144,30 @@ def split_list(list, n):
         si = (d+1)*(i if i < r else r) + d*(0 if i < r else i - r)
         sublists.append(list[si:si+(d+1 if i < r else d)])
     return sublists
+
+
+def parse_region_string(region: str) -> Tuple[Union[str, None], int, int]:
+    """
+    Convert "chr:start-end" or "start-end" string into a (str | None, int, int)
+    3-tuple. The format of chr is either "chr[1-22]" or just "[1-22]". If the
+    chr is omitted then the returned 3-tuple's first value is None.
+    """
+    match = re.match(r"((chr)?(\d+):)?(\d+)-(\d+)", region)
+    if not match:
+        raise RuntimeError(f"Invalid region string '{region}'")
+
+    chr = match[3]
+    if chr:
+        chr = int(match[3])
+        if chr < 1 or chr > 22:
+            raise RuntimeError(f"Invalid chromosome {chr} not between 1 and 22")
+
+    start = int(match[4])
+    end = int(match[5])
+    if end < start:
+        raise RuntimeError(f"Invalid range: end {end} less than start {start}")
+
+    return chr, start, end
 
 
 @contextmanager

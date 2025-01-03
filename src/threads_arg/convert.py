@@ -27,20 +27,19 @@ from .utils import decompress_threads
 logger = logging.getLogger(__name__)
 
 
-def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False, random_seed=0):
+def threads_to_arg(thread_dict, noise=0.0):
     """
     Assemble threading instructions into an ARG
     """
     threading_instructions = thread_dict['threads']
-    pos = thread_dict['positions']
-    N = max_n if max_n is not None else np.max(thread_dict['samples'].astype(int)) + 1
+    N = np.max(thread_dict['samples'].astype(int)) + 1
     logger.info(f"Will thread {N} haploids")
     arg_start, arg_end = thread_dict['arg_range']
     # "+ 2" so we can include mutations on the last site, ARG is end-inclusive, we're not.
     arg = arg_needle_lib.ARG(0, arg_end - arg_start + 2, reserved_samples=N)
     arg.set_offset(int(arg_start))
 
-    rng = np.random.default_rng(seed=random_seed)
+    rng = np.random.default_rng(seed=1234)
 
     # How this should work:
     for i, t in enumerate(threading_instructions[:N]):
@@ -65,15 +64,11 @@ def threads_to_arg(thread_dict, noise=0.0, max_n=None, verify=False, random_seed
                 import pdb
                 pdb.set_trace()
     logger.info(f"Done threading")
-
-    if verify:
-        logger.info("Verifying ARG...")
-        arg.check_basic()
     return arg
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
+def threads_convert(threads, argn, tsz):
     """
     Convert input .threads file into .threads or .argn file
     """
@@ -82,8 +77,6 @@ def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
     logger.info(f"  threads:     {threads}")
     logger.info(f"  argn:        {argn}")
     logger.info(f"  tsz:         {tsz}")
-    logger.info(f"  max_n:       {max_n}")
-    logger.info(f"  random_seed: {random_seed}")
 
     if argn is None and tsz is None:
         logger.info("Nothing to do, quitting.")
@@ -91,15 +84,15 @@ def threads_convert(threads, argn, tsz, max_n, random_seed, verify):
     decompressed_threads = decompress_threads(threads)
     try:
         logger.info("Attempting to convert to arg format...")
-        arg = threads_to_arg(decompressed_threads, noise=0.0, max_n=max_n, verify=verify, random_seed=random_seed)
+        arg = threads_to_arg(decompressed_threads, noise=0.0)
     except:
         # arg_needle_lib does not allow polytomies
         logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
         try:
-            arg = threads_to_arg(decompressed_threads, noise=1e-5, max_n=max_n, verify=verify, random_seed=random_seed)
+            arg = threads_to_arg(decompressed_threads, noise=1e-5)
         except:# tskit.LibraryError:
             logger.info(f"Conflicting branches, retrying with noise=1e-3...")
-            arg = threads_to_arg(decompressed_threads, noise=1e-3, max_n=max_n, verify=verify, random_seed=random_seed)
+            arg = threads_to_arg(decompressed_threads, noise=1e-3)
     if argn is not None:
         logger.info(f"Writing to {argn}")
         arg_needle_lib.serialize_arg(arg, argn)
