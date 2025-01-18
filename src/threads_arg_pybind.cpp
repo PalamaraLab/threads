@@ -19,6 +19,8 @@
 #include "ThreadsLowMem.hpp"
 #include "DataConsistency.hpp"
 #include "AlleleAges.hpp"
+#include "GenotypeIterator.hpp"
+#include "VCFWriter.hpp"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -127,7 +129,6 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            py::arg("het_sites"))
       .def("query", &TGEN::query, py::return_value_policy::take_ownership);
 
-
   py::class_<ThreadingInstructions>(m, "ThreadingInstructions")
       .def(py::init<const std::vector<ViterbiPath>, const int, const int, const std::vector<int>&>(), "initialize",
            py::arg("paths"), py::arg("start"), py::arg("end"), py::arg("positions"))
@@ -154,8 +155,18 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            "Initialize", py::arg("instructions"), py::arg("allele_ages"))
       .def("process_site", &ConsistencyWrapper::process_site)
       .def("get_consistent_instructions", &ConsistencyWrapper::get_consistent_instructions);
+
   py::class_<AgeEstimator>(m, "AgeEstimator")
       .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("threading_instructions"))
       .def("process_site", &AgeEstimator::process_site)
       .def("get_inferred_ages", &AgeEstimator::get_inferred_ages);
+
+  py::class_<GenotypeIterator>(m, "GenotypeIterator")
+      .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("instructions"))
+      .def("next_genotype", &GenotypeIterator::next_genotype)
+      .def("has_next_genotype", &GenotypeIterator::has_next_genotype);
+    
+  py::class_<VCFWriter>(m, "VCFWriter")
+      .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("instructions"))
+      .def("write_vcf", &VCFWriter::write_vcf);
 }

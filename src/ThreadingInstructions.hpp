@@ -30,6 +30,7 @@ public:
     std::vector<int> targets;
     std::vector<int> mismatches;
     std::size_t num_segments = 0;
+    std::size_t num_mismatches = 0;
     ThreadingInstruction(
         const std::vector<int> _starts,
         const std::vector<double> _tmrcas,
@@ -41,26 +42,32 @@ class ThreadingInstructionIterator {
 // This is a container for iterating through a ThreadingInstruction object site-by-site
 private:
     ThreadingInstruction& instruction;
+    const std::vector<int>& positions;
     int sites_processed = 0;
     int next_segment_start = 0;
+    int next_mismatch = 0;
 public:
     int num_sites = 0;
+    int current_mismatch = 0;
     int current_segment = 0;
     int current_target = 0;
     double current_tmrca = 0;
+    bool is_mismatch = false;
 public:
     void increment_site(const int pos);
-    ThreadingInstructionIterator(ThreadingInstruction& _instruction);
+    ThreadingInstructionIterator(ThreadingInstruction& _instruction, const std::vector<int>& _positions);
 };
 
 class ThreadingInstructions {
 // This is a container class for threading instructions inferred by Threads
 public:
+    // Getters
     std::vector<std::vector<int>> all_starts();
     std::vector<std::vector<double>> all_tmrcas();
     std::vector<std::vector<int>> all_targets();
     std::vector<std::vector<int>> all_mismatches();
-    std::vector<int> positions;
+
+    // Constructors
     ThreadingInstructions(const std::vector<ThreadingInstruction>& _instructions, const std::vector<int>& _positions);
     ThreadingInstructions(const std::vector<ViterbiPath>& paths, const int start, const int end, const std::vector<int>& all_positions);
     ThreadingInstructions(const std::vector<std::vector<int>>& starts,
@@ -68,12 +75,17 @@ public:
                           const std::vector<std::vector<int>>& targets,
                           const std::vector<std::vector<int>>& mismatches,
                           const std::vector<int>& _positions, int _start, int _end);
+    
+    // Genotype recovery
+
 
 public:
     int start;
     int end;
     int num_samples;
     int num_sites;
+    std::vector<int> positions;
     std::vector<ThreadingInstruction> instructions;
 };
 #endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP
+

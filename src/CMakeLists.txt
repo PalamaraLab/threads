@@ -42,6 +42,8 @@ set(threads_arg_src
     ThreadingInstructions.cpp
     DataConsistency.cpp
     AlleleAges.cpp
+    GenotypeIterator.cpp
+    VCFWriter.cpp
 )
 
 set(threads_arg_hdr
@@ -59,6 +61,8 @@ set(threads_arg_hdr
     ThreadingInstructions.hpp
     DataConsistency.hpp
     AlleleAges.hpp
+    GenotypeIterator.hpp
+    VCFWriter.hpp
 )
 
 add_library(threads_arg STATIC
