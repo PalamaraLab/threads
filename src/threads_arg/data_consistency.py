@@ -59,6 +59,10 @@ def fit_to_data(threads, pgen, region, allele_ages, out):
     start_idx = np.searchsorted(positions, region_start)
     end_idx = np.searchsorted(positions, region_end, side="right")
 
+    used_pos = positions[start_idx:end_idx]
+    if (used_pos[1:] - used_pos[:-1] <= 0).any():
+        raise RuntimeError("Sites must be strictly increasing.")
+
     if allele_ages is None:
         logging.info(f"Inferring allele ages from data")
         age_estimator = AgeEstimator(instructions)

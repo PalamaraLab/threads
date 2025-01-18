@@ -184,6 +184,9 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, f
         logger.info(f"Using constant recombination rate of {recombination_rate}")
         genetic_positions, physical_positions = get_map_from_bim(pgen, recombination_rate)
 
+    if fit_to_data and (physical_positions[1:] - physical_positions[:-1] <= 0).any():
+        raise RuntimeError("Sites must be strictly increasing when --fit-to-data is set.")
+
     out_start, out_end = None, None
     if region is not None:
         out_start, out_end = [int(r) for r in region.split("-")]

@@ -26,13 +26,14 @@ ThreadingInstruction::ThreadingInstruction(const std::vector<int> _starts,
                                            const std::vector<int> _mismatches) : 
     starts(_starts), tmrcas(_tmrcas), targets(_targets), mismatches(_mismatches) {
     num_segments = starts.size();
+    num_mismatches = mismatches.size();
     if (tmrcas.size() != num_segments || targets.size() != num_segments) {
       throw std::runtime_error("Mismatching lengths of threading instruction input");
     }
 }
 
-ThreadingInstructionIterator::ThreadingInstructionIterator(ThreadingInstruction& _instruction) :
-    instruction(_instruction) {
+ThreadingInstructionIterator::ThreadingInstructionIterator(ThreadingInstruction& _instruction, const std::vector<int>& _positions) :
+    instruction(_instruction), positions(_positions) {
     if (instruction.num_segments == 0) {
         current_tmrca = 0;
         current_target = -1;
@@ -43,7 +44,15 @@ ThreadingInstructionIterator::ThreadingInstructionIterator(ThreadingInstruction&
     if (instruction.num_segments <= 1) {
         next_segment_start = std::numeric_limits<int>::max();
     } else {
-        next_segment_start = instruction.starts.at(0);
+        next_segment_start = instruction.starts.at(1);
+    }
+
+    if (instruction.num_mismatches == 0) {
+        next_mismatch = std::numeric_limits<int>::max();
+        is_mismatch = false;
+    } else {
+        next_mismatch = positions.at(instruction.mismatches.at(0));
+        is_mismatch = instruction.mismatches.at(0) == 0;
     }
 }
 
@@ -59,6 +68,18 @@ void ThreadingInstructionIterator::increment_site(int position) {
             next_segment_start = std::numeric_limits<int>::max();
         }
     }
+
+    // Search forward and update current mismatch status
+    while (next_mismatch < position ) {
+        current_mismatch++;
+        if (current_mismatch <= instruction.num_mismatches - 1) {
+            next_mismatch = positions.at(instruction.mismatches.at(current_mismatch));
+        } else {
+            next_mismatch = std::numeric_limits<int>::max();
+        }
+    }
+    is_mismatch = position == next_mismatch;
+
     sites_processed++;
 }
 
