@@ -15,7 +15,6 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ImputationMatcher.hpp"
-#include "TGEN.hpp"
 #include "ThreadsLowMem.hpp"
 #include "DataConsistency.hpp"
 #include "AlleleAges.hpp"
@@ -121,13 +120,6 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("insert", py::overload_cast<const std::vector<bool>&>(&ThreadsFastLS::insert),
            py::arg("genotypes"))
       .def("impute", &ThreadsFastLS::impute);
-
-  py::class_<TGEN>(m, "TGEN")
-      .def(py::init<std::vector<int>, std::vector<std::vector<int>>, std::vector<std::vector<int>>,
-                    std::vector<std::vector<int>>>(),
-           "Initialize", py::arg("positions"), py::arg("bp_starts"), py::arg("target_ids"),
-           py::arg("het_sites"))
-      .def("query", &TGEN::query, py::return_value_policy::take_ownership);
 
   py::class_<ThreadingInstructions>(m, "ThreadingInstructions")
       .def(py::init<const std::vector<ViterbiPath>, const int, const int, const std::vector<int>&>(), "initialize",

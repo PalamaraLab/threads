@@ -34,7 +34,6 @@ set(threads_arg_src
     State.cpp
     ThreadsFastLS.cpp
     HMM.cpp
-    TGEN.cpp
     ImputationMatcher.cpp
     Matcher.cpp
     ViterbiLowMem.cpp
@@ -52,7 +51,6 @@ set(threads_arg_hdr
     State.hpp
     ThreadsFastLS.hpp
     HMM.hpp
-    TGEN.hpp
     TgenSegment.hpp
     ImputationMatcher.hpp
     Matcher.hpp
