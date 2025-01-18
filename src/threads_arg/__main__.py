@@ -41,23 +41,23 @@ def main():
 
 
 @main.command()
-@click.option("--pgen", required=True, help="Path to input genotypes in pgen format.")
-@click.option("--map_gz", default=None, help="Path to input genotype map with columns chromosome, snp, cM-position, bp-position.")
-@click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed.")
-@click.option("--demography", required=True, help="Path to input genotype.")
-@click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array).")
+@click.option("--pgen", required=True, help="Path to input genotypes in pgen format")
+@click.option("--map", required=True, help="Path to genotype map in SHAPEIT format")
+@click.option("--recombination_rate", default=1.3e-8, type=float, help="Genome-wide recombination rate. Ignored if a map is passed")
+@click.option("--demography", required=True, help="Path to input genotype")
+@click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array)")
 @click.option("--fit_to_data", is_flag=True, default=False, help="If specified, Threads performs a post-processing step to ensure the inferred ARG contains an edge matching each input mutation.")
 @click.option("--allele_ages", default=None, help="Allele ages used for post-processing with the --data_consistent option, otherwise ignored. If not specified, allele ages are inferred automatically.")
-@click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM.")
-@click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM.")
-@click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate.")
-@click.option("--num_threads", type=int, default=1, help="Number of computational threads to request.")
-@click.option("--region", default=None, help="Region of genome for which ARG is output. The full genotype is still used for inference.")
-@click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread.", default=None, type=int) 
+@click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM")
+@click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM")
+@click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate")
+@click.option("--num_threads", type=int, default=1, help="Number of computational threads to request")
+@click.option("--region", help="Region of genome in chr:start-end format for which ARG is output. The full genotype is still used for inference")
+@click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread", default=None, type=int) 
 @click.option("--out")
-def infer(pgen, map_gz, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def infer(pgen, map, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     from .infer import threads_infer
-    threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
+    threads_infer(pgen, map, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out)
     goodbye()
 
 @main.command()
@@ -72,15 +72,12 @@ def phase(scaffold, argn, ts, unphased, out):
     goodbye()
 
 @main.command()
-@click.option("--threads", required=True, help="Path to an input .threads file.")
-@click.option("--argn", default=None, help="Path to an output .argn file.")
-@click.option("--tsz", default=None, help="Path to an output .tsz file.")
-@click.option("--max_n", default=None, help="How many samples to thread.", type=int)
-@click.option("--random-seed", default=130222, help="Seed for noise generation.", type=int)
-@click.option("--verify", is_flag=True, show_default=True, default=False, help="Whether to use tskit to verify the ARG.")
-def convert(threads, argn, tsz, max_n, random_seed, verify):
+@click.option("--threads", required=True, help="Path to an input .threads file")
+@click.option("--argn", default=None, help="Path to an output .argn file")
+@click.option("--tsz", default=None, help="Path to an output .tsz file")
+def convert(threads, argn, tsz):
     from .convert import threads_convert
-    threads_convert(threads, argn, tsz, max_n, random_seed, verify)
+    threads_convert(threads, argn, tsz)
     goodbye()
 
 @main.command()
@@ -109,26 +106,37 @@ def fit_to_data(threads, pgen, region, allele_ages, out):
 @click.option("--out", help="Path to output .mut file")
 @click.option("--maf", type=float, default=0.02, help="Do not store entries with MAF above this")
 @click.option("--input", type=str, help="Path to bcf/vcf with genotypes to map with AC/AN fields")
-@click.option("--region", type=str, help="Of format chr:start-end (both inclusive)")
+@click.option("--region", type=str, help="Region in chr:start-end format (start and end inclusive)")
 @click.option("--num_threads", type=int, help="Number of computational threads to request", default=1)
 def map(argn, out, maf, input, region, threads):
     from .map_mutations_to_arg import threads_map_mutations_to_arg
-    threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads)
+    threads_map_mutations_to_arg(argn, out, maf, input, region, threads)
     goodbye()
 
 @main.command()
 @click.option("--panel", required=True, help="pgen array panel")
 @click.option("--target", required=True, help="pgen array targets")
 @click.option("--mut", required=True, help="pgen array targets")
-@click.option("--map", required=True, help="Path to genotype map")
-@click.option("--mutation_rate", type=float, help="Per-site-per-generation SNP mutation rate.", default=1.4e-8)
-@click.option("--demography", required=True, help="Path to file containing demographic history.")
-@click.option("--out", required=True, help="Path to output .vcf file.")
-@click.option("--region", required=True, type=str)
-def impute(panel, target, map, mut, demography, out, region, mutation_rate=1.4e-8):
+@click.option("--map", required=True, help="Path to genotype map in SHAPEIT format")
+@click.option("--mutation_rate", type=float, help="Per-site-per-generation SNP mutation rate", default=1.4e-8)
+@click.option("--demography", required=True, help="Path to file containing demographic history")
+@click.option("--out", help="Path to output .vcf file", default=None)
+@click.option("--stdout", help="Redirect output to stdout (will disable logging)", is_flag=True)
+@click.option("--region", required=True, type=str, help="Region in chr:start-end format (start and end inclusive)")
+def impute(panel, target, map, mut, demography, out, stdout, region, mutation_rate=1.4e-8):
+    # --stdout flag is mutually exclusive to --out flag. It is used only here to
+    # confirm the user wants to redirect (potentially a lot of data) to stdout.
+    # The Impute class does not use this variable, instead 'out' is just None.
+    if (stdout and out) or not (stdout or out):
+        print("Either --out or --stdout must be specified", file=sys.stderr)
+        exit(1)
+
     from .impute import Impute
     Impute(panel, target, map, mut, demography, out, region, mutation_rate)
-    goodbye()
+
+    # Do not print anything in stdout mode, to keep output clean.
+    if not stdout:
+        goodbye()
 
 @main.command()
 @click.argument("threads", required=True)

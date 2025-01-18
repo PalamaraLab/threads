@@ -35,12 +35,14 @@ from threads_arg import (
     ConsistencyWrapper
 )
 from .utils import (
-    interpolate_map,
+    make_recombination_from_map_and_pgen,
+    make_constant_recombination_from_pgen,
+    split_list,
     parse_demography,
-    get_map_from_bim,
     split_list,
     iterate_pgen,
-    read_positions_and_ids
+    read_positions_and_ids,
+    parse_region_string
 )
 from .serialization import serialize_instructions
 
@@ -158,12 +160,12 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logger.info(f"Starting Threads-infer with the following parameters:")
     logger.info(f"  pgen:                  {pgen}")
-    logger.info(f"  map_gz:                {map_gz}")
+    logger.info(f"  map:                   {map}")
     logger.info(f"  recombination_rate:    {recombination_rate}")
     logger.info(f"  region:                {region}")
     logger.info(f"  demography:            {demography}")
@@ -176,13 +178,19 @@ def threads_infer(pgen, map_gz, recombination_rate, demography, mutation_rate, f
     logger.info(f"  max_sample_batch_size: {max_sample_batch_size}")
     logger.info(f"  out:                   {out}")
 
+    out_start = None
+    out_end = None
+    chrom = None
+    if region is not None:
+        chrom, out_start, out_end = parse_region_string(region)
+
     # Initialize region, genetic map, and genotype reader
-    if map_gz is not None:
-        logger.info(f"Using recombination rates from {map_gz}")
-        genetic_positions, physical_positions = interpolate_map(map_gz, pgen)
+    if map is not None:
+        logger.info(f"Using recombination rates from {map}")
+        genetic_positions, physical_positions = make_recombination_from_map_and_pgen(map, pgen, chrom)
     else:
         logger.info(f"Using constant recombination rate of {recombination_rate}")
-        genetic_positions, physical_positions = get_map_from_bim(pgen, recombination_rate)
+        genetic_positions, physical_positions = make_constant_recombination_from_pgen(pgen, recombination_rate, chrom)
 
     if fit_to_data and (physical_positions[1:] - physical_positions[:-1] <= 0).any():
         raise RuntimeError("Sites must be strictly increasing when --fit-to-data is set.")
