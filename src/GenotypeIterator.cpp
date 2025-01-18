@@ -28,9 +28,9 @@ GenotypeIterator::GenotypeIterator(ThreadingInstructions& instructions) {
     out_genotype = std::vector(num_samples, 0);
     current_site = 0;
     num_sites = instructions.num_sites;
-    current_position = positions.at(0);
+    current_position = positions.front();
     reference_genome = std::vector(instructions.num_sites, 0);
-    for (auto i : instructions.instructions.at(0).mismatches) {
+    for (auto i : instructions.instructions.front().mismatches) {
         reference_genome[i] = 1;
     }
 }
