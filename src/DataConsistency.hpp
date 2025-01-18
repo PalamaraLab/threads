@@ -24,8 +24,11 @@
 
 class InstructionConverter {
 private:
+    // Segment starts
     std::vector<int> new_starts;
+    // Coalescence times (times to the most recent common ancestor)
     std::vector<double> new_tmrcas;
+    // Closest cousins
     std::vector<int> new_targets;
     void break_segment(double new_lower_bound, double new_upper_bound, int position, int new_target);
 public:

@@ -25,9 +25,13 @@
 class ThreadingInstruction {
 // This is a container class for the instructions inferred for a single sequence
 public:
+    // Segment starts
     std::vector<int> starts;
+    // Coalescence times (times to the most recent common ancestor)
     std::vector<double> tmrcas;
+    // Closest cousins
     std::vector<int> targets;
+    // Mismatches with closest cousin
     std::vector<int> mismatches;
     std::size_t num_segments = 0;
     std::size_t num_mismatches = 0;

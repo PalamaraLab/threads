@@ -38,8 +38,8 @@ ThreadingInstructionIterator::ThreadingInstructionIterator(ThreadingInstruction&
         current_tmrca = 0;
         current_target = -1;
     } else {
-        current_tmrca = instruction.tmrcas.at(0);
-        current_target = instruction.targets.at(0);
+        current_tmrca = instruction.tmrcas.front();
+        current_target = instruction.targets.front();
     }
     if (instruction.num_segments <= 1) {
         next_segment_start = std::numeric_limits<int>::max();
@@ -51,8 +51,8 @@ ThreadingInstructionIterator::ThreadingInstructionIterator(ThreadingInstruction&
         next_mismatch = std::numeric_limits<int>::max();
         is_mismatch = false;
     } else {
-        next_mismatch = positions.at(instruction.mismatches.at(0));
-        is_mismatch = instruction.mismatches.at(0) == 0;
+        next_mismatch = positions.at(instruction.mismatches.front());
+        is_mismatch = instruction.mismatches.front() == 0;
     }
 }
 
@@ -85,7 +85,7 @@ void ThreadingInstructionIterator::increment_site(int position) {
 
 ThreadingInstructions::ThreadingInstructions(const std::vector<ThreadingInstruction>& _instructions, const std::vector<int>& _positions) :
     instructions(_instructions), positions(_positions) {
-    start = positions.at(0);
+    start = positions.front();
     end = positions.back() + 1;
     num_samples = instructions.size();
     num_sites = positions.size();
@@ -108,10 +108,12 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
     std::vector<int> starts;
     std::vector<int> targets;
     std::vector<double> tmrcas;
+    instructions.reserve(num_samples);
     for (auto path : paths) {
         std::vector<int> mismatches;
         path.map_positions(all_positions);
         std::tie(starts, targets, tmrcas) = path.dump_data_in_range(start, end);
+        const auto [starts, targets, tmrcas] = path.dump_data_in_range(start, end);
         for (auto het_idx : path.het_sites) {
             int het_pos = all_positions.at(het_idx);
             if ((start <= het_pos) && (het_pos < end)) {
@@ -130,6 +132,7 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<std::vector<int>>
     positions(_positions), start(_start), end(_end) {
     num_samples = starts.size();
     num_sites = positions.size();
+    instructions.reserve(num_samples);
     for (int i = 0; i < num_samples; i++) {
         instructions.push_back(ThreadingInstruction(starts.at(i), tmrcas.at(i), targets.at(i), mismatches.at(i)));
     }
@@ -137,6 +140,7 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<std::vector<int>>
 
 std::vector<std::vector<int>> ThreadingInstructions::all_starts() {
     std::vector<std::vector<int>> out;
+    out.reserve(num_samples);
     for (auto& instruction : instructions) {
         out.push_back(instruction.starts);
     }
@@ -145,6 +149,7 @@ std::vector<std::vector<int>> ThreadingInstructions::all_starts() {
 
 std::vector<std::vector<double>> ThreadingInstructions::all_tmrcas() {
     std::vector<std::vector<double>> out;
+    out.reserve(num_samples);
     for (auto& instruction : instructions) {
         out.push_back(instruction.tmrcas);
     }
@@ -153,6 +158,7 @@ std::vector<std::vector<double>> ThreadingInstructions::all_tmrcas() {
 
 std::vector<std::vector<int>> ThreadingInstructions::all_targets() {
     std::vector<std::vector<int>> out;
+    out.reserve(num_samples);
     for (auto& instruction : instructions) {
         out.push_back(instruction.targets);
     }
@@ -161,6 +167,7 @@ std::vector<std::vector<int>> ThreadingInstructions::all_targets() {
 
 std::vector<std::vector<int>> ThreadingInstructions::all_mismatches() {
     std::vector<std::vector<int>> out;
+    out.reserve(num_samples);
     for (auto& instruction : instructions) {
         out.push_back(instruction.mismatches);
     }

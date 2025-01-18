@@ -24,6 +24,7 @@ AgeEstimator::AgeEstimator(ThreadingInstructions& instructions)
     {
     num_samples = instructions.num_samples;
     positions = instructions.positions;
+    threading_iterators.reserve(instructions.instructions.size());
     for (auto& instruction : instructions.instructions) {
         threading_iterators.push_back(ThreadingInstructionIterator(instruction, positions));
     }
@@ -55,6 +56,7 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
                 path_lengths[i] = 0;
             }
         }
+
         // Find the largest carrier cluster(s)
         // Extract the longest such path(s)
         if (path_lengths[i] == max_path_len) {
@@ -137,6 +139,6 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
     increment_site();
 }
 
-const std::vector<double> AgeEstimator::get_inferred_ages() {
+const std::vector<double>& AgeEstimator::get_inferred_ages() const {
     return estimated_ages;
 }

@@ -40,6 +40,8 @@ InstructionConverter::InstructionConverter(ThreadingInstruction _instructions, s
 void InstructionConverter::break_segment(double new_lower_bound, double new_upper_bound, int position, int new_target) {
     double threads_tmrca = instructions.tmrcas.at(current_segment);
 
+    // The factor of "1000" is adjust coalescence time not too much,
+    // but not little enough that the ARG-Needle noise factor will change tree topology
     if (threads_tmrca >= current_upper_bound) {
         // Just below the current upper bound
         double epsilon = std::min(current_upper_bound / 1000, (current_upper_bound - current_lower_bound) / 2);
@@ -159,6 +161,7 @@ ConsistencyWrapper::ConsistencyWrapper(const std::vector<std::vector<int>>& star
         throw std::runtime_error("Sites don't match ages");
     }
 
+    instruction_converters.reserve(num_samples);
     for (std::size_t i = 0; i < num_samples; i++) {
         ThreadingInstruction instructions = ThreadingInstruction(starts.at(i), tmrcas.at(i), targets.at(i), mismatches.at(i));
         InstructionConverter converter = InstructionConverter(instructions, i, physical_positions.at(0));
@@ -221,6 +224,7 @@ ThreadingInstructions ConsistencyWrapper::get_consistent_instructions() {
 
     // Make output threading instructions
     std::vector<ThreadingInstruction> output_instructions;
+    output_instructions.reserve(instruction_converters.size());
     for (InstructionConverter converter : instruction_converters) {
         output_instructions.push_back(converter.parse_converted_instructions());
     }
