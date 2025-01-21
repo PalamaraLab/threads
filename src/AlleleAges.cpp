@@ -26,7 +26,7 @@ AgeEstimator::AgeEstimator(ThreadingInstructions& instructions)
     positions = instructions.positions;
     threading_iterators.reserve(instructions.instructions.size());
     for (auto& instruction : instructions.instructions) {
-        threading_iterators.push_back(ThreadingInstructionIterator(instruction, positions));
+        threading_iterators.emplace_back(instruction, positions);
     }
 }
 

@@ -84,10 +84,10 @@ public:
 
 
 public:
-    int start;
-    int end;
-    int num_samples;
-    int num_sites;
+    int start = 0;
+    int end = 0;
+    int num_samples = 0;
+    int num_sites = 0;
     std::vector<int> positions;
     std::vector<ThreadingInstruction> instructions;
 };

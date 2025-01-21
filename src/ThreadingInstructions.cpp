@@ -95,14 +95,19 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
     start(_start), end(_end) {
     num_samples = paths.size();
 
+    int pos_idx_offset = -1;
+    int i = 0;
     for (auto pos : all_positions) {
         if (start <= pos && pos < end) {
             positions.push_back(pos);
+            pos_idx_offset = pos_idx_offset < 0 ? i : pos_idx_offset;
         } 
         if (pos > end) {
             break;
         }
+        i++;
     }
+    pos_idx_offset = pos_idx_offset < 0 ? 0 : pos_idx_offset;
     num_sites = positions.size();
 
     std::vector<int> starts;
@@ -117,7 +122,7 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
         for (auto het_idx : path.het_sites) {
             int het_pos = all_positions.at(het_idx);
             if ((start <= het_pos) && (het_pos < end)) {
-                mismatches.push_back(het_idx);
+                mismatches.push_back(het_idx - pos_idx_offset);
             }
         }
         instructions.push_back(ThreadingInstruction(starts, tmrcas, targets, mismatches));
