@@ -164,8 +164,7 @@ ConsistencyWrapper::ConsistencyWrapper(const std::vector<std::vector<int>>& star
     instruction_converters.reserve(num_samples);
     for (std::size_t i = 0; i < num_samples; i++) {
         ThreadingInstruction instructions = ThreadingInstruction(starts.at(i), tmrcas.at(i), targets.at(i), mismatches.at(i));
-        InstructionConverter converter = InstructionConverter(instructions, i, physical_positions.at(0));
-        instruction_converters.push_back(converter);
+        instruction_converters.emplace_back(instructions, i, physical_positions.at(0));
     }
 
     std::cout << "Will convert " << num_samples << " threading instructions across " << num_sites << " sites.\n";

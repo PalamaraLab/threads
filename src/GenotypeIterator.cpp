@@ -22,7 +22,7 @@
 GenotypeIterator::GenotypeIterator(ThreadingInstructions& instructions) {
     positions = instructions.positions;
     for (auto& instruction : instructions.instructions) {
-        threading_iterators.push_back(ThreadingInstructionIterator(instruction, positions));
+        threading_iterators.emplace_back(instruction, positions);
     }
     num_samples = instructions.num_samples;
     out_genotype = std::vector(num_samples, 0);

@@ -22,7 +22,6 @@
 
 VCFWriter::VCFWriter(ThreadingInstructions& instructions) 
     : gt_iterator(GenotypeIterator(instructions)) {
-    // gt_iterator = GenotypeIterator(instructions);
 }
 
 void VCFWriter::write_vcf() {
