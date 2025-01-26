@@ -139,6 +139,6 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
     increment_site();
 }
 
-const std::vector<double>& AgeEstimator::get_inferred_ages() const {
+std::vector<double> AgeEstimator::get_inferred_ages() const {
     return estimated_ages;
 }

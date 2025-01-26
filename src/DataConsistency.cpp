@@ -166,8 +166,6 @@ ConsistencyWrapper::ConsistencyWrapper(const std::vector<std::vector<int>>& star
         ThreadingInstruction instructions = ThreadingInstruction(starts.at(i), tmrcas.at(i), targets.at(i), mismatches.at(i));
         instruction_converters.emplace_back(instructions, i, physical_positions.at(0));
     }
-
-    std::cout << "Will convert " << num_samples << " threading instructions across " << num_sites << " sites.\n";
 }
 
 void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
@@ -177,16 +175,16 @@ void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
         allele_age = 1e-3;
     }
     std::size_t position = physical_positions.at(sites_processed);
-    int counter = 0;
+    int current_hap = 0;
     int first_carrier = -1;
     for (InstructionConverter& converter : instruction_converters) {
         converter.increment_site(position);
         int new_target = converter.current_target;
-        if (genotypes.at(counter) == 1) {
+        if (genotypes.at(current_hap) == 1) {
             // The threading instructions of carriers must be a carrier-only graph rooted
             // at the first carrier
             if (first_carrier == -1) {
-                first_carrier = counter;
+                first_carrier = current_hap;
             } else {
                 // Otherwise we try traversing the local threading graph to find another carrier
                 int current_target = converter.current_target;
@@ -208,10 +206,10 @@ void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
         }
         converter.evaluate_bounds(genotypes, position, allele_age);
 
-        if (counter > 0 && genotypes.at(converter.current_target) != genotypes.at(counter)) {
-            converter.new_mismatches.push_back(counter);
+        if (current_hap > 0 && genotypes.at(converter.current_target) != genotypes.at(current_hap)) {
+            converter.new_mismatches.push_back(sites_processed);
         }
-        counter++;
+        current_hap++;
     }
     sites_processed++;
 }

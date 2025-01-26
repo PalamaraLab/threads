@@ -39,8 +39,6 @@ def goodbye():
 def main():
     pass
 
-
-# def infer(pgen, map, recombination_rate, demography, mutation_rate, query_interval, match_group_interval, mode, fit_to_data, allele_ages, num_threads, region, max_sample_batch_size, out):
 @main.command()
 @click.option("--pgen", required=True, help="Path to input genotypes in pgen format")
 @click.option("--map", required=True, help="Path to genotype map in SHAPEIT format")
@@ -76,6 +74,7 @@ def phase(**kwargs):
 @click.option("--threads", required=True, help="Path to an input .threads file")
 @click.option("--argn", default=None, help="Path to an output .argn file")
 @click.option("--tsz", default=None, help="Path to an output .tsz file")
+@click.option("--add_mutations", is_flag=True, default=False, help="If passed, mutations are parsimoniously added to the output ARG. This may result in a high number of mutations if the --fit_to_data flag was not used.")
 def convert(**kwargs):
     from .convert import threads_convert
     threads_convert(**kwargs)
@@ -83,8 +82,6 @@ def convert(**kwargs):
 
 @main.command()
 @click.option("--threads", required=True, help="Path to an input .threads file.")
-@click.option("--pgen", required=True, help="Path to an input .pgen file.")
-@click.option("--region", help="Region in 123-456 format, defaults to the whole ARG.")
 @click.option("--out", required=True, help="Path to output.")
 def allele_ages(**kwargs):
     from .allele_ages import estimate_allele_ages

@@ -32,7 +32,7 @@ public:
     AgeEstimator(ThreadingInstructions& instructions);
     void process_site(const std::vector<int>& genotypes);
     void increment_site();
-    const std::vector<double>& get_inferred_ages() const;
+    std::vector<double> get_inferred_ages() const;
 public:
     std::vector<double> estimated_ages;
 };
