@@ -17,49 +17,29 @@
 import logging
 import numpy as np
 
-from threads_arg import AgeEstimator
+from threads_arg import AgeEstimator, GenotypeIterator
 from .serialization import load_instructions
-from .utils import iterate_pgen, read_positions_and_ids
 
-def estimate_allele_ages(threads, pgen, region, out):
+def estimate_allele_ages(threads, out):
     logging.info("Starting allele age estimation with the following parameters:")
     logging.info(f"threads:  {threads}")
-    logging.info(f"pgen:     {pgen}")
-    logging.info(f"region:   {region}")
     logging.info(f"out:      {out}")
+
     # Read threading instructions
     instructions = load_instructions(threads)
 
-    # Find the intersection of ARG/pgen/requested regions
-    if region is not None:
-        region_start = int(region.split(":")[-1].split("-")[0])
-        region_end = int(region.split(":")[-1].split("-")[1])
-    else:
-        region_start = -np.inf
-        region_end = np.inf
-    arg_start = instructions.start
-    arg_end = instructions.end
-
-    positions, ids = read_positions_and_ids(pgen)
-
-    pgen_start = positions[0]
-    pgen_end = positions[-1] + 1
-
-    allele_age_start = max([arg_start, region_start, pgen_start])
-    allele_age_end = min([arg_end, region_end, pgen_end])
-
-    start_idx = np.searchsorted(positions, allele_age_start)
-    end_idx = np.searchsorted(positions, allele_age_end, side="right")
-    logging.info(f"Will estimate the age of {end_idx - start_idx} variants")
-
-    # Initialize the age estimator
+    # Estimate ages
+    gt_it = GenotypeIterator(instructions)
     age_estimator = AgeEstimator(instructions)
-
-    # Do the age estimation
-    iterate_pgen(pgen, lambda i, g: age_estimator.process_site(g), start_idx=start_idx, end_idx=end_idx)
+    while gt_it.has_next_genotype():
+        g = np.array(gt_it.next_genotype())
+        age_estimator.process_site(g)
     allele_age_estimates = age_estimator.get_inferred_ages()
+
+    # Temporary snp ids until #45 is resolved
+    snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
 
     # Write results to file
     with open(out, "w") as outfile:
-        for allele_age, pos, snp_id in zip(allele_age_estimates, positions[start_idx:end_idx], ids[start_idx:end_idx]):
+        for snp_id, pos, allele_age in zip(snp_ids, instructions.positions, allele_age_estimates):
             outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")

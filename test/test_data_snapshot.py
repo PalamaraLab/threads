@@ -17,11 +17,15 @@
 import numpy as np
 import h5py
 import tempfile
+import pgenlib
+import arg_needle_lib
 
 from pathlib import Path
 
 from threads_arg.infer import threads_infer
 from threads_arg.convert import threads_convert
+from threads_arg.serialization import load_instructions
+from threads_arg import GenotypeIterator
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -50,9 +54,47 @@ def _check_hdf_files_match(generated: Path, expected: Path):
         for dataset_name in gen_file.keys():
             dset_gen = gen_file[dataset_name]
             dset_ref = exp_file[dataset_name]
-
             assert dset_gen.shape == dset_ref.shape
             assert np.allclose(dset_gen, dset_ref), assert_allclose_msg(dataset_name, dset_gen, dset_ref)
+
+
+def _check_compression_is_correct(threads: Path, pgen: Path):
+    """
+    Check that the threading instructions match the input pgen
+    """
+    reader = pgenlib.PgenReader(str(pgen).encode())
+    expected_num_variants = reader.get_variant_ct()
+    num_samples = reader.get_raw_sample_ct()
+
+    expected_gt = np.empty((expected_num_variants, 2 * num_samples), dtype=np.int32)
+    reader.read_alleles_range(0, expected_num_variants, expected_gt)
+
+    instructions = load_instructions(threads)
+    gt_it = GenotypeIterator(instructions)
+    found_gt = np.empty((expected_num_variants, 2 * num_samples), dtype=np.int32)
+
+    i = 0
+    while gt_it.has_next_genotype():
+        found_gt[i] = np.array(gt_it.next_genotype())
+        i += 1
+
+    assert (found_gt == expected_gt).all()
+
+
+def _check_argn_mutations_fit_to_data(argn: Path, pgen: Path):
+    reader = pgenlib.PgenReader(str(pgen).encode())
+    expected_num_variants = reader.get_variant_ct()
+    num_samples = reader.get_raw_sample_ct()
+
+    expected_gt = np.empty((expected_num_variants, 2 * num_samples), dtype=np.int32)
+    reader.read_alleles_range(0, expected_num_variants, expected_gt)
+
+    arg = arg_needle_lib.deserialize_arg(str(argn))
+    arg.populate_children_and_roots()
+    assert len(arg.mutations()) == expected_num_variants
+
+    argn_gt = arg_needle_lib.get_mutations_matrix(arg)
+    assert (argn_gt == expected_gt).all()
 
 
 def test_data_snapshot_regression():
@@ -83,6 +125,9 @@ def test_data_snapshot_regression():
             out=str(threads_path)
         )
 
+        # Compare genotypes are correctly compressed
+        _check_compression_is_correct(threads_path, str(test_data_dir / "panel.pgen"))
+
         # Compare against expected snapshot of threads data
         threads_expected_path = test_data_dir / "arg.threads"
         _check_hdf_files_match(threads_path, threads_expected_path)
@@ -98,3 +143,54 @@ def test_data_snapshot_regression():
         # Compare against expected snapshot of argn data
         convert_expected_path = test_data_dir / "arg.argn"
         _check_hdf_files_match(argn_path, convert_expected_path)
+
+
+def test_fit_to_data_snapshot_regression():
+    """
+    Regression check for difference in output from threads infer and convert using
+    the --fit-to-data flag
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Regenerate threads infer output
+        threads_path = Path(tmpdir) / "test_fit_to_data_snapshot_regression.threads"
+        test_data_dir = BASE_DIR / "test" / "data"
+        threads_infer(
+            pgen=str(test_data_dir / "panel.pgen"),
+            map=str(test_data_dir / "gmap_02.map"),
+            recombination_rate=1.3e-8,
+            demography=str(test_data_dir / "CEU_unscaled.demo"),
+            mutation_rate=1.4e-8,
+            query_interval=0.01,
+            match_group_interval=0.5,
+            mode="wgs",
+            num_threads=1,
+            region=None,
+            fit_to_data=True,
+            allele_ages=None,
+            max_sample_batch_size=None,
+            out=str(threads_path)
+        )
+
+        # Compare genotypes are correctly compressed
+        _check_compression_is_correct(threads_path, str(test_data_dir / "panel.pgen"))
+
+        # Compare against expected snapshot of threads data
+        threads_expected_path = test_data_dir / "arg_consistent.threads"
+        _check_hdf_files_match(threads_path, threads_expected_path)
+
+        # Convert generated output
+        argn_path = Path(tmpdir) / "test_fit_to_data_snapshot_regression.argn"
+        threads_convert(
+            threads=str(threads_path),
+            argn=str(argn_path),
+            tsz=None,
+            add_mutations=True
+        )
+
+        # Compare against expected snapshot of argn data
+        convert_expected_path = test_data_dir / "arg_consistent.argn"
+        _check_hdf_files_match(argn_path, convert_expected_path)
+
+        # Put this back in here once arg_needle_lib-dev #19 and #20 have been resolved
+        # _check_argn_mutations_fit_to_data(argn_path, str(test_data_dir / "panel.pgen"))
+

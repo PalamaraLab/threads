@@ -140,9 +140,8 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
         # Construct paths
         TLM.traceback()
 
-        # TODO: pass this through "iterate_pgen"
         # Add heterozygous sites to each path segment
-        iterate_pgen(pgen, lambda i, g: TLM.process_site_hets(g))
+        iterate_pgen(pgen, lambda _, g: TLM.process_site_hets(g))
 
         # Add coalescence time to each segment
         TLM.date_segments()

@@ -79,9 +79,6 @@ public:
                           const std::vector<std::vector<int>>& targets,
                           const std::vector<std::vector<int>>& mismatches,
                           const std::vector<int>& _positions, int _start, int _end);
-    
-    // Genotype recovery
-
 
 public:
     int start = 0;
