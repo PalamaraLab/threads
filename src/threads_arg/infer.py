@@ -36,7 +36,8 @@ from .utils import (
     make_constant_recombination_from_pgen,
     split_list,
     parse_demography,
-    parse_region_string
+    parse_region_string,
+    default_process_count
 )
 from datetime import datetime
 
@@ -337,7 +338,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, quer
     matcher.propagate_adjacent_matches()
 
     # From here we parallelise if we can
-    actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)
+    actual_num_threads = min(default_process_count(), num_threads)
     logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
     paths = []
     if actual_num_threads > 1:
