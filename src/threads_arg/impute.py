@@ -19,7 +19,12 @@ if BISECT_LEFT_KEY_SEARCH:
     from bisect import bisect_left
 
 from .fwbw import fwbw
-from .utils import timer_block, TimerTotal, read_map_file, default_process_count
+from .utils import (
+    timer_block,
+    TimerTotal,
+    read_map_file,
+    default_process_count
+)
 
 logger = logging.getLogger(__name__)
 
