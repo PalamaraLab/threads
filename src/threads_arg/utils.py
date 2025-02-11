@@ -220,3 +220,18 @@ class TimerTotal:
     def __str__(self):
         total = sum(self.durations)
         return f"Total time for {self.desc}: {total:.3f}s"
+
+
+def default_process_count():
+    """
+    Get the number of CPUs available for multi-processing work
+
+    This tries os.sched_getaffinity first for common case of running on an HPC
+    node, e.g. for `srun` with `--ntasks-per-node 4`, this returns 4.
+    Some platforms like macOS do not provide this method. In which case, assume
+    that this is not an HPC node and just use the host's CPU count directly.
+    """
+    try:
+        return len(os.sched_getaffinity(0))
+    except:
+        return os.cpu_count()
