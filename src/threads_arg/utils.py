@@ -233,5 +233,5 @@ def default_process_count():
     """
     try:
         return len(os.sched_getaffinity(0))
-    except:
+    except AttributeError:
         return os.cpu_count()
