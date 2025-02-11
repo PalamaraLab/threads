@@ -19,13 +19,9 @@ if BISECT_LEFT_KEY_SEARCH:
     from bisect import bisect_left
 
 from .fwbw import fwbw
-from .utils import timer_block, TimerTotal, read_map_file
+from .utils import timer_block, TimerTotal, read_map_file, default_process_count
 
 logger = logging.getLogger(__name__)
-
-
-# Get available processes from os (rather than all with multiprocessing.cpu_count)
-PROCESS_COUNT = len(os.sched_getaffinity(0))
 
 @dataclass
 class RecordMemo:
@@ -264,17 +260,20 @@ def _memoize_nth_record_process_star(args):
     return _memoize_nth_record_process(*args)
 
 
-def _memoize_vcf_region_records(filename, region, cpu_count=PROCESS_COUNT) -> RecordMemoDict:
+def _memoize_vcf_region_records(filename, region, process_count=None) -> RecordMemoDict:
     """
     Given a VCF filename and region, generate a dictionary of record memos
     containing just the data required for imputation.
     """
+    if not process_count:
+        process_count = default_process_count()
+
     # Split the expensive parts reading records over available processes.
     # 'imemos' is shorthand for indexed memos, a list of tuples with index and memo
     shortname = os.path.basename(filename)
-    with timer_block(f"memoising VCF {shortname}, region {region} ({cpu_count} CPUs)", False):
-        jobs_args = [(filename, region, i, cpu_count) for i in range(cpu_count)]
-        with multiprocessing.Pool(processes=cpu_count) as pool:
+    with timer_block(f"memoising VCF {shortname}, region {region} ({process_count} CPUs)", False):
+        jobs_args = [(filename, region, i, process_count) for i in range(process_count)]
+        with multiprocessing.Pool(processes=process_count) as pool:
             # To use tqdm with a pool, use imap with shim method to unpack args.
             imemos = list(tqdm(
                 pool.imap(_memoize_nth_record_process_star, jobs_args),
