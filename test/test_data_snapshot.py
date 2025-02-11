@@ -26,10 +26,19 @@ from threads_arg.convert import threads_convert
 BASE_DIR = Path(__file__).parent.parent
 
 
-def assert_allclose_msg(dataset_name, dset_gen, dset_ref):
-    msg = f"Detected diff in '{dataset_name}' dataset:\n"
-    msg += f"Generated:\n{np.array(dset_gen)}\n"
-    msg += f"Expected:\n{np.array(dset_ref)}\n"
+def assert_shape_msg(generated, expected, dataset_name, dset_gen, dset_ref):
+    gen_np = np.array(dset_gen)
+    ref_np = np.array(dset_ref)
+    msg = f"Difference in dataset shape '{dataset_name}' dataset\n"
+    msg += f"Generated {dset_gen.shape} ({generated}):\n{np.array(dset_gen)}\n"
+    msg += f"Expected {dset_ref.shape} ({expected}):\n{np.array(dset_ref)}\n"
+    return msg
+
+
+def assert_allclose_msg(generated, expected, dataset_name, dset_gen, dset_ref):
+    msg = f"Detected diff in '{dataset_name}' dataset\n"
+    msg += f"Generated ({generated}):\n{np.array(dset_gen)}\n"
+    msg += f"Expected ({expected}):\n{np.array(dset_ref)}\n"
     return msg
 
 
@@ -51,8 +60,8 @@ def _check_hdf_files_match(generated: Path, expected: Path):
             dset_gen = gen_file[dataset_name]
             dset_ref = exp_file[dataset_name]
 
-            assert dset_gen.shape == dset_ref.shape
-            assert np.allclose(dset_gen, dset_ref), assert_allclose_msg(dataset_name, dset_gen, dset_ref)
+            assert dset_gen.shape == dset_ref.shape, assert_shape_msg(generated, expected, dataset_name, dset_gen, dset_ref)
+            assert np.allclose(dset_gen, dset_ref), assert_allclose_msg(generated, expected, dataset_name, dset_gen, dset_ref)
 
 
 def test_data_snapshot_regression():
