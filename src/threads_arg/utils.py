@@ -132,7 +132,7 @@ def make_constant_recombination_from_pgen(pgen_file, rho):
 
 
 def parse_demography(demography):
-    d = pd.read_table(demography, sep="\\s+", header=None)
+    d = pd.read_table(demography, sep="\\s+", header=None, float_precision="round_trip")
     return list(d[0]), list(d[1])
 
 
