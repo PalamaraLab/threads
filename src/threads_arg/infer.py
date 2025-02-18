@@ -96,7 +96,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
             TLM.initialize_viterbi(s_match_group, match_cm_positions)
         else:
             TLM.initialize_viterbi([[s[k] for k in sample_index_subset] for s in s_match_group], match_cm_positions)
-        
+
         M = reader.get_variant_ct()
         BATCH_SIZE = int(4e7 // num_samples_hap)
         n_batches = int(np.ceil(M / BATCH_SIZE))
@@ -294,7 +294,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results):
             paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
-    
+
     # Inference is done, now we slice up the threading instructions and keep only the region requested
     region_start = physical_positions[0] if out_start is None else max(physical_positions[0], out_start)
     region_end = physical_positions[-1] + 1 if out_end is None else min(physical_positions[-1] + 1, out_end + 1)
