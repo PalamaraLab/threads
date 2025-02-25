@@ -62,14 +62,14 @@ public:
                        const std::vector<std::vector<int>>& targets,
                        const std::vector<std::vector<int>>& mismatches,
                        const std::vector<int>& physical_positions,
-                       const std::vector<double>& allele_ages);
-    ConsistencyWrapper(ThreadingInstructions& instructions, const std::vector<double>& allele_ages) :
-        ConsistencyWrapper(instructions.all_starts(), 
+                       const std::vector<double>& _allele_ages);
+    ConsistencyWrapper(ThreadingInstructions& instructions, const std::vector<double>& _allele_ages) :
+        ConsistencyWrapper(instructions.all_starts(),
                            instructions.all_tmrcas(),
                            instructions.all_targets(),
                            instructions.all_mismatches(),
                            instructions.positions,
-                           allele_ages) {}
+                           _allele_ages) {}
     ThreadingInstructions get_consistent_instructions();
 
 public:

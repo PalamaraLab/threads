@@ -118,7 +118,6 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
         std::vector<int> mismatches;
         path.map_positions(all_positions);
         std::tie(starts, targets, tmrcas) = path.dump_data_in_range(start, end);
-        const auto [starts, targets, tmrcas] = path.dump_data_in_range(start, end);
         for (auto het_idx : path.het_sites) {
             int het_pos = all_positions.at(het_idx);
             if ((start <= het_pos) && (het_pos < end)) {

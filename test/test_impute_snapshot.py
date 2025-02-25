@@ -25,15 +25,15 @@ from threads_arg.map_mutations_to_arg import threads_map_mutations_to_arg
 BASE_DIR = Path(__file__).parent.parent
 
 
-def _line_assert_eq(line, lhs, rhs):
-    assert(lhs == rhs)
+def _line_check_eq(_line_no, lhs, rhs):
+    return lhs == rhs
 
 
-def _line_assert_eq_ignore_date(line, lhs, rhs):
-    if line == 3:
-        assert(lhs[0:10] == "##fileDate")
+def _line_check_eq_ignore_date(line_no, lhs, rhs):
+    if line_no == 3:
+        return lhs[0:10] == "##fileDate"
     else:
-        assert(lhs == rhs)
+        return lhs == rhs
 
 
 def _check_files_match(expected_path, generated_path, line_compare_fn):
@@ -41,9 +41,10 @@ def _check_files_match(expected_path, generated_path, line_compare_fn):
     generated = open(generated_path)
 
     for i, lhs in enumerate(expected):
-        line = i + 1
+        line_no = i + 1
         rhs = generated.readline()
-        line_compare_fn(line, lhs, rhs)
+        if not line_compare_fn(line_no, lhs, rhs):
+            assert lhs == rhs, f"line no {line_no} differs between expected {expected_path} and generated {generated_path}"
 
 
 def test_map_snapshot_regression():
@@ -68,7 +69,7 @@ def test_map_snapshot_regression():
         _check_files_match(
             expected_path=str(data_dir / "mapping.mut"),
             generated_path=str(generated_mut_path),
-            line_compare_fn=_line_assert_eq
+            line_compare_fn=_line_check_eq
         )
 
 
@@ -97,5 +98,5 @@ def test_impute_snapshot_regression():
         _check_files_match(
             expected_path=str(data_dir / "imputed.vcf"),
             generated_path=str(generated_vcf_path),
-            line_compare_fn=_line_assert_eq_ignore_date
+            line_compare_fn=_line_check_eq_ignore_date
         )
