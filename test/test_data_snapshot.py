@@ -30,11 +30,36 @@ from threads_arg import GenotypeIterator
 BASE_DIR = Path(__file__).parent.parent
 
 
-def assert_allclose_msg(dataset_name, dset_gen, dset_ref):
-    msg = f"Detected diff in '{dataset_name}' dataset:\n"
-    msg += f"Generated:\n{np.array(dset_gen)}\n"
-    msg += f"Expected:\n{np.array(dset_ref)}\n"
+def assert_shape_msg(generated, expected, dataset_name, gen_item, exp_item):
+    msg = f"Difference in dataset shape '{dataset_name}' dataset\n"
+    msg += f"Generated {gen_item.shape} ({generated}):\n{np.array(gen_item)}\n"
+    msg += f"Expected {exp_item.shape} ({expected}):\n{np.array(exp_item)}\n"
     return msg
+
+
+def assert_allclose_msg(generated, expected, dataset_name, gen_item, exp_item):
+    msg = f"Detected diff in '{dataset_name}' dataset\n"
+    msg += f"Generated ({generated}):\n{np.array(gen_item)}\n"
+    msg += f"Expected ({expected}):\n{np.array(exp_item)}\n"
+    return msg
+
+
+def _check_hdf_items_match(generated_file, expected_file, generated_items, expected_items, path):
+    """
+    Check that datasets or groups match. Recurses on groups.
+    """
+    for name in generated_items.keys():
+        gen_item = generated_items[name]
+        exp_item = expected_items[name]
+        item_path = f"{path}/{name}"
+        if isinstance(gen_item, h5py.Group):
+            # Assert that sibling group exists and recurse into child
+            assert isinstance(exp_item, h5py.Group)
+            _check_hdf_items_match(generated_file, expected_file, gen_item, exp_item, item_path)
+        else:
+            # Assert that shape same and values close enough
+            assert gen_item.shape == exp_item.shape, assert_shape_msg(generated_file, expected_file, name, gen_item, exp_item)
+            assert np.allclose(gen_item, exp_item), assert_allclose_msg(generated_file, expected_file, name, gen_item, exp_item)
 
 
 def _check_hdf_files_match(generated: Path, expected: Path):
@@ -51,11 +76,7 @@ def _check_hdf_files_match(generated: Path, expected: Path):
         # Compare the names of datasets
         assert set(gen_file.keys()) == set(exp_file.keys())
 
-        for dataset_name in gen_file.keys():
-            dset_gen = gen_file[dataset_name]
-            dset_ref = exp_file[dataset_name]
-            assert dset_gen.shape == dset_ref.shape
-            assert np.allclose(dset_gen, dset_ref), assert_allclose_msg(dataset_name, dset_gen, dset_ref)
+        _check_hdf_items_match(generated, expected, gen_file, exp_file, f"{expected.name}: ")
 
 
 def _check_compression_is_correct(threads: Path, pgen: Path):
