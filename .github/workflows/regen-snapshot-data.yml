@@ -5,38 +5,38 @@ on:
 
 jobs:
   build-and-run:
-    name: Regenerate on Ubuntu
+    name: Regenerate snapshot test data
     runs-on: ubuntu-22.04
 
     steps:
-      - name: checkout repo & submodules
+      - name: Checkout repo & submodules
         uses: actions/checkout@v4
 
-      - name: set up Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: install system packages
+      - name: Install system packages
         run: |
           sudo apt -y update
           sudo apt -y install libboost-dev
 
-      - name: install python dependencies
+      - name: Install Python dependencies
         run: |
           pip install --upgrade pip setuptools wheel
           pip install cmake ninja
 
-      - name: install Threads with dev dependencies
+      - name: Install Threads with dev dependencies
         run: |
           pip install ".[dev]"
 
-      - name: display versions
+      - name: Display Python and library versions
         run: |
           python --version
           pip list
 
-      - name: regenerate snapshot data
+      - name: Regenerate snapshot data
         run: python test/regen_snapshot_data.py snapshot_out_dir
 
       - name: Upload archive files
