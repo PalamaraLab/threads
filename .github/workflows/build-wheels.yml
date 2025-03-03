@@ -52,7 +52,7 @@ jobs:
           fetch-depth: 0
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.18.1
+        uses: pypa/cibuildwheel@v2.22.1
 
       - uses: actions/upload-artifact@v4
         with:
@@ -74,7 +74,7 @@ jobs:
           merge-multiple: true
           path: wheels
 
-      - uses: pypa/gh-action-pypi-publish@v1.8.14
+      - uses: pypa/gh-action-pypi-publish@v1.12.4
         with:
           user: __token__
           password: ${{ secrets.PYPI_TOKEN }}
