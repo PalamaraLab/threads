@@ -25,4 +25,5 @@ RUN apt-get install -y \
 RUN apt-get install -y \
     python3-dev \
     libboost-dev \
-    pybind11-dev
+    pybind11-dev \
+    libgsl-dev
