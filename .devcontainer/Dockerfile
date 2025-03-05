@@ -17,3 +17,6 @@ RUN apt-get update && apt-get install -y \
     libboost-dev \
     pybind11-dev \
     libgsl-dev
+
+# Relax pip constraints to simplify installing threads in this container
+RUN pip config set global.break-system-packages true
