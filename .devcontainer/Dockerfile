@@ -1,29 +1,19 @@
 FROM ubuntu:24.04
 
-# Base python dependencies
-RUN apt-get update
-RUN apt-get install -y \
+RUN apt-get update && apt-get install -y \
     python3 \
     python3-venv \
-    python3-pip
-
-# Packages for local testing
-RUN pip install --upgrade pip setuptools wheel
-RUN pip install pytest numpy
-
-# Packages for local build
-RUN pip install cmake ninja
-
-# Dev tools require an additional update
-RUN apt-get update
-RUN apt-get install -y \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    python3-pytest \
+    python3-numpy \
+    python3-dev \
+    cmake \
+    ninja-build \
     git \
     gdb \
-    lcov
-
-# Dev dependencies
-RUN apt-get install -y \
-    python3-dev \
+    lcov \
     libboost-dev \
     pybind11-dev \
     libgsl-dev
