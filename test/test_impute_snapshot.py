@@ -19,8 +19,11 @@ import time
 
 from pathlib import Path
 
-from threads_arg.impute import Impute
-from threads_arg.map_mutations_to_arg import threads_map_mutations_to_arg
+from snapshot_runners import (
+    run_map_snapshot,
+    run_impute_snapshot,
+    TEST_DATA_DIR
+)
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -51,23 +54,19 @@ def test_map_snapshot_regression():
     """
     Regression check for for deterministic mapping generation
     """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        data_dir = BASE_DIR / "test" / "data"
-        generated_mut_path = Path(tmp_dir) / "test_mapping.mut"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Pre-generated argn snapshot used as valid mapping input
+        generated_mut_path = Path(tmpdir) / "mapping.mut"
         start_time = time.perf_counter()
-        threads_map_mutations_to_arg(
-            argn=str(data_dir / "arg.argn"),
-            out=str(generated_mut_path),
-            maf=0.01,
-            input=str(data_dir / "panel.vcf.gz"),
-            region="1:400000-600000",
-            num_threads=1
+        run_map_snapshot(
+            TEST_DATA_DIR / "expected_convert_snapshot.argn",
+            generated_mut_path
         )
         end_time = time.perf_counter()
         print(f"Map ran in {end_time - start_time}s")
 
         _check_files_match(
-            expected_path=str(data_dir / "mapping.mut"),
+            expected_path=str(TEST_DATA_DIR / "expected_mapping_snapshot.mut"),
             generated_path=str(generated_mut_path),
             line_compare_fn=_line_check_eq
         )
@@ -77,26 +76,20 @@ def test_impute_snapshot_regression():
     """
     Regression check for difference in output from threads impute
     """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        generated_vcf_path = Path(tmp_dir) / "test_imputed.vcf"
-        data_dir = BASE_DIR / "test" / "data"
-
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Pre-generated mut snapshot used as valid imputation input
+        generated_vcf_path = Path(tmpdir) / "imputed.vcf"
         start_time = time.perf_counter()
-        Impute(
-            data_dir / "panel.vcf.gz",
-            data_dir / "target.vcf.gz",
-            data_dir / "gmap_04.map",
-            data_dir / "mapping.mut",
-            data_dir / "CEU_unscaled.demo",
-            generated_vcf_path,
-            "1:400000-600000"
+        run_impute_snapshot(
+            TEST_DATA_DIR / "expected_mapping_snapshot.mut",
+            generated_vcf_path
         )
-
         end_time = time.perf_counter()
         print(f"Impute ran in {end_time - start_time}s")
 
+        # The files should be identical except one line with new date
         _check_files_match(
-            expected_path=str(data_dir / "imputed.vcf"),
+            expected_path=str(TEST_DATA_DIR / "expected_impute_snapshot.vcf"),
             generated_path=str(generated_vcf_path),
             line_compare_fn=_line_check_eq_ignore_date
         )
