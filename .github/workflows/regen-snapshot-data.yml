@@ -44,8 +44,7 @@ jobs:
         with:
           name: regenerated-snapshot-data
           path: |
-            snapshot_out_dir/expected_infer_snapshot.argn
+            snapshot_out_dir/expected_infer_snapshot.threads
             snapshot_out_dir/expected_convert_snapshot.argn
             snapshot_out_dir/expected_mapping_snapshot.mut
-            snapshot_out_dir/expected_imputed_snapshot.vcf
-
+            snapshot_out_dir/expected_impute_snapshot.vcf
