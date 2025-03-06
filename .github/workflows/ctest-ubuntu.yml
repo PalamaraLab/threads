@@ -11,12 +11,12 @@ on:
 jobs:
   build-and-test:
     name: Tests on Ubuntu
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if:  ${{ github.event_name == 'pull_request' || github.repository == 'PalamaraLab/threads' }}
 
     steps:
       - name: checkout repo & submodules
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: install system packages
         run: |
