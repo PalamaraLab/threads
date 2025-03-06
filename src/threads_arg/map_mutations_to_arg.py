@@ -25,7 +25,7 @@ import numpy as np
 import arg_needle_lib
 
 from cyvcf2 import VCF
-from .utils import split_list
+from .utils import split_list, default_process_count
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads):
     logger.info(f"  threads: {num_threads}")
     start_time = time.time()
 
-    actual_num_threads = min(len(os.sched_getaffinity(0)), num_threads)
+    actual_num_threads = min(default_process_count(), num_threads)
     logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
 
     return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = None, None, None, None
