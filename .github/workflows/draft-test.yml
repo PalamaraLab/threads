@@ -34,11 +34,10 @@ jobs:
             py-vers: cp313-*
             before-all: echo "BEFORE ALL macos-14"
 
-    # Don't build macOS in pull requests unless on public repo (private repo build cost is 10x)
-    if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, 'macos')) || github.repository == 'PalamaraLab/threads' }}
-
     steps:
       - name: report run
+        # Don't build macOS in pull requests unless on public repo (private repo build cost is 10x)
+        if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, 'macos')) || github.repository == 'PalamaraLab/threads' }}
         run: echo "*** RUN ${{ matrix.os }}"
 
   upload_all:
