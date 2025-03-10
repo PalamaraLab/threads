@@ -24,7 +24,7 @@ jobs:
           - os: ubuntu-24.04
             arch: auto64
             py-vers: cp313-*
-            before-all: echo "BEFORE ALL ubuntu-24.04"
+            before-all: yum -y install cmake
           - os: macos-13
             arch: x86_64
             py-vers: cp313-*
