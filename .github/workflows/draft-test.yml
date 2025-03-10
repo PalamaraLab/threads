@@ -12,8 +12,7 @@ jobs:
   build_wheels_cloud:
     name: Diagnostic ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    # Avoid macOS in pull requests unless on public repo as private repo cost is 10x
-    if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, "macos")) || github.repository == 'PalamaraLab/threads' }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +29,9 @@ jobs:
           - os: macos-14
             arch: arm64
             py-vers: cp313-*
+
+    # Don't build macOS in pull requests unless on public repo (private repo build cost is 10x)
+    if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, "macos")) || github.repository == 'PalamaraLab/threads' }}
 
     steps:
       - name: report run
