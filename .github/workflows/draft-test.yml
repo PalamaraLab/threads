@@ -2,19 +2,12 @@ name: Diagnostic draft runs # FIXME remove before merge
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    branches:
-      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
   release:
-    types:
-      - published
+    types: [published]
 
 jobs:
   ignore_draft_test:
