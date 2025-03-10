@@ -19,15 +19,15 @@ jobs:
         include:
           - os: ubuntu-22.04
             arch: auto64
-            py-vers: cp313-*
-            before-all: python3 --version
+            py-vers: cp310-*
+            before-all: echo "BEFORE ALL ubuntu-22.04"
           - os: ubuntu-24.04
             arch: auto64
-            py-vers: cp313-*
-            before-all: yum -y install cmake
+            py-vers: cp311-*
+            before-all: echo "BEFORE ALL ubuntu-24.04"
           - os: macos-13
             arch: x86_64
-            py-vers: cp313-*
+            py-vers: cp312-*
             before-all: echo "BEFORE ALL macos-13"
           - os: macos-14
             arch: arm64
@@ -38,11 +38,15 @@ jobs:
       - name: report run
         # Don't build macOS in pull requests unless on public repo (private repo build cost is 10x)
         if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, 'macos')) || github.repository == 'PalamaraLab/threads' }}
-        run: echo "*** RUN ${{ matrix.os }}"
+        run: |
+          echo "*** PYTHON ${{ matrix.py-vers }}"
+          echo "*** BEFORE-ALL ${{ matrix.before-all }}"
+          echo "*** RUN ${{ matrix.os }}"
 
   upload_all:
     name: Fake upload
     runs-on: ubuntu-latest
     steps:
       - name: report upload
-        run: echo "*** UPLOAD ${{ matrix.os }}"
+        run: |
+          echo "*** UPLOAD ALL"
