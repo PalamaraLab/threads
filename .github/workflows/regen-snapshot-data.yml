@@ -7,6 +7,7 @@ jobs:
   build-and-run:
     name: Regenerate snapshot test data
     runs-on: ubuntu-24.04
+    if: false # FIXME temporarily disable whilst getting draft system working
 
     steps:
       - name: Checkout repo & submodules

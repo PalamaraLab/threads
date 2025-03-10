@@ -13,6 +13,7 @@ jobs:
   build-libs:
     name: Build C++ libs
     runs-on: ${{ matrix.os }}
+    if: false # FIXME temporarily disable whilst getting draft system working
     strategy:
       fail-fast: false
       matrix:
