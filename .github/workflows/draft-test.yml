@@ -23,7 +23,7 @@ jobs:
     if: |
       (github.event_name == 'pull_request' &&
        (github.event.pull_request.draft == true ||
-        contains(github.event.pull_request.title, '[Draft]'
+        contains(github.event.pull_request.title, '[Draft]')
        )
       ) || github.repository == 'PalamaraLab/threads-arg'
 
@@ -37,7 +37,7 @@ jobs:
     if: |
       (github.event_name == 'pull_request' &&
        (github.event.pull_request.draft == false ||
-        !contains(github.event.pull_request.title, '[Draft]'
+        !contains(github.event.pull_request.title, '[Draft]')
        )
       ) || github.repository == 'PalamaraLab/threads-arg'
 
