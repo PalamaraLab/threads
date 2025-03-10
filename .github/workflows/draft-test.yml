@@ -1,0 +1,36 @@
+name: Diagnostic draft runs # FIXME remove before merge
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  release:
+    types:
+      - published
+
+jobs:
+  ignore_draft_test:
+    name: Ignore draft PR
+    if: |
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == true) ||
+      github.repository == 'PalamaraLab/threads-arg'
+
+    steps:
+      - name: report ignore
+        run: echo "*** IGNORE DRAFT"
+
+  run_draft_test:
+    name: Run non-draft PRs
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false) ||
+      github.repository == 'PalamaraLab/threads-arg'
+
+    steps:
+      - name: report run
+        run: echo "*** RUN PR"
