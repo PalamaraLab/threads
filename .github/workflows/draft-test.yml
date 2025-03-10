@@ -20,7 +20,7 @@ jobs:
           - os: ubuntu-22.04
             arch: auto64
             py-vers: cp313-*
-            before-all: echo "BEFORE ALL ubuntu-22.04"
+            before-all: python3 --version
           - os: ubuntu-24.04
             arch: auto64
             py-vers: cp313-*
