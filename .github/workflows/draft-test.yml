@@ -22,8 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'pull_request' &&
-        github.event.pull_request.draft == true) ||
-      github.repository == 'PalamaraLab/threads-arg'
+       (github.event.pull_request.draft == true ||
+        contains(github.event.pull_request.title, '[Draft]'
+       )
+      ) || github.repository == 'PalamaraLab/threads-arg'
 
     steps:
       - name: report ignore
@@ -34,8 +36,10 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'pull_request' &&
-        github.event.pull_request.draft == false) ||
-      github.repository == 'PalamaraLab/threads-arg'
+       (github.event.pull_request.draft == false ||
+        !contains(github.event.pull_request.title, '[Draft]'
+       )
+      ) || github.repository == 'PalamaraLab/threads-arg'
 
     steps:
       - name: report run
