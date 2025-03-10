@@ -20,21 +20,24 @@ jobs:
           - os: ubuntu-22.04
             arch: auto64
             py-vers: cp313-*
+            before-all: echo "BEFORE ALL ubuntu-22.04"
           - os: ubuntu-24.04
             arch: auto64
             py-vers: cp313-*
+            before-all: echo "BEFORE ALL ubuntu-24.04"
           - os: macos-13
             arch: x86_64
             py-vers: cp313-*
+            before-all: echo "BEFORE ALL macos-13"
           - os: macos-14
             arch: arm64
             py-vers: cp313-*
-
-    # Don't build macOS in pull requests unless on public repo (private repo build cost is 10x)
-    if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, "macos")) || github.repository == 'PalamaraLab/threads' }}
+            before-all: echo "BEFORE ALL macos-14"
 
     steps:
       - name: report run
+        # Don't build macOS in pull requests unless on public repo (private repo build cost is 10x)
+        if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, "macos")) || github.repository == 'PalamaraLab/threads' }}
         run: echo "*** RUN ${{ matrix.os }}"
 
   upload_all:
