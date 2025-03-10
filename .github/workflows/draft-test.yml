@@ -1,39 +1,43 @@
-name: Diagnostic draft runs # FIXME remove before merge
+name: Diagnostic exclude macos # FIXME remove before merge
 
 on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, edited, ready_for_review]
     branches: [main]
   release:
     types: [published]
 
 jobs:
-  ignore_draft_test:
-    name: Ignore draft PR
-    runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'pull_request' &&
-       (github.event.pull_request.draft == true ||
-        contains(github.event.pull_request.title, '[Draft]')
-       )
-      ) || github.repository == 'PalamaraLab/threads-arg'
-
-    steps:
-      - name: report ignore
-        run: echo "*** IGNORE DRAFT"
-
-  run_draft_test:
-    name: Run non-draft PRs
-    runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'pull_request' &&
-       (github.event.pull_request.draft == false &&
-        !contains(github.event.pull_request.title, '[Draft]')
-       )
-      ) || github.repository == 'PalamaraLab/threads-arg'
+  build_wheels_cloud:
+    name: Diagnostic ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # Avoid macOS in pull requests unless on public repo as private repo cost is 10x
+    if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, "macos")) || github.repository == 'PalamaraLab/threads' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: auto64
+            py-vers: cp313-*
+          - os: ubuntu-24.04
+            arch: auto64
+            py-vers: cp313-*
+          - os: macos-13
+            arch: x86_64
+            py-vers: cp313-*
+          - os: macos-14
+            arch: arm64
+            py-vers: cp313-*
 
     steps:
       - name: report run
-        run: echo "*** RUN PR"
+        run: echo "*** RUN ${{ matrix.os }}"
+
+  upload_all:
+    name: Fake upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: report upload
+        run: echo "*** UPLOAD ${{ matrix.os }}"
