@@ -16,7 +16,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+          is-skipped:
+            # Skip macOS pull request builds unless on public repo (private repo build cost is 10x)
+            - ${{ github.repository != 'PalamaraLab/threads' && (
+                    github.event_name == 'pull_request' &&
+                    contains(matrix.os, 'macos')
+                  ) }}
+
+          include:
           - os: ubuntu-22.04
             arch: auto64
             py-vers: cp310-*
@@ -34,10 +41,11 @@ jobs:
             py-vers: cp313-*
             before-all: echo "BEFORE ALL macos-14"
 
+          exclude:
+            - { is-skipped: true }
+
     steps:
       - name: report run
-        # Don't build macOS in pull requests unless on public repo (private repo build cost is 10x)
-        if: ${{ (github.event_name == 'pull_request' && !contains(matrix.os, 'macos')) || github.repository == 'PalamaraLab/threads' }}
         run: |
           echo "*** PYTHON ${{ matrix.py-vers }}"
           echo "*** BEFORE-ALL ${{ matrix.before-all }}"
