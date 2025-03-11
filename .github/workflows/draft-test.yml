@@ -20,36 +20,24 @@ jobs:
           - os: ubuntu-22.04
             arch: auto64
             py-vers: cp310-*
-            before-all: echo "BEFORE ALL ubuntu-22.04"
-            is-macos: false
           - os: ubuntu-24.04
             arch: auto64
             py-vers: cp311-*
-            before-all: echo "BEFORE ALL ubuntu-24.04"
-            is-macos: false
           - os: macos-13
             arch: x86_64
             py-vers: cp312-*
-            before-all: echo "BEFORE ALL macos-13"
-            is-macos: true
           - os: macos-14
             arch: arm64
             py-vers: cp313-*
-            before-all: echo "BEFORE ALL macos-14"
-            is-macos: true
-
-          is-private-pr:
-            - ${{ github.repository != 'PalamaraLab/threads' && github.event_name == 'pull_request' }}
-
+          skip-expensive-run:
+            - ${{ github.repository == 'PalamaraLab/TDPBWT' && (github.event_name == 'pull_request' && runner.os == 'macOS') }}
           exclude:
-            - { is-private-pr: true }
-            - { is-macos: true }
+            - { skip-expensive-run: true }
 
     steps:
       - name: report run
         run: |
           echo "*** PYTHON ${{ matrix.py-vers }}"
-          echo "*** BEFORE-ALL ${{ matrix.before-all }}"
           echo "*** RUN ${{ matrix.os }}"
 
   upload_all:
