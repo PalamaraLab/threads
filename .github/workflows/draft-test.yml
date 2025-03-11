@@ -13,10 +13,13 @@ jobs:
     name: Diagnostic ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
 
+    env:
+      is-private-pr: ${{ github.repository == 'PalamaraLab/TDPBWT' && github.event_name == 'pull_request' }}
+
     strategy:
       fail-fast: false
       matrix:
-          include:
+        include:
           - os: ubuntu-22.04
             arch: auto64
             py-vers: cp310-*
@@ -29,13 +32,9 @@ jobs:
           - os: macos-14
             arch: arm64
             py-vers: cp313-*
-          is-private-pr:
-            - ${{ github.repository == 'PalamaraLab/TDPBWT' && github.event_name == 'pull_request' }}
-          exclude:
-            - os: macos-13
-              is-private-pr: true
-            - os: macos-14
-              is-private-pr: true
+        exclude:
+          - { os: macos-13, is-private-pr: true }
+          - { os: macos-14, is-private-pr: true }
 
     steps:
       - name: report run
