@@ -42,6 +42,8 @@ jobs:
           echo "github.repository: ${{ github.repository }}"
           echo "github.event_name: ${{ github.event_name }}"
           echo "matrix.os: ${{ matrix.os }}"
+          echo "job.continue-on-error ${{ job.continue-on-error }}"
+          echo "is macos: ${{ startsWith(matrix.os, 'macos') }}"
           exit 0
 
       - name: report run
