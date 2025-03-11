@@ -29,10 +29,13 @@ jobs:
           - os: macos-14
             arch: arm64
             py-vers: cp313-*
-          skip-expensive-run:
-            - ${{ github.repository == 'PalamaraLab/TDPBWT' && (github.event_name == 'pull_request' && runner.os == 'macOS') }}
+          is-private-pr:
+            - ${{ github.repository == 'PalamaraLab/TDPBWT' && github.event_name == 'pull_request' }}
           exclude:
-            - { skip-expensive-run: true }
+            - os: macos-13
+              is-private-pr: true
+            - os: macos-14
+              is-private-pr: true
 
     steps:
       - name: report run
