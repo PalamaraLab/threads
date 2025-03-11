@@ -39,6 +39,9 @@ jobs:
            }}
         run: |
           echo "::warning title=Skipping::Job is skipped to preserve macOS resources"
+          echo "github.repository: ${{ github.repository }}"
+          echo "github.event_name: ${{ github.event_name }}"
+          echo "matrix.os: ${{ matrix.os }}"
           exit 0
 
       - name: report run
