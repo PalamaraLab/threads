@@ -33,10 +33,9 @@ jobs:
     steps:
       - name: Skip macOS PR in private repo
         if: |
-          ${{ github.repository == 'PalamaraLab/TDPBWT' &&
-              github.event_name == 'pull_request' &&
-              startsWith(matrix.os, 'macos')
-           }}
+          github.repository == 'PalamaraLab/TDPBWT' &&
+          github.event_name == 'pull_request' &&
+          startsWith(matrix.os, 'macos')
         run: |
           echo "::warning title=Skipping::Job is skipped to preserve macOS resources"
           echo "github.repository: ${{ github.repository }}"
