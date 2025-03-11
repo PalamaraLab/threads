@@ -13,6 +13,8 @@ jobs:
   build-libs:
     name: Build C++ libs
     runs-on: ${{ matrix.os }}
+    if: github.repository_visibility != 'private' || github.event_name == 'pull_request'
+
     strategy:
       fail-fast: false
       matrix:
@@ -31,24 +33,34 @@ jobs:
             system-deps: "brew install boost"
 
     steps:
+      - name: Check if macOS build should be skipped
+        if: github.repository_visibility == 'private' && startsWith(matrix.os, 'macos')
+        run: |
+          echo "::warning title=Skipping::Skipping private repo job to preserve macOS resources"
+          echo "SKIP_JOB=true" >> $GITHUB_ENV
 
       - name: checkout repo & submodules
+        if: ${{ env.SKIP_JOB != 'true' }}
         uses: actions/checkout@v4
 
       - name: install system packages
+        if: ${{ env.SKIP_JOB != 'true' }}
         run: |
           ${{ matrix.system-deps }}
 
       - name: make build directory
+        if: ${{ env.SKIP_JOB != 'true' }}
         run: |
           mkdir ${{ matrix.build-type }}
 
       - name: cmake configure
+        if: ${{ env.SKIP_JOB != 'true' }}
         run: |
           cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
         working-directory: ${{ matrix.build-type }}
 
       - name: cmake build
+        if: ${{ env.SKIP_JOB != 'true' }}
         run: |
           cmake --build . --parallel
         working-directory: ${{ matrix.build-type }}

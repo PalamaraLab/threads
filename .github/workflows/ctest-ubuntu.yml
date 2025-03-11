@@ -12,7 +12,7 @@ jobs:
   build-and-test:
     name: Tests on Ubuntu
     runs-on: ubuntu-24.04
-    if:  ${{ github.event_name == 'pull_request' || github.repository == 'PalamaraLab/threads' }}
+    if: github.repository_visibility != 'private' || github.event_name == 'pull_request'
 
     steps:
       - name: checkout repo & submodules

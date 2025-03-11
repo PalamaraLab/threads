@@ -15,6 +15,7 @@ jobs:
   build_wheels_cloud:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    if: github.repository_visibility != 'private' || github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -46,15 +47,24 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: 10.15
 
     steps:
+      - name: Check if macOS build should be skipped
+        if: github.repository_visibility == 'private' && startsWith(matrix.os, 'macos')
+        run: |
+          echo "::warning title=Skipping::Skipping private repo job to preserve macOS resources"
+          echo "SKIP_JOB=true" >> $GITHUB_ENV
+
       - name: checkout repo & submodules
+        if: ${{ env.SKIP_JOB != 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Build wheels
+        if: ${{ env.SKIP_JOB != 'true' }}
         uses: pypa/cibuildwheel@v2.22.0
 
       - uses: actions/upload-artifact@v4
+        if: ${{ env.SKIP_JOB != 'true' }}
         with:
           name: wheels-cloud-${{ matrix.os }}
           path: ./wheelhouse/*.whl
