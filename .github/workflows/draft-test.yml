@@ -30,9 +30,17 @@ jobs:
             arch: arm64
             py-vers: cp313-*
 
-    if: ${{ !(github.repository == 'PalamaraLab/TDPBWT' && github.event_name == 'pull_request' && startsWith(matrix.os, 'macos')) }}
-
     steps:
+      - name: Skip macOS PR in private repo
+        if: |
+          ${{ github.repository == 'PalamaraLab/TDPBWT' &&
+              github.event_name == 'pull_request' &&
+              startsWith(matrix.os, 'macos')
+           }}
+        run: |
+          echo "::warning title=Skipping::Job is skipped to preserve macOS resources"
+          exit 0
+
       - name: report run
         run: |
           echo "*** PYTHON ${{ matrix.py-vers }}"
