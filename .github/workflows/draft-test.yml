@@ -32,9 +32,8 @@ jobs:
           - os: macos-14
             arch: arm64
             py-vers: cp313-*
-        exclude:
-          - { os: macos-13, is-private-pr: true }
-          - { os: macos-14, is-private-pr: true }
+
+    if: ${{ !(is-private-pr && runner.os == 'macOS') }}
 
     steps:
       - name: report run
