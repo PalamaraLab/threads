@@ -29,10 +29,8 @@ jobs:
             arch: arm64
             py-vers: cp313-*
         exclude:
-          - os: macos-13
-            is-private-pr: true
-          - os: macos-14
-            is-private-pr: true
+          - { is-private-pr: true, os: macos-13 }
+          - { is-private-pr: true, os: macos-14 }
 
     steps:
       - name: report run
