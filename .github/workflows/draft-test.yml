@@ -43,7 +43,7 @@ jobs:
           echo "matrix.os: ${{ matrix.os }}"
           echo "job.continue-on-error ${{ job.continue-on-error }}"
           echo "is macos: ${{ startsWith(matrix.os, 'macos') }}"
-          exit 0
+          exit 1
 
       - name: report run
         run: |
