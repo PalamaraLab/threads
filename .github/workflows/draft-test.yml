@@ -31,7 +31,7 @@ jobs:
             py-vers: cp313-*
 
     steps:
-      - name: Skip macOS PR in private repo
+      - name: Check if macOS build should be skipped
         if: |
           github.repository == 'PalamaraLab/TDPBWT' &&
           github.event_name == 'pull_request' &&
