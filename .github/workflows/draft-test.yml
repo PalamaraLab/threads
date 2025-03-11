@@ -33,7 +33,7 @@ jobs:
             arch: arm64
             py-vers: cp313-*
 
-    if: ${{ !(is-private-pr && runner.os == 'macOS') }}
+    if: ${{ !(env.is-private-pr && runner.os == 'macOS') }}
 
     steps:
       - name: report run
