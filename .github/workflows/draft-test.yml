@@ -16,21 +16,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        is-private-pr: ${{ github.repository == 'PalamaraLab/TDPBWT' && github.event_name == 'pull_request' }}
-        os: [ubuntu-22.04, ubuntu-24.04, macos-13, macos-14]
         include:
           - os: ubuntu-22.04
             arch: auto64
             py-vers: cp310-*
+          - os: ubuntu-24.04
+            arch: auto64
+            py-vers: cp311-*
           - os: macos-13
             arch: x86_64
             py-vers: cp312-*
           - os: macos-14
             arch: arm64
             py-vers: cp313-*
-        exclude:
-          - { is-private-pr: true, os: macos-13 }
-          - { is-private-pr: true, os: macos-14 }
+
+    if: ${{ !(github.repository == 'PalamaraLab/TDPBWT' && github.event_name == 'pull_request' && startsWith(matrix.os, 'macos')) }}
 
     steps:
       - name: report run
