@@ -23,12 +23,13 @@ jobs:
           - os: ubuntu-24.04
             build-type: Release
             system-deps: "sudo apt -y install libboost-dev libboost-math-dev"
-          - os: macos-14
-            build-type: Debug
-            system-deps: "brew install boost"
-          - os: macos-14
-            build-type: Release
-            system-deps: "brew install boost"
+          # FIXME Temporarily disabled to reduce load on private macOS runners
+          #- os: macos-14
+          #  build-type: Debug
+          #  system-deps: "brew install boost"
+          #- os: macos-14
+          #  build-type: Release
+          #  system-deps: "brew install boost"
 
     steps:
 
