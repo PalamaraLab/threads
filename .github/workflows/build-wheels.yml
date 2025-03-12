@@ -15,6 +15,10 @@ jobs:
   build_wheels_cloud:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    if: |
+      (github.repository_visibility != 'private' || github.event_name == 'pull_request') &&
+      !contains(github.event.pull_request.labels.*.name, 'ci:off')
+
     strategy:
       fail-fast: false
       matrix:
