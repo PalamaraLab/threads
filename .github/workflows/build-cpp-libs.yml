@@ -13,6 +13,10 @@ jobs:
   build-libs:
     name: Build C++ libs
     runs-on: ${{ matrix.os }}
+    if: |
+      (github.repository_visibility != 'private' || github.event_name == 'pull_request') &&
+      !contains(github.event.pull_request.labels.*.name, 'ci:off')
+
     strategy:
       fail-fast: false
       matrix:
@@ -23,12 +27,13 @@ jobs:
           - os: ubuntu-24.04
             build-type: Release
             system-deps: "sudo apt -y install libboost-dev libboost-math-dev"
-          - os: macos-14
-            build-type: Debug
-            system-deps: "brew install boost"
-          - os: macos-14
-            build-type: Release
-            system-deps: "brew install boost"
+          # FIXME Temporarily disabled to reduce load on private macOS runners
+          #- os: macos-14
+          #  build-type: Debug
+          #  system-deps: "brew install boost"
+          #- os: macos-14
+          #  build-type: Release
+          #  system-deps: "brew install boost"
 
     steps:
 

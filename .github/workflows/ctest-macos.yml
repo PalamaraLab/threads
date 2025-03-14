@@ -9,7 +9,10 @@ jobs:
   build-and-test:
     name: Tests on macOS
     runs-on: macos-13
-    if:  ${{ github.event_name == 'pull_request' || github.repository == 'PalamaraLab/threads' }}
+    if: false # FIXME Temporarily disabled to reduce load on private macOS runners
+    #if: |
+    #  (github.repository_visibility != 'private' || github.event_name == 'pull_request') &&
+    #  contains(github.event.pull_request.labels.*.name, 'ci:off')
 
     steps:
       - name: checkout repo & submodules
