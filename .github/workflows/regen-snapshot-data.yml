@@ -7,6 +7,9 @@ jobs:
   build-and-run:
     name: Regenerate snapshot test data
     runs-on: ubuntu-24.04
+    if: |
+      (github.repository_visibility != 'private' || github.event_name == 'pull_request') &&
+      !contains(github.event.pull_request.labels.*.name, 'ci:off')
 
     steps:
       - name: Checkout repo & submodules
