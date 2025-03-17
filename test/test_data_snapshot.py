@@ -129,7 +129,7 @@ def test_data_snapshot_regression():
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         generated_threads_path = Path(tmpdir) / "arg.threads"
-        run_infer_snapshot(generated_threads_path)
+        run_infer_snapshot(generated_threads_path, fit_to_data=False)
 
         # Compare genotypes are correctly compressed
         _check_compression_is_correct(
@@ -156,54 +156,41 @@ def test_data_snapshot_regression():
             TEST_DATA_DIR / "expected_convert_snapshot.argn"
         )
 
+
 # FIXME temporarily disabled whilst getting snapshot regeneration working
-'''
 def test_fit_to_data_snapshot_regression():
     """
     Regression check for difference in output from threads infer and convert using
     the --fit-to-data flag
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Regenerate threads infer output
-        threads_path = Path(tmpdir) / "test_fit_to_data_snapshot_regression.threads"
-        test_data_dir = BASE_DIR / "test" / "data"
-        threads_infer(
-            pgen=str(test_data_dir / "panel.pgen"),
-            map=str(test_data_dir / "gmap_02.map"),
-            recombination_rate=1.3e-8,
-            demography=str(test_data_dir / "CEU_unscaled.demo"),
-            mutation_rate=1.4e-8,
-            query_interval=0.01,
-            match_group_interval=0.5,
-            mode="wgs",
-            num_threads=1,
-            region=None,
-            fit_to_data=True,
-            allele_ages=None,
-            max_sample_batch_size=None,
-            out=str(threads_path)
-        )
+        generated_threads_path = Path(tmpdir) / "arg_fit_to_data.threads"
+        run_infer_snapshot(generated_threads_path, fit_to_data=True)
 
         # Compare genotypes are correctly compressed
-        _check_compression_is_correct(threads_path, str(test_data_dir / "panel.pgen"))
+        _check_compression_is_correct(
+            generated_threads_path,
+            str(TEST_DATA_DIR / "panel.pgen")
+        )
 
         # Compare against expected snapshot of threads data
-        threads_expected_path = test_data_dir / "arg_consistent.threads"
-        _check_hdf_files_match(threads_path, threads_expected_path)
+        _check_hdf_files_match(
+            generated_threads_path,
+            TEST_DATA_DIR / "expected_infer_fit_to_data_snapshot.threads"
+        )
 
         # Convert generated output
-        argn_path = Path(tmpdir) / "test_fit_to_data_snapshot_regression.argn"
-        threads_convert(
-            threads=str(threads_path),
-            argn=str(argn_path),
-            tsz=None,
-            add_mutations=True
+        generated_argn_path = Path(tmpdir) / "arg_fit_to_data.argn"
+        run_convert_snapshot(
+            generated_threads_path,
+            generated_argn_path
         )
 
         # Compare against expected snapshot of argn data
-        convert_expected_path = test_data_dir / "arg_consistent.argn"
-        _check_hdf_files_match(argn_path, convert_expected_path)
+        _check_hdf_files_match(
+            generated_argn_path,
+            TEST_DATA_DIR / "expected_convert_fit_to_data_snapshot.argn"
+        )
 
         # Put this back in here once arg_needle_lib-dev #19 and #20 have been resolved
         # _check_argn_mutations_fit_to_data(argn_path, str(test_data_dir / "panel.pgen"))
-'''

@@ -47,3 +47,5 @@ jobs:
             snapshot_out_dir/expected_convert_snapshot.argn
             snapshot_out_dir/expected_mapping_snapshot.mut
             snapshot_out_dir/expected_impute_snapshot.vcf
+            snapshot_out_dir/expected_infer_fit_to_data_snapshot.threads
+            snapshot_out_dir/expected_convert_fit_to_data_snapshot.argn
