@@ -5,7 +5,7 @@ BASE_DIR = Path(__file__).parent.parent
 TEST_DATA_DIR = BASE_DIR / "test" / "data"
 
 
-def run_infer_snapshot(out_threads_path: Path):
+def run_infer_snapshot(out_threads_path: Path, fit_to_data: bool):
     from threads_arg.infer import threads_infer
     threads_infer(
         pgen=str(TEST_DATA_DIR / "panel.pgen"),
@@ -18,7 +18,7 @@ def run_infer_snapshot(out_threads_path: Path):
         mode="wgs",
         num_threads=1,
         region=None,
-        fit_to_data=False,
+        fit_to_data=fit_to_data,
         allele_ages=None,
         max_sample_batch_size=None,
         out=str(out_threads_path)

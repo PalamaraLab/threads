@@ -30,7 +30,7 @@ def regen_snapshot_files(out_dir: str):
     out_path = Path(out_dir)
 
     threads_path = out_path / "expected_infer_snapshot.threads"
-    run_infer_snapshot(threads_path)
+    run_infer_snapshot(threads_path, fit_to_data=False)
 
     argn_path = out_path / "expected_convert_snapshot.argn"
     run_convert_snapshot(threads_path, argn_path)
@@ -40,6 +40,13 @@ def regen_snapshot_files(out_dir: str):
 
     vcf_path = out_path / "expected_impute_snapshot.vcf"
     run_impute_snapshot(mut_path, vcf_path)
+
+    # Re-run infer and convert with fit_to_data
+    threads_ftd_path = out_path / "expected_infer_fit_to_data_snapshot.threads"
+    run_infer_snapshot(threads_ftd_path, fit_to_data=True)
+
+    argn_ftd_path = out_path / "expected_convert_fit_to_data_snapshot.argn"
+    run_convert_snapshot(threads_ftd_path, argn_ftd_path)
 
 
 if __name__ == "__main__":
