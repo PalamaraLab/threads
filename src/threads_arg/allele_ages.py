@@ -19,27 +19,29 @@ import numpy as np
 
 from threads_arg import AgeEstimator, GenotypeIterator
 from .serialization import load_instructions
+from .utils import timer_block # FIXME remove
 
 def estimate_allele_ages(threads, out):
     logging.info("Starting allele age estimation with the following parameters:")
     logging.info(f"threads:  {threads}")
     logging.info(f"out:      {out}")
 
-    # Read threading instructions
-    instructions = load_instructions(threads)
+    with timer_block("estimate_allele_ages"):
+        # Read threading instructions
+        instructions = load_instructions(threads)
 
-    # Estimate ages
-    gt_it = GenotypeIterator(instructions)
-    age_estimator = AgeEstimator(instructions)
-    while gt_it.has_next_genotype():
-        g = np.array(gt_it.next_genotype())
-        age_estimator.process_site(g)
-    allele_age_estimates = age_estimator.get_inferred_ages()
+        # Estimate ages
+        gt_it = GenotypeIterator(instructions)
+        age_estimator = AgeEstimator(instructions)
+        while gt_it.has_next_genotype():
+            g = np.array(gt_it.next_genotype())
+            age_estimator.process_site(g)
+        allele_age_estimates = age_estimator.get_inferred_ages()
 
-    # Temporary snp ids until #45 is resolved
-    snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
+        # Temporary snp ids until #45 is resolved
+        snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
 
-    # Write results to file
-    with open(out, "w") as outfile:
-        for snp_id, pos, allele_age in zip(snp_ids, instructions.positions, allele_age_estimates):
-            outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")
+        # Write results to file
+        with open(out, "w") as outfile:
+            for snp_id, pos, allele_age in zip(snp_ids, instructions.positions, allele_age_estimates):
+                outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")
