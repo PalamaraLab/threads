@@ -1444,7 +1444,9 @@ ThreadsFastLS::remove_burn_in(std::vector<int>& bp_starts,
     }
 
     trim_starts = {bp_starts.begin() + seg_start_i, bp_starts.begin() + seg_end_i};
-    trim_starts[0] = static_cast<int>(threading_start);
+    if (seg_end_i > seg_start_i) {
+      trim_starts[0] = static_cast<int>(threading_start);
+    }
     trim_IDs = {target_IDs.begin() + seg_start_i, target_IDs.begin() + seg_end_i};
     trim_ages = {segment_ages.begin() + seg_start_i, segment_ages.begin() + seg_end_i};
   }
