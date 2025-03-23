@@ -25,41 +25,43 @@ VCFWriter::VCFWriter(ThreadingInstructions& instructions)
 }
 
 void VCFWriter::write_vcf() {
+    int i = 0;
     int num_dip_samples = gt_iterator.num_samples / 2;
     write_header();
     std::vector<int> gt;
     while (gt_iterator.has_next_genotype()) {
         // Output variant metadata:
         // Chromosome
-        std::cout << "1\t";
+        std::cout << chrom.at(i) << "\t";
         // Position
-        std::cout << gt_iterator.current_position << "\t";
+        std::cout << pos.at(i) << "\t";
         // ID
-        std::cout << "1:" << gt_iterator.current_position << "\t";
+        std::cout << id.at(i) << "\t";
         // REF
-        std::cout << "A\t";
+        std::cout << ref.at(i) << "\t";
         // ALT
-        std::cout << "G\t";
+        std::cout << alt.at(i) << "\t";
         // QUAL
-        std::cout << ".\t";
+        std::cout << qual.at(i) << "\t";
         // FILTER
-        std::cout << "PASS\t";
+        std::cout << filter.at(i) << "\t";
         // INFO
         std::cout << "NS=" << num_dip_samples << "\t";
         // FORMAT
         std::cout << "GT\t";
 
         // Output genotype
-        int i = 0;
+        int j = 0;
         for (auto& gt : gt_iterator.next_genotype()) {
-            if (i % 2) {
+            if (j % 2) {
                 std::cout << gt << "\t";
             } else {
                 std::cout << gt << "|";
             }
-            i++;
+            j++;
         }
         std::cout << "\n";
+        i++;
     }
 }
 

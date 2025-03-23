@@ -160,5 +160,12 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
     
   py::class_<VCFWriter>(m, "VCFWriter")
       .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("instructions"))
+      .def("set_chrom", &VCFWriter::set_chrom)
+      .def("set_pos", &VCFWriter::set_pos)
+      .def("set_id", &VCFWriter::set_id)
+      .def("set_ref", &VCFWriter::set_ref)
+      .def("set_alt", &VCFWriter::set_alt)
+      .def("set_qual", &VCFWriter::set_qual)
+      .def("set_filter", &VCFWriter::set_filter)
       .def("write_vcf", &VCFWriter::write_vcf);
 }

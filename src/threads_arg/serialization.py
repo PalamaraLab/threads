@@ -19,10 +19,11 @@ import numpy as np
 from datetime import datetime
 from threads_arg import ThreadingInstructions
 
-def serialize_instructions(instructions, out):
+def serialize_instructions(instructions, out, variant_metadata=None, allele_ages=None):
     num_threads = instructions.num_samples
     num_sites = instructions.num_sites
     positions = instructions.positions
+
     region_start = instructions.start
     region_end = instructions.end
     samples = list(range(num_threads))
@@ -73,6 +74,30 @@ def serialize_instructions(instructions, out):
     dset_het_s[:] = flat_mismatches
     dset_range[:] = [region_start, region_end]
 
+    if variant_metadata is not None:
+        # If not none, it is a pandas dataframe with columns
+        # CHR, POS, ID, REF, ALT, QUAL, FILTER
+        min_pos = min(positions)
+        max_pos = max(positions)
+        dset_variant_metadata = f.create_dataset("variant_metadata", (num_sites, 7), dtype=h5py.string_dtype(encoding='utf-8'), compression='gzip',
+                                    compression_opts=compression_opts)
+        variant_metadata = variant_metadata[(variant_metadata["POS"] >= min_pos) & (variant_metadata["POS"] <= max_pos)]
+        assert variant_metadata.shape[0] == len(positions)
+        assert np.all(np.array(variant_metadata["POS"], dtype=int) == np.array(positions))
+
+        dset_variant_metadata[:, 0] = variant_metadata["CHROM"].astype(str)
+        dset_variant_metadata[:, 1] = variant_metadata["POS"].astype(str)
+        dset_variant_metadata[:, 2] = variant_metadata["ID"].astype(str)
+        dset_variant_metadata[:, 3] = variant_metadata["REF"].astype(str)
+        dset_variant_metadata[:, 4] = variant_metadata["ALT"].astype(str)
+        dset_variant_metadata[:, 5] = variant_metadata["QUAL"].astype(str)
+        dset_variant_metadata[:, 6] = variant_metadata["FILTER"].astype(str)
+
+    if allele_ages is not None:
+        assert len(allele_ages) == len(positions)
+        dset_allele_ages = f.create_dataset("allele_ages", (num_sites, ), dtype=np.double, compression='gzip',
+                                    compression_opts=compression_opts)
+        dset_allele_ages[:] = allele_ages
     f.close()
 
 def load_instructions(threads):
@@ -108,3 +133,9 @@ def load_instructions(threads):
             tmrcas.append(flat_tmrcas[start:thread_starts[i + 1]].tolist())
             mismatches.append(flat_mismatches[het_start:het_starts[i + 1]].tolist())
     return ThreadingInstructions(starts, tmrcas, targets, mismatches, positions.astype(int).tolist(), region_start, region_end)
+
+def load_metadata(threads):
+    f = h5py.File(threads, "r")
+    import pandas as pd
+    return pd.DataFrame(threads["variant_metadata"][:], columns=["CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER"])
+

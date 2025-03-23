@@ -42,7 +42,8 @@ from .utils import (
     iterate_pgen,
     read_positions_and_ids,
     parse_region_string,
-    default_process_count
+    default_process_count,
+    read_variant_metadata
 )
 from .serialization import serialize_instructions
 
@@ -191,6 +192,9 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         logger.info(f"Using constant recombination rate of {recombination_rate}")
         genetic_positions, physical_positions = make_constant_recombination_from_pgen(pgen, recombination_rate, chrom)
 
+    # Load/set CHR, POS, ID, REF, ALT, QUAL, FILTER
+    variant_metadata = read_variant_metadata(pgen)
+
     if fit_to_data and (physical_positions[1:] - physical_positions[:-1] <= 0).any():
         raise RuntimeError("Sites must be strictly increasing when --fit-to-data is set.")
 
@@ -305,6 +309,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         start_idx = np.searchsorted(physical_positions, region_start)
         end_idx = np.searchsorted(physical_positions, region_end, side="right")
 
+        allele_age_estimates = None
         if allele_ages is None:
             logger.info("Inferring allele ages from data")
             age_estimator = AgeEstimator(instructions)
@@ -329,10 +334,10 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         iterate_pgen(pgen, lambda i, g: cw.process_site(g), start_idx=start_idx, end_idx=end_idx)
         consistent_instructions = cw.get_consistent_instructions()
         logger.info(f"Writing to {out}")
-        serialize_instructions(consistent_instructions, out)
+        serialize_instructions(consistent_instructions, out, variant_metadata=variant_metadata, allele_ages=allele_age_estimates)
     else:
         logger.info(f"Writing to {out}")
-        serialize_instructions(instructions, out)
+        serialize_instructions(instructions, out, variant_metadata=variant_metadata)
 
     # Save results
     logger.info(f"Done in (s): {time.time() - start_time}")

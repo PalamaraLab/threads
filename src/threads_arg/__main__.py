@@ -141,10 +141,8 @@ def impute(panel, target, map, mut, demography, out, stdout, region, mutation_ra
 @click.argument("threads", required=True)
 def vcf(threads):
     """Convert THREADS to VCF format and print to stdout."""
-    from .serialization import load_instructions
-    from threads_arg import VCFWriter
-    instructions = load_instructions(threads)
-    VCFWriter(instructions).write_vcf()
+    from .threads_to_vcf import threads_to_vcf
+    threads_to_vcf(threads)
 
 if __name__ == "__main__":
     main()
