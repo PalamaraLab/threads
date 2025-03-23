@@ -73,8 +73,8 @@ void VCFWriter::write_header() {
         << "##INFO=<ID=NS,Number=1,Type=Integer,Description=\"Number of Samples With Data\">\n"
         << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
         << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT";
-    for (int i=0; i < gt_iterator.num_samples; i = i+2) {
-        std::cout << "\t" << "sample_" << i /2;
+    for (auto name : sample_names) {
+        std::cout << "\t" << name;
     }
     std::cout << "\n";
 }

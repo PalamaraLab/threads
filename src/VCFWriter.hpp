@@ -35,6 +35,7 @@ private:
     std::vector<std::string> alt;
     std::vector<std::string> qual;
     std::vector<std::string> filter;
+    std::vector<std::string> sample_names;
 public:
     VCFWriter(ThreadingInstructions& instructions);
 
@@ -45,6 +46,7 @@ public:
     void set_alt(const std::vector<std::string>& _alt) { alt = _alt; }
     void set_qual(const std::vector<std::string>& _qual) { qual = _qual; }
     void set_filter(const std::vector<std::string>& _filter) { filter = _filter; }
+    void set_sample_names(const std::vector<std::string>& _sample_names) { sample_names = _sample_names; }
 
     void write_vcf();
     void write_header();
