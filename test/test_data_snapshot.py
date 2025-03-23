@@ -61,7 +61,10 @@ def _check_hdf_items_match(generated_file, expected_file, generated_items, expec
         else:
             # Assert that shape same and values close enough
             assert gen_item.shape == exp_item.shape, assert_shape_msg(generated_file, expected_file, name, gen_item, exp_item)
-            assert np.allclose(gen_item, exp_item), assert_allclose_msg(generated_file, expected_file, name, gen_item, exp_item)
+            if gen_item.dtype == h5py.string_dtype(encoding='utf-8'):
+                assert np.all(gen_item[:] == exp_item[:]), assert_allclose_msg(generated_file, expected_file, name, gen_item, exp_item)
+            else:
+                assert np.allclose(gen_item, exp_item), assert_allclose_msg(generated_file, expected_file, name, gen_item, exp_item)
 
 
 def _check_hdf_files_match(generated: Path, expected: Path):
