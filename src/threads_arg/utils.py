@@ -109,6 +109,41 @@ def read_positions_and_ids(pgen):
         raise RuntimeError(f"Can't find {bim} or {pvar}")
     return positions, ids
 
+
+def read_variant_metadata(pgen):
+    """
+    Attempt to read variant metadata in vcf style:
+    CHR, POS, ID, REF, ALT, QUAL, FILTER
+    """
+    pvar = pgen.replace("pgen", "pvar")
+    bim = pgen.replace("pgen", "bim")
+    if os.path.isfile(bim):
+        bim_df = pd.read_table(bim, names=["CHROM", "ID", "CM", "POS", "ALT", "REF"])
+        out_df = bim_df[["CHROM", "POS", "ID", "REF", "ALT"]]
+        out_df["FILTER"] = pvar_df["FILTER"] if "FILTER" in out_df.columns else "PASS"
+        out_df["QUAL"] = pvar_df["QUAL"] if "QUAL" in out_df.columns else "."
+        return out_df
+    elif os.path.isfile(pvar):
+        header = None
+        with open(pvar, "r") as pvarfile:
+            for line in pvarfile:
+                if line.startswith("##"):
+                    continue
+                if line.startswith("#CHROM"):
+                    header = line.strip().split()
+                    break
+            if header is None:
+                raise RuntimeError(f"Invalid .pvar file {pvar}")
+        pvar_df = pd.read_table(pvar, comment="#", header=None, names=header, sep=r"\s+").rename({"#CHROM": "CHROM"}, axis=1)
+
+        pd.options.mode.chained_assignment = None
+        out_df = pvar_df[["CHROM", "POS", "ID", "REF", "ALT"]]
+        out_df["FILTER"] = pvar_df["FILTER"].copy() if "FILTER" in out_df.columns else "PASS"
+        out_df["QUAL"] = pvar_df["QUAL"].copy() if "QUAL" in out_df.columns else "."
+        return out_df
+    else:
+        raise RuntimeError(f"Can't find {bim} or {pvar}")
+
 def make_constant_recombination_from_pgen(pgen_file, rho):
     """
     Read pgen variant file and generate a constant recombination using rho

@@ -71,7 +71,6 @@ def _check_hdf_files_match(generated: Path, expected: Path):
     assert generated.is_file()
     assert expected.is_file()
     with h5py.File(generated, "r") as gen_file, h5py.File(expected, "r") as exp_file:
-
         # Compare attributes in the root of the files - the only attribute in this file should be datetime_created
         assert gen_file.attrs.keys() == exp_file.attrs.keys()
 
