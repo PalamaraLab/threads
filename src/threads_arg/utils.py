@@ -120,8 +120,8 @@ def read_variant_metadata(pgen):
     if os.path.isfile(bim):
         bim_df = pd.read_table(bim, names=["CHROM", "ID", "CM", "POS", "ALT", "REF"])
         out_df = bim_df[["CHROM", "POS", "ID", "REF", "ALT"]]
-        out_df["FILTER"] = pvar_df["FILTER"] if "FILTER" in out_df.columns else "PASS"
-        out_df["QUAL"] = pvar_df["QUAL"] if "QUAL" in out_df.columns else "."
+        out_df["FILTER"] = bim_df["FILTER"] if "FILTER" in out_df.columns else "PASS"
+        out_df["QUAL"] = bim_df["QUAL"] if "QUAL" in out_df.columns else "."
         return out_df
     elif os.path.isfile(pvar):
         header = None
@@ -155,6 +155,29 @@ def make_constant_recombination_from_pgen(pgen_file, rho):
         if cm_out[i] <= cm_out[i-1]:
             cm_out[i] = cm_out[i-1] + 1e-5
     return cm_out, physical_positions
+
+def read_sample_names(pgen):
+    """
+    Read the sample names corresponding to the input pgen
+    """
+    fam = pgen.replace("pgen", "fam")
+    psam = pgen.replace("pgen", "psam")
+    if os.path.isfile(fam):
+        with open(fam, "r") as famfile:
+            return [l.split()[1] for l in famfile]
+
+    elif os.path.isfile(psam):
+        sam_df = pd.read_table(psam, sep=r"\s+")
+        if "IID" in sam_df.columns:
+            return sam_df["IID"].tolist()
+        elif "#IID" in sam_df.columns:
+            return sam_df["#IID"].tolist()
+        else:
+            # If no header, default to famfile
+            with open(psam, "r") as famfile:
+                return [l.split()[1] for l in famfile]
+    else:
+        raise RuntimeError(f"Can't find {fam} or {psam}")
 
 
 def parse_demography(demography):

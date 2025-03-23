@@ -19,7 +19,7 @@ import numpy as np
 from datetime import datetime
 from threads_arg import ThreadingInstructions
 
-def serialize_instructions(instructions, out, variant_metadata=None, allele_ages=None):
+def serialize_instructions(instructions, out, variant_metadata=None, allele_ages=None, sample_names=None):
     num_threads = instructions.num_samples
     num_sites = instructions.num_sites
     positions = instructions.positions
@@ -98,6 +98,13 @@ def serialize_instructions(instructions, out, variant_metadata=None, allele_ages
         dset_allele_ages = f.create_dataset("allele_ages", (num_sites, ), dtype=np.double, compression='gzip',
                                     compression_opts=compression_opts)
         dset_allele_ages[:] = allele_ages
+    
+    if sample_names is not None:
+        assert len(sample_names) == num_threads // 2
+        num_diploids = len(sample_names)
+        dset_sample_names = f.create_dataset("sample_names", (num_diploids,), dtype=h5py.string_dtype(encoding='utf-8'), compression='gzip',
+                                    compression_opts=compression_opts)
+        dset_sample_names[:] = sample_names
     f.close()
 
 def load_instructions(threads):
@@ -137,5 +144,8 @@ def load_instructions(threads):
 def load_metadata(threads):
     f = h5py.File(threads, "r")
     import pandas as pd
-    return pd.DataFrame(threads["variant_metadata"][:], columns=["CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER"])
+    return pd.DataFrame(f["variant_metadata"][:], columns=["CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER"])
 
+def load_sample_names(threads):
+    f = h5py.File(threads, "r")
+    return f["sample_names"][:]

@@ -43,8 +43,10 @@ from .utils import (
     read_positions_and_ids,
     parse_region_string,
     default_process_count,
-    read_variant_metadata
+    read_variant_metadata,
+    read_sample_names
 )
+
 from .serialization import serialize_instructions
 
 logger = logging.getLogger(__name__)
@@ -195,6 +197,9 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     # Load/set CHR, POS, ID, REF, ALT, QUAL, FILTER
     variant_metadata = read_variant_metadata(pgen)
 
+    # Load sample names
+    sample_names = read_sample_names(pgen)
+
     if fit_to_data and (physical_positions[1:] - physical_positions[:-1] <= 0).any():
         raise RuntimeError("Sites must be strictly increasing when --fit-to-data is set.")
 
@@ -334,10 +339,17 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         iterate_pgen(pgen, lambda i, g: cw.process_site(g), start_idx=start_idx, end_idx=end_idx)
         consistent_instructions = cw.get_consistent_instructions()
         logger.info(f"Writing to {out}")
-        serialize_instructions(consistent_instructions, out, variant_metadata=variant_metadata, allele_ages=allele_age_estimates)
+        serialize_instructions(consistent_instructions,
+                               out,
+                               variant_metadata=variant_metadata,
+                               allele_ages=allele_age_estimates,
+                               sample_names=sample_names)
     else:
         logger.info(f"Writing to {out}")
-        serialize_instructions(instructions, out, variant_metadata=variant_metadata)
+        serialize_instructions(instructions,
+                               out,
+                               variant_metadata=variant_metadata,
+                               sample_names=sample_names)
 
     # Save results
     logger.info(f"Done in (s): {time.time() - start_time}")
