@@ -15,13 +15,13 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "AlleleAges.hpp"
-#include <numeric>
-#include <execution>
+#include <iostream>
 #include <vector>
 #include <unordered_map>
 #include <map>
 
-AgeEstimator::AgeEstimator(ThreadingInstructions& instructions) {
+AgeEstimator::AgeEstimator(ThreadingInstructions& instructions)
+    {
     num_samples = instructions.num_samples;
     positions = instructions.positions;
     threading_iterators.reserve(instructions.instructions.size());
@@ -42,11 +42,10 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
     // Find carrier clusters
     // Algorithm: find paths in the marginal threading tree consisting only of carriers
     // Index those by "start" (highest index)
-    std::unordered_map<size_t, size_t> path_lengths;
-    std::vector<size_t> max_path_starts;
-    size_t max_path_len = 0;
-
-    for (size_t i = 0; i < genotypes.size(); i++) {
+    std::unordered_map<int, int> path_lengths;
+    std::vector<int> max_path_starts;
+    int max_path_len = 0;
+    for (int i = 0; i < genotypes.size(); i++) {
         if (i == 0) {
             path_lengths[i] = genotypes.at(i);
         } else {
@@ -70,7 +69,7 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
 
     int max_score = 0;
     double allele_age = 0;
-    for (size_t path_start : max_path_starts) {
+    for (int path_start : max_path_starts) {
         // For each longest path, trace the start node to the root and compute
         // tmrca with each other sample
 
@@ -78,7 +77,7 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         std::vector<double> tmrcas(num_samples, -1);
         tmrcas.at(path_start) = 0;
         double running_max = 0;
-        size_t start_tmp = path_start;
+        int start_tmp = path_start;
         while (start_tmp > 0) {
             int next_sample = threading_iterators.at(start_tmp).current_target;
             double this_tmrca = threading_iterators.at(start_tmp).current_tmrca;
@@ -105,26 +104,19 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
             }
         }
 
-        // For each sample, check its tmrca with path_start and
+        // For each sample, check its tmrca with path_start and 
         // update the score for each tmrca bin accordingly
-        for (const auto &[key, value] : scores) {
-            scores[key] += std::transform_reduce(
-                tmrcas.begin(),
-                tmrcas.end(),
-                genotypes.begin(),
-                0,
-                std::plus<>(),
-                [key](double tmrca, int genotype) {
-                    bool is_carrier = genotype > 0;
-                    if (is_carrier && tmrca <= key) {
-                        return 1;
-                    }
-                    if (!is_carrier && tmrca > key) {
-                        return 1;
-                    }
-                    return 0;
+        for (int i = 0; i < num_samples; i++) {
+            double tmrca = tmrcas.at(i);
+            bool is_carrier = (genotypes.at(i) > 0);
+            for (const auto &[key, value] : scores) {
+                if (is_carrier && tmrca <= key) {
+                    scores[key]++;
                 }
-            );
+                if (!is_carrier && tmrca > key) {
+                    scores[key]++;
+                }
+            }
         }
 
         std::vector<double> age_bin_boundaries;
@@ -132,12 +124,12 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
             age_bin_boundaries.push_back(imap.first);
         std::vector<double> age_bins;
 
-        for (size_t k = 0; k < age_bin_boundaries.size(); k++) {
+        for (int k; k < age_bin_boundaries.size(); k++) {
             int score = scores.at(age_bin_boundaries.at(k));
             if (score > max_score) {
                 max_score = score;
                 allele_age = (k == age_bin_boundaries.size() - 1)
-                    ? age_bin_boundaries.at(k) + 1
+                    ? age_bin_boundaries.at(k) + 1 
                     : (age_bin_boundaries.at(k) + age_bin_boundaries.at(k + 1)) / 2.;
             }
         }
