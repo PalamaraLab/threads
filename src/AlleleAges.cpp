@@ -15,6 +15,8 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "AlleleAges.hpp"
+#include <numeric>
+#include <execution>
 #include <vector>
 #include <unordered_map>
 #include <map>
@@ -103,19 +105,26 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
             }
         }
 
-        // For each sample, check its tmrca with path_start and 
+        // For each sample, check its tmrca with path_start and
         // update the score for each tmrca bin accordingly
-        for (int i = 0; i < num_samples; i++) {
-            double tmrca = tmrcas.at(i);
-            bool is_carrier = (genotypes.at(i) > 0);
-            for (const auto &[key, value] : scores) {
-                if (is_carrier && tmrca <= key) {
-                    scores[key]++;
+        for (const auto &[key, value] : scores) {
+            scores[key] += std::transform_reduce(
+                tmrcas.begin(),
+                tmrcas.end(),
+                genotypes.begin(),
+                0,
+                std::plus<>(),
+                [key](double tmrca, int genotype) {
+                    bool is_carrier = genotype > 0;
+                    if (is_carrier && tmrca <= key) {
+                        return 1;
+                    }
+                    if (!is_carrier && tmrca > key) {
+                        return 1;
+                    }
+                    return 0;
                 }
-                if (!is_carrier && tmrca > key) {
-                    scores[key]++;
-                }
-            }
+            );
         }
 
         std::vector<double> age_bin_boundaries;
