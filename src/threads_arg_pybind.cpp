@@ -15,8 +15,11 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ImputationMatcher.hpp"
-#include "TGEN.hpp"
 #include "ThreadsLowMem.hpp"
+#include "DataConsistency.hpp"
+#include "AlleleAges.hpp"
+#include "GenotypeIterator.hpp"
+#include "VCFWriter.hpp"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -118,10 +121,52 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            py::arg("genotypes"))
       .def("impute", &ThreadsFastLS::impute);
 
-  py::class_<TGEN>(m, "TGEN")
-      .def(py::init<std::vector<int>, std::vector<std::vector<int>>, std::vector<std::vector<int>>,
-                    std::vector<std::vector<int>>>(),
-           "Initialize", py::arg("positions"), py::arg("bp_starts"), py::arg("target_ids"),
-           py::arg("het_sites"))
-      .def("query", &TGEN::query, py::return_value_policy::take_ownership);
+  py::class_<ThreadingInstructions>(m, "ThreadingInstructions")
+      .def(py::init<const std::vector<ViterbiPath>, const int, const int, const std::vector<int>&>(), "initialize",
+           py::arg("paths"), py::arg("start"), py::arg("end"), py::arg("positions"))
+      .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
+           const std::vector<std::vector<int>>&, const std::vector<int>&, int, int>(),
+           "Initialize", py::arg("starts"), py::arg("tmrcas"), py::arg("targets"), py::arg("mismatches"),
+           py::arg("positions"),  py::arg("start"),  py::arg("end"))
+      .def_readonly("positions", &ThreadingInstructions::positions)
+      .def_readonly("num_sites", &ThreadingInstructions::num_sites)
+      .def_readonly("num_samples", &ThreadingInstructions::num_samples)
+      .def_readonly("start", &ThreadingInstructions::start)
+      .def_readonly("end", &ThreadingInstructions::end)
+      .def("all_starts", &ThreadingInstructions::all_starts)
+      .def("all_tmrcas", &ThreadingInstructions::all_tmrcas)
+      .def("all_targets", &ThreadingInstructions::all_targets)
+      .def("all_mismatches", &ThreadingInstructions::all_mismatches);
+  
+  py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
+      .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
+           const std::vector<std::vector<int>>&, const std::vector<int>&, const std::vector<double>&>(),
+           "Initialize", py::arg("starts"), py::arg("tmrcas"), py::arg("targets"), py::arg("mismatches"),
+           py::arg("physical_positions"), py::arg("allele_ages"))
+      .def(py::init<ThreadingInstructions&, const std::vector<double>&>(),
+           "Initialize", py::arg("instructions"), py::arg("allele_ages"))
+      .def("process_site", &ConsistencyWrapper::process_site)
+      .def("get_consistent_instructions", &ConsistencyWrapper::get_consistent_instructions);
+
+  py::class_<AgeEstimator>(m, "AgeEstimator")
+      .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("threading_instructions"))
+      .def("process_site", &AgeEstimator::process_site)
+      .def("get_inferred_ages", &AgeEstimator::get_inferred_ages);
+
+  py::class_<GenotypeIterator>(m, "GenotypeIterator")
+      .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("instructions"))
+      .def("next_genotype", &GenotypeIterator::next_genotype)
+      .def("has_next_genotype", &GenotypeIterator::has_next_genotype);
+    
+  py::class_<VCFWriter>(m, "VCFWriter")
+      .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("instructions"))
+      .def("set_chrom", &VCFWriter::set_chrom)
+      .def("set_pos", &VCFWriter::set_pos)
+      .def("set_id", &VCFWriter::set_id)
+      .def("set_ref", &VCFWriter::set_ref)
+      .def("set_alt", &VCFWriter::set_alt)
+      .def("set_qual", &VCFWriter::set_qual)
+      .def("set_filter", &VCFWriter::set_filter)
+      .def("set_sample_names", &VCFWriter::set_sample_names)
+      .def("write_vcf", &VCFWriter::write_vcf);
 }

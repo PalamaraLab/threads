@@ -14,29 +14,27 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#ifndef THREADS_ARG_TGEN_HPP
-#define THREADS_ARG_TGEN_HPP
+#ifndef THREADS_ARG_ALLELE_AGES_HPP
+#define THREADS_ARG_ALLELE_AGES_HPP
 
-#include <limits>
-#include <memory>
+#include "ThreadingInstructions.hpp"
+#include <iostream>
 #include <vector>
 
-// Forward declaration of the implementation class
-// Using PIMPL idiom to prevent libraries that #include "TGEN.hpp" needing to see boost/icl headers
-class TGENImpl;
-
-class TGEN {
-public:
-  TGEN(std::vector<int> _positions, std::vector<std::vector<int>> _bp_starts,
-       std::vector<std::vector<int>> _target_IDs, std::vector<std::vector<int>> _het_sites);
-  ~TGEN();
-
-  std::vector<std::vector<bool>>& query(int start_pos, int end_pos,
-                                        const std::vector<int>& samples);
-  void clear_cache();
-
+class AgeEstimator {
 private:
-  std::unique_ptr<TGENImpl> pimpl; ///< Pointer to implementation
+    int sites_processed = 0;
+    int num_sites = 0;
+    int num_samples = 0;
+    std::vector<int> positions;
+    std::vector<ThreadingInstructionIterator> threading_iterators;
+public:
+    AgeEstimator(ThreadingInstructions& instructions);
+    void process_site(const std::vector<int>& genotypes);
+    void increment_site();
+    std::vector<double> get_inferred_ages() const;
+public:
+    std::vector<double> estimated_ages;
 };
 
-#endif // THREADS_ARG_TGEN_HPP
+#endif // THREADS_ARG_ALLELE_AGES_HPP

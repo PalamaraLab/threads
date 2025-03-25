@@ -23,6 +23,7 @@ from .utils import (
     timer_block,
     TimerTotal,
     read_map_file,
+    parse_demography,
     default_process_count
 )
 
@@ -87,11 +88,6 @@ class WriterVCF:
         gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
         f = self.file
         f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
-
-
-def _parse_demography(demography):
-    d = pd.read_table(demography, sep=r"\s+", header=None)
-    return list(d[0]), list(d[1])
 
 
 def _reference_matching(haps_panel, haps_target, cm_pos):
@@ -462,7 +458,7 @@ class Impute:
         """
         sparse_sites = True
         use_hmm = False
-        ne_times, ne_sizes = _parse_demography(demography)
+        ne_times, ne_sizes = parse_demography(demography)
         bwt = ThreadsFastLS(self.phys_pos_array,
                             self.cm_pos_array,
                             mutation_rate,

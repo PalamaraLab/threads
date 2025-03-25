@@ -18,15 +18,6 @@
 find_package(Boost REQUIRED)
 message(STATUS "Found Boost ${Boost_VERSION}")
 
-# When using GCC C++17 and Boost ICL < 1.65, need to turn off new-ttp-matching.
-# See https://github.com/PalamaraLab/TDPBWT/issues/7
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if(Boost_FOUND AND Boost_VERSION VERSION_LESS "1.65.0")
-        message(STATUS "GCC is used with Boost version less than 1.65, disabling -fnew-ttp-matching.")
-        add_compile_options(-fno-new-ttp-matching)
-    endif()
-endif()
-
 # Threads static library
 set(threads_arg_src
     Demography.cpp
@@ -34,11 +25,15 @@ set(threads_arg_src
     State.cpp
     ThreadsFastLS.cpp
     HMM.cpp
-    TGEN.cpp
     ImputationMatcher.cpp
     Matcher.cpp
     ViterbiLowMem.cpp
     ThreadsLowMem.cpp
+    ThreadingInstructions.cpp
+    DataConsistency.cpp
+    AlleleAges.cpp
+    GenotypeIterator.cpp
+    VCFWriter.cpp
 )
 
 set(threads_arg_hdr
@@ -47,12 +42,16 @@ set(threads_arg_hdr
     State.hpp
     ThreadsFastLS.hpp
     HMM.hpp
-    TGEN.hpp
     TgenSegment.hpp
     ImputationMatcher.hpp
     Matcher.hpp
     ViterbiLowMem.hpp
     ThreadsLowMem.hpp
+    ThreadingInstructions.hpp
+    DataConsistency.hpp
+    AlleleAges.hpp
+    GenotypeIterator.hpp
+    VCFWriter.hpp
 )
 
 add_library(threads_arg STATIC

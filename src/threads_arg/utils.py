@@ -16,9 +16,9 @@
 
 import os
 import numpy as np
-import h5py
 import pandas as pd
 import logging
+import pgenlib
 import re
 import time
 import warnings
@@ -27,38 +27,6 @@ from contextlib import contextmanager
 from typing import Tuple, Union
 
 logger = logging.getLogger(__name__)
-
-
-def decompress_threads(threads):
-    f = h5py.File(threads, "r")
-
-    samples, thread_starts = f["samples"][:, 0], f["samples"][:, 1]
-    positions = f['positions'][...]
-    flat_ids, flat_bps = f['thread_targets'][:, :-1], f['thread_targets'][:, -1]
-    flat_ages = f['thread_ages'][...]
-    try:
-        arg_range = f['arg_range'][...]
-    except KeyError:
-        arg_range = [np.nan, np.nan]
-
-    threading_instructions = []
-    for i, start in enumerate(thread_starts):
-        if i == len(thread_starts) - 1:
-            ids = flat_ids[start:]
-            bps = flat_bps[start:]
-            ages = flat_ages[start:]
-        else:
-            ids = flat_ids[start:thread_starts[i + 1]]
-            bps = flat_bps[start:thread_starts[i + 1]]
-            ages = flat_ages[start:thread_starts[i + 1]]
-        threading_instructions.append((bps, ids, ages))
-    return {
-        "threads": threading_instructions,
-        "samples": samples,
-        "positions": positions,
-        "arg_range": arg_range
-    }
-
 
 def read_map_file(map_file, expected_chromosome=None) -> Tuple[np.ndarray, np.ndarray, str]:
     """
@@ -117,6 +85,64 @@ def make_recombination_from_map_and_pgen(map_file, pgen_file, expected_chrom):
             cm_out[i] = cm_out[i-1] + 1e-5
     return cm_out, physical_positions
 
+def read_positions_and_ids(pgen):
+    pvar = pgen.replace("pgen", "pvar")
+    bim = pgen.replace("pgen", "bim")
+
+    ids, positions = [], []
+    if os.path.isfile(bim):
+        with open(bim, "r") as bimfile:
+            for line in bimfile:
+                data = line.split()
+                ids.append(data[1])
+                positions.append(int(data[3]))
+    elif os.path.isfile(pvar):
+        with open(pvar, "r") as pvarfile:
+            for line in pvarfile:
+                if line.startswith("#"):
+                    continue
+                else:
+                    data = line.split()
+                    ids.append(data[2])
+                    positions.append(int(data[1]))
+    else:
+        raise RuntimeError(f"Can't find {bim} or {pvar}")
+    return positions, ids
+
+
+def read_variant_metadata(pgen):
+    """
+    Attempt to read variant metadata in vcf style:
+    CHR, POS, ID, REF, ALT, QUAL, FILTER
+    """
+    pvar = pgen.replace("pgen", "pvar")
+    bim = pgen.replace("pgen", "bim")
+    if os.path.isfile(bim):
+        bim_df = pd.read_table(bim, names=["CHROM", "ID", "CM", "POS", "ALT", "REF"])
+        out_df = bim_df[["CHROM", "POS", "ID", "REF", "ALT"]]
+        out_df["FILTER"] = bim_df["FILTER"] if "FILTER" in out_df.columns else "PASS"
+        out_df["QUAL"] = bim_df["QUAL"] if "QUAL" in out_df.columns else "."
+        return out_df
+    elif os.path.isfile(pvar):
+        header = None
+        with open(pvar, "r") as pvarfile:
+            for line in pvarfile:
+                if line.startswith("##"):
+                    continue
+                if line.startswith("#CHROM"):
+                    header = line.strip().split()
+                    break
+            if header is None:
+                raise RuntimeError(f"Invalid .pvar file {pvar}")
+        pvar_df = pd.read_table(pvar, comment="#", header=None, names=header, sep=r"\s+").rename({"#CHROM": "CHROM"}, axis=1)
+
+        pd.options.mode.chained_assignment = None
+        out_df = pvar_df[["CHROM", "POS", "ID", "REF", "ALT"]]
+        out_df["FILTER"] = pvar_df["FILTER"].copy() if "FILTER" in out_df.columns else "PASS"
+        out_df["QUAL"] = pvar_df["QUAL"].copy() if "QUAL" in out_df.columns else "."
+        return out_df
+    else:
+        raise RuntimeError(f"Can't find {bim} or {pvar}")
 
 def make_constant_recombination_from_pgen(pgen_file, rho):
     """
@@ -129,6 +155,29 @@ def make_constant_recombination_from_pgen(pgen_file, rho):
         if cm_out[i] <= cm_out[i-1]:
             cm_out[i] = cm_out[i-1] + 1e-5
     return cm_out, physical_positions
+
+def read_sample_names(pgen):
+    """
+    Read the sample names corresponding to the input pgen
+    """
+    fam = pgen.replace("pgen", "fam")
+    psam = pgen.replace("pgen", "psam")
+    if os.path.isfile(fam):
+        with open(fam, "r") as famfile:
+            return [l.split()[1] for l in famfile]
+
+    elif os.path.isfile(psam):
+        sam_df = pd.read_table(psam, sep=r"\s+")
+        if "IID" in sam_df.columns:
+            return sam_df["IID"].tolist()
+        elif "#IID" in sam_df.columns:
+            return sam_df["#IID"].tolist()
+        else:
+            # If no header, default to famfile
+            with open(psam, "r") as famfile:
+                return [l.split()[1] for l in famfile]
+    else:
+        raise RuntimeError(f"Can't find {fam} or {psam}")
 
 
 def parse_demography(demography):
@@ -220,6 +269,43 @@ class TimerTotal:
     def __str__(self):
         total = sum(self.durations)
         return f"Total time for {self.desc}: {total:.3f}s"
+
+
+def iterate_pgen(pgen, callback, start_idx=None, end_idx=None, **kwargs):
+    """
+    Wrapper to iterate over each site in a .pgen with a callback,
+    batching to reduce memory usage and read time
+    """
+    # Initialize read batching
+    reader = pgenlib.PgenReader(pgen.encode())
+    num_samples = reader.get_raw_sample_ct()
+    num_sites = reader.get_variant_ct()
+    if start_idx is None:
+        start_idx = 0
+    if end_idx is None:
+        end_idx = num_sites
+    M = end_idx - start_idx
+
+    BATCH_SIZE = int(4e7 // num_samples)
+    n_batches = int(np.ceil(M / BATCH_SIZE))
+    # Get singleton filter for the matching step
+    alleles_out = None
+    phased_out = None
+    i = 0
+    for b in range(n_batches):
+        b_start = b * BATCH_SIZE + start_idx
+        b_end = min(end_idx, (b+1) * BATCH_SIZE)
+        g_size = b_end - b_start
+        alleles_out = np.empty((g_size, 2 * num_samples), dtype=np.int32)
+        phasepresent_out = np.empty((g_size, num_samples), dtype=np.uint8)
+        reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phasepresent_out)
+        if np.any(phasepresent_out == 0):
+            raise RuntimeError("Unphased variants are currently not supported.")
+        for g in alleles_out:
+            callback(i, g, **kwargs)
+            i += 1
+    # Make sure we processed as many things as wanted to
+    assert i == M
 
 
 def default_process_count():
