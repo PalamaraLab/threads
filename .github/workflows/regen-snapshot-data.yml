@@ -7,10 +7,6 @@ jobs:
   build-and-run:
     name: Regenerate snapshot test data
     runs-on: ubuntu-24.04
-    if: |
-      (github.repository_visibility != 'private' || github.event_name == 'pull_request') &&
-      !contains(github.event.pull_request.labels.*.name, 'ci:off')
-
     steps:
       - name: Checkout repo & submodules
         uses: actions/checkout@v4
@@ -47,8 +43,9 @@ jobs:
         with:
           name: regenerated-snapshot-data
           path: |
-            snapshot_out_dir/expected_infer_snapshot.argn
+            snapshot_out_dir/expected_infer_snapshot.threads
             snapshot_out_dir/expected_convert_snapshot.argn
             snapshot_out_dir/expected_mapping_snapshot.mut
-            snapshot_out_dir/expected_imputed_snapshot.vcf
-
+            snapshot_out_dir/expected_impute_snapshot.vcf
+            snapshot_out_dir/expected_infer_fit_to_data_snapshot.threads
+            snapshot_out_dir/expected_convert_fit_to_data_snapshot.argn
