@@ -42,10 +42,10 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
     // Find carrier clusters
     // Algorithm: find paths in the marginal threading tree consisting only of carriers
     // Index those by "start" (highest index)
-    std::unordered_map<size_t, size_t> path_lengths;
     std::vector<size_t> max_path_starts;
     size_t max_path_len = 0;
 
+    std::vector<size_t> path_lengths(genotypes.size(), 0);
     for (size_t i = 0; i < genotypes.size(); i++) {
         if (i == 0) {
             path_lengths[i] = genotypes.at(i);
