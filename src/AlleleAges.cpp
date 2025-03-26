@@ -15,11 +15,14 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "AlleleAges.hpp"
+
 #include <numeric>
 #include <execution>
 #include <vector>
 #include <unordered_map>
 #include <map>
+
+#include <boost/container/flat_set.hpp>
 
 AgeEstimator::AgeEstimator(ThreadingInstructions& instructions) {
     num_samples = instructions.num_samples;
@@ -89,6 +92,7 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         if (start_tmp != 0) {
             throw std::runtime_error("Invalid threading instruction traversal.");
         }
+
         for (int i = 0; i < num_samples; i++) {
             if (tmrcas.at(i) < 0) {
                 int target = threading_iterators.at(i).current_target;
@@ -97,29 +101,27 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
             }
         }
 
-        // We make a note of all unique coalescence times (sorted)
-        std::map<double, int> scores;
-        for (double t : tmrcas) {
-            if (!scores.count(t)) {
-                scores[t] = 0;
-            }
-        }
+        // Create a sorted unique list of coalescence times as transform_reduce
+        // below must be done in order. For performance, boost's flat_set is
+        // faster than std::set or sorting a std::vector in this instance.
+        boost::container::flat_set<double> unique_tmrcas(tmrcas.begin(), tmrcas.end());
 
         // For each sample, check its tmrca with path_start and
         // update the score for each tmrca bin accordingly
-        for (const auto &[key, value] : scores) {
-            scores[key] += std::transform_reduce(
+        std::map<double, int> scores;
+        for (double t : unique_tmrcas) {
+            scores[t] = std::transform_reduce(
                 tmrcas.begin(),
                 tmrcas.end(),
                 genotypes.begin(),
                 0,
                 std::plus<>(),
-                [key](double tmrca, int genotype) {
+                [t](double tmrca, int genotype) {
                     bool is_carrier = genotype > 0;
-                    if (is_carrier && tmrca <= key) {
+                    if (is_carrier && tmrca <= t) {
                         return 1;
                     }
-                    if (!is_carrier && tmrca > key) {
+                    if (!is_carrier && tmrca > t) {
                         return 1;
                     }
                     return 0;
