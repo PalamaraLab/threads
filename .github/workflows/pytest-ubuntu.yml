@@ -15,9 +15,7 @@ jobs:
   run_python_tests:
     name: Run python tests on ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    if: |
-      (github.repository_visibility != 'private' || github.event_name == 'pull_request') &&
-      !contains(github.event.pull_request.labels.*.name, 'ci:off')
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:off') }}
 
     strategy:
       fail-fast: false
