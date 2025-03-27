@@ -12,9 +12,7 @@ jobs:
   build-and-test:
     name: Tests on Ubuntu
     runs-on: ubuntu-24.04
-    if: |
-      (github.repository_visibility != 'private' || github.event_name == 'pull_request') &&
-      !contains(github.event.pull_request.labels.*.name, 'ci:off')
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:off') }}
 
     steps:
       - name: checkout repo & submodules
