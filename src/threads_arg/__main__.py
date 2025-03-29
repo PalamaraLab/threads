@@ -138,11 +138,13 @@ def impute(panel, target, map, mut, demography, out, stdout, region, mutation_ra
         goodbye()
 
 @main.command()
-@click.argument("threads", required=True)
-def vcf(threads):
+@click.option("--threads", required=True, help="Path to input .threads file")
+@click.option("--variants", default=None, help="Path to .pvar or .bim file with variant information")
+@click.option("--samples", default=None, help="Path to a file with one sample ID per line")
+def vcf(threads, variants, samples):
     """Convert THREADS to VCF format and print to stdout."""
     from .threads_to_vcf import threads_to_vcf
-    threads_to_vcf(threads)
+    threads_to_vcf(threads, samples=samples, variants=variants)
 
 if __name__ == "__main__":
     main()
