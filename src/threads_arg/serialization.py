@@ -16,8 +16,22 @@
 
 import h5py
 import numpy as np
+from dataclasses import dataclass
 from datetime import datetime
+
 from threads_arg import ThreadingInstructions
+from .utils import split_list
+
+@dataclass
+class InstructionsData:
+    starts: list
+    tmrcas: list
+    targets: list
+    mismatches: list
+    positions: list
+    region_start: int
+    region_end: int
+
 
 def serialize_instructions(instructions, out, variant_metadata=None, allele_ages=None, sample_names=None):
     num_threads = instructions.num_samples
@@ -98,7 +112,7 @@ def serialize_instructions(instructions, out, variant_metadata=None, allele_ages
         dset_allele_ages = f.create_dataset("allele_ages", (num_sites, ), dtype=np.double, compression='gzip',
                                     compression_opts=compression_opts)
         dset_allele_ages[:] = allele_ages
-    
+
     if sample_names is not None:
         assert len(sample_names) == num_threads // 2
         num_diploids = len(sample_names)
@@ -107,7 +121,112 @@ def serialize_instructions(instructions, out, variant_metadata=None, allele_ages
         dset_sample_names[:] = sample_names
     f.close()
 
+
 def load_instructions(threads):
+    """
+    Create ThreadingInstructions object from a source .threads file
+    """
+    inst_data = load_instructions_data(threads)
+    return instructions_from_data(inst_data)
+
+
+def instructions_from_data(instructions_data):
+    return ThreadingInstructions(
+        instructions_data.starts,
+        instructions_data.tmrcas,
+        instructions_data.targets,
+        instructions_data.mismatches,
+        instructions_data.positions,
+        instructions_data.region_start,
+        instructions_data.region_end
+    )
+
+
+def load_instructions_data_batched(threads, num_batches):
+    """
+    Load InstructionsData from a .threads file and split into num_batches that
+    may be later processed on separate CPUs.
+
+    This returns an array of InstructionsData that may safely passed to new
+    processes. The actual use of the C++ API should be done inside each process,
+    for example use instructions_from_data on each batch of data and then
+    GenotypeIterator and AgeEstimator can be used per-process.
+    """
+    inst_data = load_instructions_data(threads)
+
+    # Split list will generate cl-open blocks of positions, e.g. [1,2,3,4,5,6]
+    # over 2 batches yields batches with positions [1,2,3], [4,5,6], i.e. each
+    # batch is complete which is why the in_range() check is inclusive.
+    batched_positions = split_list(inst_data.positions, num_batches)
+
+    batched_instructions_data = []
+    for bpos in batched_positions:
+        range_start = bpos[0]
+        range_end = bpos[-1]
+        range_starts = []
+        range_tmrcas = []
+        range_targets = []
+        range_mismatches = []
+
+        # Position in range check is inclusive, split_list results do not overlap
+        def in_range(pos):
+            return (pos >= range_start) and (pos <= range_end)
+
+        # Make positions for this batch as subset of those in range
+        range_start_idx = inst_data.positions.index(range_start)
+        range_end_idx = inst_data.positions.index(range_end)
+        range_positions = inst_data.positions[range_start_idx:range_end_idx + 1]
+
+        # Assumes that tmrcas and targets same size as starts
+        for inst_idx in range(len(inst_data.starts)):
+            sub_starts = []
+            sub_tmrcas = []
+            sub_targets = []
+            sub_mismatches = []
+
+            # Create sub-vectors based on range
+            for pos_idx in range(len(inst_data.starts[inst_idx])):
+                pos = inst_data.starts[inst_idx][pos_idx]
+                if in_range(pos):
+                    sub_starts.append(pos)
+                    sub_tmrcas.append(inst_data.tmrcas[inst_idx][pos_idx])
+                    sub_targets.append(inst_data.targets[inst_idx][pos_idx])
+
+            # Recompute mismatches based on start indexes within range
+            for mismatch in inst_data.mismatches[inst_idx]:
+                pos = inst_data.positions[mismatch]
+                if in_range(pos):
+                    sub_mismatches.append(mismatch - range_start_idx)
+
+            # FIXME for review: apparently empty starts are not allowed after
+            # the first entry, and a single dummy value must be used instead.
+            # Confirm logic with Arni, in particular tmrcas and targets values.
+            if not sub_starts and inst_idx != 0:
+                sub_starts.append(inst_data.starts[inst_idx][0])
+                sub_tmrcas.append(inst_data.tmrcas[inst_idx][0])
+                sub_targets.append(inst_data.targets[inst_idx][0])
+
+            range_starts.append(sub_starts)
+            range_tmrcas.append(sub_tmrcas)
+            range_targets.append(sub_targets)
+            range_mismatches.append(sub_mismatches)
+
+        batched_instructions_data.append(
+            InstructionsData(
+                range_starts,
+                range_tmrcas,
+                range_targets,
+                range_mismatches,
+                range_positions,
+                range_start,
+                range_end
+            )
+        )
+
+    return batched_instructions_data
+
+
+def load_instructions_data(threads):
     f = h5py.File(threads, "r")
 
     _, thread_starts, het_starts = f["samples"][:, 0], f["samples"][:, 1], f["samples"][:, 2]
@@ -139,7 +258,18 @@ def load_instructions(threads):
             starts.append(flat_starts[start:thread_starts[i + 1]].tolist())
             tmrcas.append(flat_tmrcas[start:thread_starts[i + 1]].tolist())
             mismatches.append(flat_mismatches[het_start:het_starts[i + 1]].tolist())
-    return ThreadingInstructions(starts, tmrcas, targets, mismatches, positions.astype(int).tolist(), region_start, region_end)
+
+    positions = positions.astype(int).tolist()
+    return InstructionsData(
+        starts,
+        tmrcas,
+        targets,
+        mismatches,
+        positions,
+        region_start,
+        region_end
+    )
+
 
 def load_metadata(threads):
     f = h5py.File(threads, "r")
