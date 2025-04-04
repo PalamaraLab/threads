@@ -83,6 +83,7 @@ def convert(**kwargs):
 @main.command()
 @click.option("--threads", required=True, help="Path to an input .threads file.")
 @click.option("--out", required=True, help="Path to output.")
+@click.option("--num_batches", type=int, help="Number of processors to batch work up for ", default=None)
 def allele_ages(**kwargs):
     from .allele_ages import estimate_allele_ages
     estimate_allele_ages(**kwargs)
