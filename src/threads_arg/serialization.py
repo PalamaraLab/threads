@@ -18,6 +18,7 @@ import h5py
 import numpy as np
 from dataclasses import dataclass
 from datetime import datetime
+import sys
 
 from threads_arg import ThreadingInstructions
 from .utils import split_list
@@ -185,10 +186,13 @@ def load_instructions_data_batched(threads, num_batches):
             sub_mismatches = []
 
             # Create sub-vectors based on range
-            for pos_idx in range(len(inst_data.starts[inst_idx])):
-                pos = inst_data.starts[inst_idx][pos_idx]
-                if in_range(pos):
-                    sub_starts.append(pos)
+            num_starts = len(inst_data.starts[inst_idx])
+            for pos_idx in range(num_starts):
+                seg_start = inst_data.starts[inst_idx][pos_idx]
+                # FIXME neater way to handle last segment rather than sys.maxsize
+                seg_end = sys.maxsize if pos_idx == num_starts - 1 else inst_data.starts[inst_idx][pos_idx + 1]
+                if (range_start <= seg_end) and (range_end >= seg_start):
+                    sub_starts.append(seg_start)
                     sub_tmrcas.append(inst_data.tmrcas[inst_idx][pos_idx])
                     sub_targets.append(inst_data.targets[inst_idx][pos_idx])
 
@@ -197,14 +201,6 @@ def load_instructions_data_batched(threads, num_batches):
                 pos = inst_data.positions[mismatch]
                 if in_range(pos):
                     sub_mismatches.append(mismatch - range_start_idx)
-
-            # FIXME for review: apparently empty starts are not allowed after
-            # the first entry, and a single dummy value must be used instead.
-            # Confirm logic with Arni, in particular tmrcas and targets values.
-            if not sub_starts and inst_idx != 0:
-                sub_starts.append(inst_data.starts[inst_idx][0])
-                sub_tmrcas.append(inst_data.tmrcas[inst_idx][0])
-                sub_targets.append(inst_data.targets[inst_idx][0])
 
             range_starts.append(sub_starts)
             range_tmrcas.append(sub_tmrcas)
