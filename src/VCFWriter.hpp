@@ -37,7 +37,7 @@ private:
     std::vector<std::string> filter;
     std::vector<std::string> sample_names;
 public:
-    VCFWriter(ThreadingInstructions& instructions);
+    VCFWriter(const ThreadingInstructions& instructions);
 
     void set_chrom(const std::vector<std::string>& _chrom) { chrom = _chrom; }
     void set_pos(const std::vector<std::string>& _pos) { pos = _pos; }

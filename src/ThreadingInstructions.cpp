@@ -15,15 +15,16 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ThreadingInstructions.hpp"
-#include <limits>
+
 #include <iostream>
+#include <limits>
 #include <vector>
 
 
-ThreadingInstruction::ThreadingInstruction(const std::vector<int> _starts,
-                                           const std::vector<double> _tmrcas,
-                                           const std::vector<int> _targets,
-                                           const std::vector<int> _mismatches) : 
+ThreadingInstruction::ThreadingInstruction(const std::vector<int>& _starts,
+                                           const std::vector<double>& _tmrcas,
+                                           const std::vector<int>& _targets,
+                                           const std::vector<int>& _mismatches) :
     starts(_starts), tmrcas(_tmrcas), targets(_targets), mismatches(_mismatches) {
     num_segments = starts.size();
     num_mismatches = mismatches.size();
@@ -32,7 +33,10 @@ ThreadingInstruction::ThreadingInstruction(const std::vector<int> _starts,
     }
 }
 
-ThreadingInstructionIterator::ThreadingInstructionIterator(ThreadingInstruction& _instruction, const std::vector<int>& _positions) :
+ThreadingInstructionIterator::ThreadingInstructionIterator(
+    const ThreadingInstruction& _instruction,
+    const std::vector<int>& _positions
+) :
     instruction(_instruction), positions(_positions) {
     if (instruction.num_segments == 0) {
         current_tmrca = 0;
@@ -101,7 +105,7 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
         if (start <= pos && pos < end) {
             positions.push_back(pos);
             pos_idx_offset = pos_idx_offset < 0 ? i : pos_idx_offset;
-        } 
+        }
         if (pos > end) {
             break;
         }
@@ -124,7 +128,7 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<ViterbiPath>& pat
                 mismatches.push_back(het_idx - pos_idx_offset);
             }
         }
-        instructions.push_back(ThreadingInstruction(starts, tmrcas, targets, mismatches));
+        instructions.emplace_back(starts, tmrcas, targets, mismatches);
     }
 }
 
@@ -138,7 +142,7 @@ ThreadingInstructions::ThreadingInstructions(const std::vector<std::vector<int>>
     num_sites = positions.size();
     instructions.reserve(num_samples);
     for (int i = 0; i < num_samples; i++) {
-        instructions.push_back(ThreadingInstruction(starts.at(i), tmrcas.at(i), targets.at(i), mismatches.at(i)));
+        instructions.emplace_back(starts.at(i), tmrcas.at(i), targets.at(i), mismatches.at(i));
     }
 }
 

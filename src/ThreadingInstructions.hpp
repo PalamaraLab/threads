@@ -36,16 +36,17 @@ public:
     std::size_t num_segments = 0;
     std::size_t num_mismatches = 0;
     ThreadingInstruction(
-        const std::vector<int> _starts,
-        const std::vector<double> _tmrcas,
-        const std::vector<int> _targets,
-        const std::vector<int> _mismatches);
+        const std::vector<int>& _starts,
+        const std::vector<double>& _tmrcas,
+        const std::vector<int>& _targets,
+        const std::vector<int>& _mismatches
+    );
 };
 
 class ThreadingInstructionIterator {
 // This is a container for iterating through a ThreadingInstruction object site-by-site
 private:
-    ThreadingInstruction& instruction;
+    const ThreadingInstruction& instruction;
     const std::vector<int>& positions;
     int sites_processed = 0;
     int next_segment_start = 0;
@@ -59,7 +60,7 @@ public:
     bool is_mismatch = false;
 public:
     void increment_site(const int pos);
-    ThreadingInstructionIterator(ThreadingInstruction& _instruction, const std::vector<int>& _positions);
+    ThreadingInstructionIterator(const ThreadingInstruction& _instruction, const std::vector<int>& _positions);
 };
 
 class ThreadingInstructions {

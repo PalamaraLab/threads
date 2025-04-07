@@ -31,10 +31,10 @@ private:
 
 public:
     // Constructor
-    GenotypeIterator(ThreadingInstructions& _instructions);
+    GenotypeIterator(const ThreadingInstructions& _instructions);
 
     // Simple iterator functions
-    std::vector<int>& next_genotype();
+    const std::vector<int>& next_genotype();
     bool has_next_genotype();
 
 public:

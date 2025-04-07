@@ -29,7 +29,7 @@ private:
     std::vector<int> positions;
     std::vector<ThreadingInstructionIterator> threading_iterators;
 public:
-    AgeEstimator(ThreadingInstructions& instructions);
+    AgeEstimator(const ThreadingInstructions& instructions);
     void process_site(const std::vector<int>& genotypes);
     void increment_site();
     std::vector<double> get_inferred_ages() const;
