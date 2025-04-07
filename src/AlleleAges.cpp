@@ -24,7 +24,7 @@
 
 #include <boost/container/flat_set.hpp>
 
-AgeEstimator::AgeEstimator(ThreadingInstructions& instructions) {
+AgeEstimator::AgeEstimator(const ThreadingInstructions& instructions) {
     num_samples = instructions.num_samples;
     positions = instructions.positions;
     threading_iterators.reserve(instructions.instructions.size());

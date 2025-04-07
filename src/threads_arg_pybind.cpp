@@ -137,7 +137,7 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("all_tmrcas", &ThreadingInstructions::all_tmrcas)
       .def("all_targets", &ThreadingInstructions::all_targets)
       .def("all_mismatches", &ThreadingInstructions::all_mismatches);
-  
+
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
            const std::vector<std::vector<int>>&, const std::vector<int>&, const std::vector<double>&>(),
@@ -149,15 +149,15 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("get_consistent_instructions", &ConsistencyWrapper::get_consistent_instructions);
 
   py::class_<AgeEstimator>(m, "AgeEstimator")
-      .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("threading_instructions"))
+      .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))
       .def("process_site", &AgeEstimator::process_site)
       .def("get_inferred_ages", &AgeEstimator::get_inferred_ages);
 
   py::class_<GenotypeIterator>(m, "GenotypeIterator")
-      .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("instructions"))
+      .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))
       .def("next_genotype", &GenotypeIterator::next_genotype)
       .def("has_next_genotype", &GenotypeIterator::has_next_genotype);
-    
+
   py::class_<VCFWriter>(m, "VCFWriter")
       .def(py::init<ThreadingInstructions&>(), "initialize", py::arg("instructions"))
       .def("set_chrom", &VCFWriter::set_chrom)
