@@ -42,9 +42,9 @@ def _allele_ages_worker(instructions_data, result_idx, allele_ages_results):
 
 
 def estimate_allele_ages(threads, out, num_batches):
-    # If not specified use 75% of CPUs available; performance diminishes at 100%
     if not num_batches:
-        num_batches = int(default_process_count() * 0.75)
+        # Keep one processor free by default for the main process
+        num_batches = max(1, default_process_count() - 1)
 
     logging.info("Starting allele age estimation with the following parameters:")
     logging.info(f"threads:     {threads}")
