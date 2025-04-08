@@ -169,4 +169,6 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("set_filter", &VCFWriter::set_filter)
       .def("set_sample_names", &VCFWriter::set_sample_names)
       .def("write_vcf", &VCFWriter::write_vcf);
+
+    m.def("batch_threading_instructions", &batch_threading_instructions);
 }

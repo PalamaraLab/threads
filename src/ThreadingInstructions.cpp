@@ -181,3 +181,149 @@ std::vector<std::vector<int>> ThreadingInstructions::all_mismatches() {
     }
     return out;
 }
+
+std::tuple<
+    std::vector<std::vector<std::vector<int>>>,
+    std::vector<std::vector<std::vector<double>>>,
+    std::vector<std::vector<std::vector<int>>>,
+    std::vector<std::vector<std::vector<int>>>,
+    std::vector<std::vector<int>>,
+    std::vector<int>,
+    std::vector<int>
+>
+batch_threading_instructions(
+    const std::vector<std::vector<int>>& starts,
+    const std::vector<std::vector<double>>& tmrcas,
+    const std::vector<std::vector<int>>& targets,
+    const std::vector<std::vector<int>>& mismatches,
+    const std::vector<int>& positions,
+    const int num_batches
+) {
+    std::vector<std::vector<std::vector<int>>> batched_starts;
+    std::vector<std::vector<std::vector<double>>> batched_tmrcas;
+    std::vector<std::vector<std::vector<int>>> batched_targets;
+    std::vector<std::vector<std::vector<int>>> batched_mismatches;
+    std::vector<std::vector<int>> batched_positions;
+    std::vector<int> batched_position_starts;
+    std::vector<int> batched_position_ends;
+
+    if (tmrcas.size() != starts.size()) {
+        std::ostringstream oss;
+        oss << "tmrcas size " << tmrcas.size();
+        oss << " does not match starts size " << starts.size();
+        throw std::runtime_error(oss.str());
+    }
+
+    if (targets.size() != starts.size()) {
+        std::ostringstream oss;
+        oss << "targets size " << targets.size();
+        oss << " does not match starts size " << starts.size();
+        throw std::runtime_error(oss.str());
+    }
+
+    if (num_batches <= 1) {
+        std::ostringstream oss;
+        oss << "num_batches must be greater than 1, got " << num_batches;
+        throw std::runtime_error(oss.str());
+    }
+
+    const int split_size = static_cast<int>(positions.size()) / num_batches;
+    int range_start_idx = 0;
+
+    // Step over the positions in segments based on split size
+    while (range_start_idx < positions.size()) {
+        // Trim any error in position end to actual size
+        const int range_end_idx = std::min(
+            range_start_idx + split_size - 1,
+            static_cast<int>(positions.size())
+        );
+        if (range_start_idx >= range_end_idx) {
+            break;
+        }
+
+        // Make positions for this batch as subset of those in range
+        const int range_start = positions[range_start_idx];
+        const int range_end = positions[range_end_idx];
+        std::vector<int> range_positions{
+            positions.begin() + range_start_idx,
+            positions.begin() + range_end_idx + 1
+        };
+
+        std::vector<std::vector<int>> range_starts;
+        std::vector<std::vector<double>> range_tmrcas;
+        std::vector<std::vector<int>> range_targets;
+        std::vector<std::vector<int>> range_mismatches;
+
+        const size_t num_insts = starts.size();
+        for (size_t inst_idx = 0; inst_idx < num_insts; ++inst_idx) {
+            std::vector<int> sub_starts;
+            std::vector<double> sub_tmrcas;
+            std::vector<int> sub_targets;
+            std::vector<int> sub_mismatches;
+
+            if (tmrcas[inst_idx].size() != starts[inst_idx].size()) {
+                std::ostringstream oss;
+                oss << "tmrcas size " << tmrcas[inst_idx].size();
+                oss << " does not match starts size " << starts[inst_idx].size();
+                oss << " for list entry " << inst_idx;
+                throw std::runtime_error(oss.str());
+            }
+
+            if (targets[inst_idx].size() != starts[inst_idx].size()) {
+                std::ostringstream oss;
+                oss << "targets size " << targets[inst_idx].size();
+                oss << " does not match starts size " << starts[inst_idx].size();
+                oss << " for list entry " << inst_idx;
+                throw std::runtime_error(oss.str());
+            }
+
+            // Create sub-vectors based on range
+            const size_t num_starts = starts[inst_idx].size();
+            for (size_t pos_idx = 0; pos_idx < num_starts; ++pos_idx) {
+                const int seg_start = starts[inst_idx][pos_idx];
+                const int seg_end = (pos_idx == num_starts - 1) ?
+                    std::numeric_limits<int>::max() :
+                    starts[inst_idx][pos_idx + 1];
+
+                if ((range_start <= seg_end) && (range_end >= seg_start)) {
+                    sub_starts.push_back(seg_start);
+                    sub_tmrcas.push_back(tmrcas[inst_idx][pos_idx]);
+                    sub_targets.push_back(targets[inst_idx][pos_idx]);
+                }
+            }
+
+            // Recompute mismatches based on start indexes within range
+            for (const int mismatch_idx : mismatches[inst_idx]) {
+                const int pos = positions[mismatch_idx];
+                if ((pos >= range_start) && (pos <= range_end)) {
+                    sub_mismatches.push_back(mismatch_idx - range_start_idx);
+                }
+            }
+
+            range_starts.push_back(std::move(sub_starts));
+            range_tmrcas.push_back(std::move(sub_tmrcas));
+            range_targets.push_back(std::move(sub_targets));
+            range_mismatches.push_back(std::move(sub_mismatches));
+        }
+
+        batched_starts.push_back(std::move(range_starts));
+        batched_tmrcas.push_back(std::move(range_tmrcas));
+        batched_targets.push_back(std::move(range_targets));
+        batched_mismatches.push_back(std::move(range_mismatches));
+        batched_positions.push_back(std::move(range_positions));
+        batched_position_starts.push_back(std::move(range_start));
+        batched_position_ends.push_back(std::move(range_end));
+
+        range_start_idx += split_size;
+    }
+
+    return std::make_tuple(
+        batched_starts,
+        batched_tmrcas,
+        batched_targets,
+        batched_mismatches,
+        batched_positions,
+        batched_position_starts,
+        batched_position_ends
+    );
+}

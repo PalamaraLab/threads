@@ -18,7 +18,9 @@
 #define THREADS_ARG_THREADING_INSTRUCTIONS_HPP
 
 #include "ViterbiLowMem.hpp"
-#include <iostream>
+
+#include <limits>
+#include <sstream>
 #include <vector>
 
 
@@ -89,5 +91,23 @@ public:
     std::vector<int> positions;
     std::vector<ThreadingInstruction> instructions;
 };
-#endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP
 
+std::tuple<
+    std::vector<std::vector<std::vector<int>>>,
+    std::vector<std::vector<std::vector<double>>>,
+    std::vector<std::vector<std::vector<int>>>,
+    std::vector<std::vector<std::vector<int>>>,
+    std::vector<std::vector<int>>,
+    std::vector<int>,
+    std::vector<int>
+>
+batch_threading_instructions(
+    const std::vector<std::vector<int>>& starts,
+    const std::vector<std::vector<double>>& tmrcas,
+    const std::vector<std::vector<int>>& targets,
+    const std::vector<std::vector<int>>& mismatches,
+    const std::vector<int>& positions,
+    int num_batches
+);
+
+#endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP
