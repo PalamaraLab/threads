@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import sys
 
-from threads_arg import ThreadingInstructions
+from threads_arg import ThreadingInstructions, batch_threading_instructions
 from .utils import split_list
 
 @dataclass
@@ -155,67 +155,26 @@ def load_instructions_data_batched(threads, num_batches):
     """
     inst_data = load_instructions_data(threads)
 
-    # Split list will generate cl-open blocks of positions, e.g. [1,2,3,4,5,6]
-    # over 2 batches yields batches with positions [1,2,3], [4,5,6], i.e. each
-    # batch is complete which is why the in_range() check is inclusive.
-    batched_positions = split_list(inst_data.positions, num_batches)
+    b_starts, b_tmrcas, b_targets, b_mismatches, b_positions, b_region_start, b_region_end = batch_threading_instructions(
+        inst_data.starts,
+        inst_data.tmrcas,
+        inst_data.targets,
+        inst_data.mismatches,
+        inst_data.positions,
+        num_batches
+    )
 
     batched_instructions_data = []
-    for bpos in batched_positions:
-        range_start = bpos[0]
-        range_end = bpos[-1]
-        range_starts = []
-        range_tmrcas = []
-        range_targets = []
-        range_mismatches = []
-
-        # Position in range check is inclusive, split_list results do not overlap
-        def in_range(pos):
-            return (pos >= range_start) and (pos <= range_end)
-
-        # Make positions for this batch as subset of those in range
-        range_start_idx = inst_data.positions.index(range_start)
-        range_end_idx = inst_data.positions.index(range_end)
-        range_positions = inst_data.positions[range_start_idx:range_end_idx + 1]
-
-        # Assumes that tmrcas and targets same size as starts
-        for inst_idx in range(len(inst_data.starts)):
-            sub_starts = []
-            sub_tmrcas = []
-            sub_targets = []
-            sub_mismatches = []
-
-            # Create sub-vectors based on range
-            num_starts = len(inst_data.starts[inst_idx])
-            for pos_idx in range(num_starts):
-                seg_start = inst_data.starts[inst_idx][pos_idx]
-                # FIXME neater way to handle last segment rather than sys.maxsize
-                seg_end = sys.maxsize if pos_idx == num_starts - 1 else inst_data.starts[inst_idx][pos_idx + 1]
-                if (range_start <= seg_end) and (range_end >= seg_start):
-                    sub_starts.append(seg_start)
-                    sub_tmrcas.append(inst_data.tmrcas[inst_idx][pos_idx])
-                    sub_targets.append(inst_data.targets[inst_idx][pos_idx])
-
-            # Recompute mismatches based on start indexes within range
-            for mismatch in inst_data.mismatches[inst_idx]:
-                pos = inst_data.positions[mismatch]
-                if in_range(pos):
-                    sub_mismatches.append(mismatch - range_start_idx)
-
-            range_starts.append(sub_starts)
-            range_tmrcas.append(sub_tmrcas)
-            range_targets.append(sub_targets)
-            range_mismatches.append(sub_mismatches)
-
+    for i in range(len(b_starts)):
         batched_instructions_data.append(
             InstructionsData(
-                range_starts,
-                range_tmrcas,
-                range_targets,
-                range_mismatches,
-                range_positions,
-                range_start,
-                range_end
+                b_starts[i],
+                b_tmrcas[i],
+                b_targets[i],
+                b_mismatches[i],
+                b_positions[i],
+                b_region_start[i],
+                b_region_end[i]
             )
         )
 
