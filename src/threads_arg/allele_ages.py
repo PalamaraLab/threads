@@ -17,61 +17,76 @@
 import logging
 import multiprocessing
 import numpy as np
+from tqdm import tqdm
 
 from threads_arg import AgeEstimator, GenotypeIterator
-from .serialization import load_instructions_data_batched, instructions_from_data
-from .utils import timer_block, default_process_count
+from .serialization import load_instructions
+from .utils import timer_block, default_process_count, split_list
 
 logger = logging.getLogger(__name__)
 
 
-def _allele_ages_worker(instructions_data, result_idx, allele_ages_results):
-    with timer_block(f"processing instructions for batch {result_idx}", print_start=False):
-        instructions = instructions_from_data(instructions_data)
+def _nth_batch_worker(instructions, result_idx, allele_ages_results):
+    # Estimate ages on this instruction batch
+    gt_it = GenotypeIterator(instructions)
+    age_estimator = AgeEstimator(instructions)
+    while gt_it.has_next_genotype():
+        g = np.array(gt_it.next_genotype())
+        age_estimator.process_site(g)
+    allele_age_estimates = age_estimator.get_inferred_ages()
 
-        # Estimate ages on this instruction batch
-        gt_it = GenotypeIterator(instructions)
-        age_estimator = AgeEstimator(instructions)
-        while gt_it.has_next_genotype():
-            g = np.array(gt_it.next_genotype())
-            age_estimator.process_site(g)
-        allele_age_estimates = age_estimator.get_inferred_ages()
-
-        # Index result so full data can be reconstructed in order
-        allele_ages_results[result_idx] = allele_age_estimates
+    # Index result so full data can be reconstructed in order
+    allele_ages_results[result_idx] = allele_age_estimates
 
 
-def estimate_allele_ages(threads, out, num_batches):
+def _nth_batch_worker_star(args):
+    return _nth_batch_worker(*args)
+
+
+def estimate_allele_ages(threads, out, num_batches, num_processors):
+    # Unless specified, use all CPUs available minus one for the main process
+    if not num_processors:
+        num_processors = max(1, default_process_count() - 1)
+
+    # Between 2 and 3 batches per processor in the pool seems to be a good
+    # default for balancing moving data around and sharing workload.
     if not num_batches:
-        # Keep one processor free by default for the main process
-        num_batches = max(1, default_process_count() - 1)
+        num_batches = num_processors * 3
 
     logging.info("Starting allele age estimation with the following parameters:")
-    logging.info(f"threads:     {threads}")
-    logging.info(f"out:         {out}")
-    logging.info(f"num_batches: {num_batches}")
+    logging.info(f"threads:        {threads}")
+    logging.info(f"out:            {out}")
+    logging.info(f"num_batches:    {num_batches}")
+    logging.info(f"num_processors: {num_processors}")
 
     with timer_block(f"loading {threads} into {num_batches} batches", print_start=False):
-        batched_instructions_data = load_instructions_data_batched(threads, num_batches)
-        positions = []
-        for batch in batched_instructions_data:
-            positions += batch.positions
+        # Load instructions, and get sub-ranges based on number of batches
+        instructions = load_instructions(threads)
+        batched_instructions = []
+        batch_positions = split_list(instructions.positions, num_batches)
+        for bpos in batch_positions:
+            range_start = bpos[0]
+            range_end = bpos[-1]
+            range_instructions = instructions.sub_range(range_start, range_end)
+            batched_instructions.append(range_instructions)
 
-    with timer_block(f"estimating allele ages ({num_batches} CPUs)"):
+    with timer_block(f"estimating allele ages ({num_processors} CPUs)"):
         # Process-safe dict so batch results can be reconstructed in order
         manager = multiprocessing.Manager()
         allele_ages_results = manager.dict()
-        jobs = []
-        for i in range(num_batches):
-            p = multiprocessing.Process(
-                target=_allele_ages_worker,
-                args=(batched_instructions_data[i], i, allele_ages_results)
-            )
-            jobs.append(p)
-            p.start()
 
-        for p in jobs:
-            p.join()
+        # Create arguments for each job in process pool
+        jobs_args = [(range_inst, i, allele_ages_results)
+                        for i, range_inst in enumerate(batched_instructions)]
+
+        with multiprocessing.Pool(processes=num_processors) as pool:
+            # To use tqdm with a pool, use imap with shim method to unpack args.
+            # Note the enclosing unassigned list() call is necessary. Otherwise
+            # no value is retrieved and the process is ignored/dropped.
+            list(tqdm(
+                pool.imap(_nth_batch_worker_star, jobs_args),
+                total=len(jobs_args)
+            ))
 
     logger.info(f"Writing results to {out}...")
 
@@ -81,9 +96,9 @@ def estimate_allele_ages(threads, out, num_batches):
         allele_age_estimates += allele_ages_results[i]
 
     # Temporary snp ids until #45 is resolved
-    snp_ids = [f"snp_{i}" for i in range(len(positions))]
+    snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
 
     # Write results to file
     with open(out, "w") as outfile:
-        for snp_id, pos, allele_age in zip(snp_ids, positions, allele_age_estimates):
+        for snp_id, pos, allele_age in zip(snp_ids, instructions.positions, allele_age_estimates):
             outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")

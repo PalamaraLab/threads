@@ -83,6 +83,7 @@ if(PYTHON_BINDINGS)
 
     pybind11_add_module(threads_arg_python_bindings
         threads_arg_pybind.cpp
+        pybind_utils.cpp
     )
 
     target_link_libraries(threads_arg_python_bindings
