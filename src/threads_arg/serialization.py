@@ -16,22 +16,9 @@
 
 import h5py
 import numpy as np
-from dataclasses import dataclass
 from datetime import datetime
-import sys
 
-from threads_arg import ThreadingInstructions, batch_threading_instructions
-from .utils import split_list
-
-@dataclass
-class InstructionsData:
-    starts: list
-    tmrcas: list
-    targets: list
-    mismatches: list
-    positions: list
-    region_start: int
-    region_end: int
+from threads_arg import ThreadingInstructions
 
 
 def serialize_instructions(instructions, out, variant_metadata=None, allele_ages=None, sample_names=None):
@@ -127,61 +114,6 @@ def load_instructions(threads):
     """
     Create ThreadingInstructions object from a source .threads file
     """
-    inst_data = load_instructions_data(threads)
-    return instructions_from_data(inst_data)
-
-
-def instructions_from_data(instructions_data):
-    return ThreadingInstructions(
-        instructions_data.starts,
-        instructions_data.tmrcas,
-        instructions_data.targets,
-        instructions_data.mismatches,
-        instructions_data.positions,
-        instructions_data.region_start,
-        instructions_data.region_end
-    )
-
-
-def load_instructions_data_batched(threads, num_batches):
-    """
-    Load InstructionsData from a .threads file and split into num_batches that
-    may be later processed on separate CPUs.
-
-    This returns an array of InstructionsData that may safely passed to new
-    processes. The actual use of the C++ API should be done inside each process,
-    for example use instructions_from_data on each batch of data and then
-    GenotypeIterator and AgeEstimator can be used per-process.
-    """
-    inst_data = load_instructions_data(threads)
-
-    b_starts, b_tmrcas, b_targets, b_mismatches, b_positions, b_region_start, b_region_end = batch_threading_instructions(
-        inst_data.starts,
-        inst_data.tmrcas,
-        inst_data.targets,
-        inst_data.mismatches,
-        inst_data.positions,
-        num_batches
-    )
-
-    batched_instructions_data = []
-    for i in range(len(b_starts)):
-        batched_instructions_data.append(
-            InstructionsData(
-                b_starts[i],
-                b_tmrcas[i],
-                b_targets[i],
-                b_mismatches[i],
-                b_positions[i],
-                b_region_start[i],
-                b_region_end[i]
-            )
-        )
-
-    return batched_instructions_data
-
-
-def load_instructions_data(threads):
     f = h5py.File(threads, "r")
 
     _, thread_starts, het_starts = f["samples"][:, 0], f["samples"][:, 1], f["samples"][:, 2]
@@ -215,7 +147,7 @@ def load_instructions_data(threads):
             mismatches.append(flat_mismatches[het_start:het_starts[i + 1]].tolist())
 
     positions = positions.astype(int).tolist()
-    return InstructionsData(
+    return ThreadingInstructions(
         starts,
         tmrcas,
         targets,
@@ -230,6 +162,7 @@ def load_metadata(threads):
     f = h5py.File(threads, "r")
     import pandas as pd
     return pd.DataFrame(f["variant_metadata"][:], columns=["CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER"])
+
 
 def load_sample_names(threads):
     f = h5py.File(threads, "r")

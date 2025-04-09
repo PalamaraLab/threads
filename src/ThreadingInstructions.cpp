@@ -21,10 +21,12 @@
 #include <vector>
 
 
-ThreadingInstruction::ThreadingInstruction(const std::vector<int>& _starts,
-                                           const std::vector<double>& _tmrcas,
-                                           const std::vector<int>& _targets,
-                                           const std::vector<int>& _mismatches) :
+// perf: Note that args are passed by value rather than ref as they run faster
+// when used with std::move below.
+ThreadingInstruction::ThreadingInstruction(std::vector<int> _starts,
+                                           std::vector<double> _tmrcas,
+                                           std::vector<int> _targets,
+                                           std::vector<int> _mismatches) :
     starts(_starts), tmrcas(_tmrcas), targets(_targets), mismatches(_mismatches) {
     num_segments = starts.size();
     num_mismatches = mismatches.size();
@@ -87,7 +89,7 @@ void ThreadingInstructionIterator::increment_site(int position) {
     sites_processed++;
 }
 
-ThreadingInstructions::ThreadingInstructions(const std::vector<ThreadingInstruction>& _instructions, const std::vector<int>& _positions) :
+ThreadingInstructions::ThreadingInstructions(std::vector<ThreadingInstruction> _instructions, std::vector<int> _positions) :
     instructions(_instructions), positions(_positions) {
     start = positions.front();
     end = positions.back() + 1;
@@ -182,148 +184,78 @@ std::vector<std::vector<int>> ThreadingInstructions::all_mismatches() {
     return out;
 }
 
-std::tuple<
-    std::vector<std::vector<std::vector<int>>>,
-    std::vector<std::vector<std::vector<double>>>,
-    std::vector<std::vector<std::vector<int>>>,
-    std::vector<std::vector<std::vector<int>>>,
-    std::vector<std::vector<int>>,
-    std::vector<int>,
-    std::vector<int>
->
-batch_threading_instructions(
-    const std::vector<std::vector<int>>& starts,
-    const std::vector<std::vector<double>>& tmrcas,
-    const std::vector<std::vector<int>>& targets,
-    const std::vector<std::vector<int>>& mismatches,
-    const std::vector<int>& positions,
-    const int num_batches
-) {
-    std::vector<std::vector<std::vector<int>>> batched_starts;
-    std::vector<std::vector<std::vector<double>>> batched_tmrcas;
-    std::vector<std::vector<std::vector<int>>> batched_targets;
-    std::vector<std::vector<std::vector<int>>> batched_mismatches;
-    std::vector<std::vector<int>> batched_positions;
-    std::vector<int> batched_position_starts;
-    std::vector<int> batched_position_ends;
-
-    if (tmrcas.size() != starts.size()) {
+ThreadingInstructions ThreadingInstructions::sub_range(const int range_start, const int range_end) const {
+    // Validate range and get corresponding start end index in positions
+    if (range_start > range_end) {
         std::ostringstream oss;
-        oss << "tmrcas size " << tmrcas.size();
-        oss << " does not match starts size " << starts.size();
+        oss << "range_start " << range_start << " cannot be greater than range_end " << range_end;
         throw std::runtime_error(oss.str());
     }
 
-    if (targets.size() != starts.size()) {
+    const auto range_start_it = std::lower_bound(positions.begin(), positions.end(), range_start);
+    if ((range_start < 0) || (range_start_it == positions.end())) {
         std::ostringstream oss;
-        oss << "targets size " << targets.size();
-        oss << " does not match starts size " << starts.size();
+        oss << "range_start " << range_start << " is not a valid position";
         throw std::runtime_error(oss.str());
     }
+    const int range_start_idx = range_start_it - positions.begin();
 
-    if (num_batches <= 1) {
+    const auto range_end_it = std::lower_bound(positions.begin(), positions.end(), range_end);
+    if ((range_end < 0) || (range_end_it == positions.end())) {
         std::ostringstream oss;
-        oss << "num_batches must be greater than 1, got " << num_batches;
+        oss << "range_end " << range_end << " is not a valid position";
         throw std::runtime_error(oss.str());
     }
+    const int range_end_idx = range_end_it - positions.begin();
 
-    const int split_size = static_cast<int>(positions.size()) / num_batches;
-    int range_start_idx = 0;
+    // Create range positions from indexed subset
+    std::vector<int> range_positions{
+        positions.begin() + range_start_idx,
+        positions.begin() + range_end_idx + 1
+    };
 
-    // Step over the positions in segments based on split size
-    while (range_start_idx < positions.size()) {
-        // Trim any error in position end to actual size
-        const int range_end_idx = std::min(
-            range_start_idx + split_size - 1,
-            static_cast<int>(positions.size())
-        );
-        if (range_start_idx >= range_end_idx) {
-            break;
+    std::vector<ThreadingInstruction> range_instructions;
+    for (const auto& instruction : instructions) {
+        std::vector<int> sub_starts;
+        std::vector<double> sub_tmrcas;
+        std::vector<int> sub_targets;
+        std::vector<int> sub_mismatches;
+
+        // Create sub-vectors based on range
+        const size_t num_starts = instruction.starts.size();
+        for (size_t pos_idx = 0; pos_idx < num_starts; ++pos_idx) {
+            const int seg_start = instruction.starts[pos_idx];
+            const int seg_end = (pos_idx == num_starts - 1) ?
+                std::numeric_limits<int>::max() :
+                instruction.starts[pos_idx + 1];
+
+            if ((range_start <= seg_end) && (range_end >= seg_start)) {
+                sub_starts.push_back(seg_start);
+                sub_tmrcas.push_back(instruction.tmrcas[pos_idx]);
+                sub_targets.push_back(instruction.targets[pos_idx]);
+            }
         }
 
-        // Make positions for this batch as subset of those in range
-        const int range_start = positions[range_start_idx];
-        const int range_end = positions[range_end_idx];
-        std::vector<int> range_positions{
-            positions.begin() + range_start_idx,
-            positions.begin() + range_end_idx + 1
-        };
-
-        std::vector<std::vector<int>> range_starts;
-        std::vector<std::vector<double>> range_tmrcas;
-        std::vector<std::vector<int>> range_targets;
-        std::vector<std::vector<int>> range_mismatches;
-
-        const size_t num_insts = starts.size();
-        for (size_t inst_idx = 0; inst_idx < num_insts; ++inst_idx) {
-            std::vector<int> sub_starts;
-            std::vector<double> sub_tmrcas;
-            std::vector<int> sub_targets;
-            std::vector<int> sub_mismatches;
-
-            if (tmrcas[inst_idx].size() != starts[inst_idx].size()) {
-                std::ostringstream oss;
-                oss << "tmrcas size " << tmrcas[inst_idx].size();
-                oss << " does not match starts size " << starts[inst_idx].size();
-                oss << " for list entry " << inst_idx;
-                throw std::runtime_error(oss.str());
+        // Recompute mismatches based on start indexes within range
+        for (const int mismatch_idx : instruction.mismatches) {
+            const int pos = positions[mismatch_idx];
+            if ((pos >= range_start) && (pos <= range_end)) {
+                sub_mismatches.push_back(mismatch_idx - range_start_idx);
             }
-
-            if (targets[inst_idx].size() != starts[inst_idx].size()) {
-                std::ostringstream oss;
-                oss << "targets size " << targets[inst_idx].size();
-                oss << " does not match starts size " << starts[inst_idx].size();
-                oss << " for list entry " << inst_idx;
-                throw std::runtime_error(oss.str());
-            }
-
-            // Create sub-vectors based on range
-            const size_t num_starts = starts[inst_idx].size();
-            for (size_t pos_idx = 0; pos_idx < num_starts; ++pos_idx) {
-                const int seg_start = starts[inst_idx][pos_idx];
-                const int seg_end = (pos_idx == num_starts - 1) ?
-                    std::numeric_limits<int>::max() :
-                    starts[inst_idx][pos_idx + 1];
-
-                if ((range_start <= seg_end) && (range_end >= seg_start)) {
-                    sub_starts.push_back(seg_start);
-                    sub_tmrcas.push_back(tmrcas[inst_idx][pos_idx]);
-                    sub_targets.push_back(targets[inst_idx][pos_idx]);
-                }
-            }
-
-            // Recompute mismatches based on start indexes within range
-            for (const int mismatch_idx : mismatches[inst_idx]) {
-                const int pos = positions[mismatch_idx];
-                if ((pos >= range_start) && (pos <= range_end)) {
-                    sub_mismatches.push_back(mismatch_idx - range_start_idx);
-                }
-            }
-
-            range_starts.push_back(std::move(sub_starts));
-            range_tmrcas.push_back(std::move(sub_tmrcas));
-            range_targets.push_back(std::move(sub_targets));
-            range_mismatches.push_back(std::move(sub_mismatches));
         }
 
-        batched_starts.push_back(std::move(range_starts));
-        batched_tmrcas.push_back(std::move(range_tmrcas));
-        batched_targets.push_back(std::move(range_targets));
-        batched_mismatches.push_back(std::move(range_mismatches));
-        batched_positions.push_back(std::move(range_positions));
-        batched_position_starts.push_back(std::move(range_start));
-        batched_position_ends.push_back(std::move(range_end));
-
-        range_start_idx += split_size;
+        if (!sub_starts.empty() || !sub_mismatches.empty()) {
+            range_instructions.emplace_back(
+                std::move(sub_starts),
+                std::move(sub_tmrcas),
+                std::move(sub_targets),
+                std::move(sub_mismatches)
+            );
+        }
     }
 
-    return std::make_tuple(
-        batched_starts,
-        batched_tmrcas,
-        batched_targets,
-        batched_mismatches,
-        batched_positions,
-        batched_position_starts,
-        batched_position_ends
-    );
+    return ThreadingInstructions{
+        std::move(range_instructions),
+        std::move(range_positions)
+    };
 }

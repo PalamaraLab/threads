@@ -20,12 +20,12 @@
 #include "AlleleAges.hpp"
 #include "GenotypeIterator.hpp"
 #include "VCFWriter.hpp"
+#include "pybind_utils.hpp"
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 #include <vector>
 
 namespace py = pybind11;
+
 PYBIND11_MODULE(threads_arg_python_bindings, m) {
   py::class_<ImputationSegment>(m, "ImputationSegment")
       .def_readonly("seg_start", &ImputationSegment::seg_start)
@@ -136,7 +136,11 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("all_starts", &ThreadingInstructions::all_starts)
       .def("all_tmrcas", &ThreadingInstructions::all_tmrcas)
       .def("all_targets", &ThreadingInstructions::all_targets)
-      .def("all_mismatches", &ThreadingInstructions::all_mismatches);
+      .def("all_mismatches", &ThreadingInstructions::all_mismatches)
+      .def("sub_range", &ThreadingInstructions::sub_range)
+      .def(py::pickle(
+           &threading_instructions_get_state,
+           &threading_instructions_set_state));
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
@@ -169,6 +173,4 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("set_filter", &VCFWriter::set_filter)
       .def("set_sample_names", &VCFWriter::set_sample_names)
       .def("write_vcf", &VCFWriter::write_vcf);
-
-    m.def("batch_threading_instructions", &batch_threading_instructions);
 }
