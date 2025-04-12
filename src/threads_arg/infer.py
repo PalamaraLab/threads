@@ -203,9 +203,6 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     if fit_to_data and (physical_positions[1:] - physical_positions[:-1] <= 0).any():
         raise RuntimeError("Sites must be strictly increasing when --fit-to-data is set.")
 
-    # out_start, out_end = None, None
-    # if region is not None:
-    #     out_start, out_end = [int(r) for r in region.split("-")]
 
     reader = pgenlib.PgenReader(pgen.encode())
     num_samples = reader.get_raw_sample_ct()
