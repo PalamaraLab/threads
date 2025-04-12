@@ -169,9 +169,9 @@ def read_sample_names(pgen):
     elif os.path.isfile(psam):
         sam_df = pd.read_table(psam, sep=r"\s+")
         if "IID" in sam_df.columns:
-            return sam_df["IID"].tolist()
+            return sam_df["IID"].astype(str).tolist()
         elif "#IID" in sam_df.columns:
-            return sam_df["#IID"].tolist()
+            return sam_df["#IID"].astype(str).tolist()
         else:
             # If no header, default to famfile
             with open(psam, "r") as famfile:
