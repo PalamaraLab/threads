@@ -74,7 +74,7 @@ def serialize_instructions(instructions, out, variant_metadata=None, allele_ages
     dset_het_s[:] = flat_mismatches
     dset_range[:] = [region_start, region_end]
 
-    if variant_metadata is not None:
+    if variant_metadata is not None and num_sites:
         # If not none, it is a pandas dataframe with columns
         # CHR, POS, ID, REF, ALT, QUAL, FILTER
         min_pos = min(positions)
