@@ -4,12 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    labels:
-      - "ci:off"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    labels:
-      - "ci:off"
