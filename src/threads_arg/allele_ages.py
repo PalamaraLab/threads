@@ -42,8 +42,7 @@ def _nth_batch_worker(instructions, result_idx, allele_ages_results):
 def _nth_batch_worker_star(args):
     return _nth_batch_worker(*args)
 
-
-def estimate_allele_ages(threads, out, num_batches, num_processors):
+def estimate_ages(instructions, num_batches, num_processors):
     # Unless specified, use all CPUs available minus one for the main process
     if not num_processors:
         num_processors = max(1, default_process_count() - 1)
@@ -53,15 +52,8 @@ def estimate_allele_ages(threads, out, num_batches, num_processors):
     if not num_batches:
         num_batches = num_processors * 3
 
-    logging.info("Starting allele age estimation with the following parameters:")
-    logging.info(f"threads:        {threads}")
-    logging.info(f"out:            {out}")
-    logging.info(f"num_batches:    {num_batches}")
-    logging.info(f"num_processors: {num_processors}")
-
-    with timer_block(f"loading {threads} into {num_batches} batches", print_start=False):
+    with timer_block(f"Splitting instructions into {num_batches} batches", print_start=False):
         # Load instructions, and get sub-ranges based on number of batches
-        instructions = load_instructions(threads)
         batched_instructions = []
         batch_positions = split_list(instructions.positions, num_batches)
         for bpos in batch_positions:
@@ -70,7 +62,7 @@ def estimate_allele_ages(threads, out, num_batches, num_processors):
             range_instructions = instructions.sub_range(range_start, range_end)
             batched_instructions.append(range_instructions)
 
-    with timer_block(f"estimating allele ages ({num_processors} CPUs)"):
+    with timer_block(f"Estimating allele ages ({num_processors} CPUs)"):
         # Process-safe dict so batch results can be reconstructed in order
         manager = multiprocessing.Manager()
         allele_ages_results = manager.dict()
@@ -88,17 +80,27 @@ def estimate_allele_ages(threads, out, num_batches, num_processors):
                 total=len(jobs_args)
             ))
 
-    logger.info(f"Writing results to {out}...")
-
     # Collect batched estimates into single list in index sort order
     allele_age_estimates = []
     for i in range(len(allele_ages_results)):
         allele_age_estimates += allele_ages_results[i]
+    return allele_age_estimates
+
+def estimate_allele_ages(threads, out, num_batches, num_processors):
+    logging.info("Starting allele age estimation with the following parameters:")
+    logging.info(f"threads:        {threads}")
+    logging.info(f"out:            {out}")
+    logging.info(f"num_batches:    {num_batches}")
+    logging.info(f"num_processors: {num_processors}")
+    
+    instructions = load_instructions(threads)
+    allele_age_estimates = estimate_ages(instructions, num_batches, num_processors)
 
     # Temporary snp ids until #45 is resolved
     snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
 
     # Write results to file
+    logger.info(f"Writing results to {out}...")
     with open(out, "w") as outfile:
         for snp_id, pos, allele_age in zip(snp_ids, instructions.positions, allele_age_estimates):
             outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")
