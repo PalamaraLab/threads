@@ -49,6 +49,8 @@ from .utils import (
 
 from .serialization import serialize_instructions
 
+from .allele_ages import estimate_ages
+
 logger = logging.getLogger(__name__)
 
 
@@ -317,9 +319,10 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         allele_age_estimates = None
         if allele_ages is None:
             logger.info("Inferring allele ages from data")
-            age_estimator = AgeEstimator(instructions)
-            iterate_pgen(pgen, lambda i, g: age_estimator.process_site(g), start_idx=start_idx, end_idx=end_idx)
-            allele_age_estimates = age_estimator.get_inferred_ages()
+            allele_age_estimates = estimate_ages(instructions, 3 * actual_num_threads, actual_num_threads)
+            # age_estimator = AgeEstimator(instructions)
+            # iterate_pgen(pgen, lambda i, g: age_estimator.process_site(g), start_idx=start_idx, end_idx=end_idx)
+            # allele_age_estimates = age_estimator.get_inferred_ages()
             assert len(allele_age_estimates) == len(instructions.positions)
         else:
             logger.info(f"Reading allele ages from {allele_ages}")
