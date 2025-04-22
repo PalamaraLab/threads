@@ -15,7 +15,6 @@ jobs:
   build_wheels_cloud:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:off') }}
 
     strategy:
       fail-fast: false
@@ -54,7 +53,7 @@ jobs:
           fetch-depth: 0
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.22.0
+        uses: pypa/cibuildwheel@v2.23.2
 
       - uses: actions/upload-artifact@v4
         with:

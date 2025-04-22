@@ -13,7 +13,6 @@ jobs:
   build-libs:
     name: Build C++ libs
     runs-on: ${{ matrix.os }}
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:off') }}
 
     strategy:
       fail-fast: false

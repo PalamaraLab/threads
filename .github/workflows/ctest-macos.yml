@@ -9,7 +9,6 @@ jobs:
   build-and-test:
     name: Tests on macOS
     runs-on: macos-13
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:off') }}
 
     steps:
       - name: checkout repo & submodules
