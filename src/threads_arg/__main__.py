@@ -46,7 +46,7 @@ def main():
 @click.option("--demography", required=True, help="Path to input genotype")
 @click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array)")
 @click.option("--fit_to_data", is_flag=True, default=False, help="If specified, Threads performs a post-processing step to ensure the inferred ARG contains an edge matching each input mutation.")
-@click.option("--allele_ages", default=None, help="Allele ages used for post-processing with the --data_consistent option, otherwise ignored. If not specified, allele ages are inferred automatically.")
+@click.option("--allele_ages", default=None, help="Allele ages used for post-processing with the --fit_to_data flag, otherwise ignored. If not specified, allele ages are inferred automatically.")
 @click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM")
 @click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM")
 @click.option("--mutation_rate", required=True, type=float, default=1.4e-8, help="Genome-wide mutation rate")
@@ -87,17 +87,6 @@ def convert(**kwargs):
 def allele_ages(**kwargs):
     from .allele_ages import estimate_allele_ages
     estimate_allele_ages(**kwargs)
-    goodbye()
-
-@main.command()
-@click.option("--threads", required=True, help="Path to an input .threads file.")
-@click.option("--pgen", required=True, help="Path to an input .pgen file.")
-@click.option("--region", default=None, help="Region in 123-456 format, defaults to the whole ARG.")
-@click.option("--allele_ages", default=None, help="Path to file containing allele ages to fit to. If not specified, will automatically infer allele ages.")
-@click.option("--out", required=True, help="Path to output .threads file.")
-def fit_to_data(**kwargs):
-    from .data_consistency import fit_to_data
-    fit_to_data(**kwargs)
     goodbye()
 
 @main.command()
