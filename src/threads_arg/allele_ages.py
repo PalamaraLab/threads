@@ -42,10 +42,11 @@ def _nth_batch_worker(instructions, result_idx, allele_ages_results):
 def _nth_batch_worker_star(args):
     return _nth_batch_worker(*args)
 
-def estimate_ages(instructions, num_batches, num_processors):
-    # Unless specified, use all CPUs available minus one for the main process
-    if not num_processors:
-        num_processors = max(1, default_process_count() - 1)
+def estimate_ages(instructions, num_batches, num_threads):
+    # Make sure we don't use more CPUs than requested
+    if not num_threads:
+        num_threads = 1
+    num_processors = min(num_threads, max(1, default_process_count() - 1))
 
     # Between 2 and 3 batches per processor in the pool seems to be a good
     # default for balancing moving data around and sharing workload.
@@ -86,15 +87,15 @@ def estimate_ages(instructions, num_batches, num_processors):
         allele_age_estimates += allele_ages_results[i]
     return allele_age_estimates
 
-def estimate_allele_ages(threads, out, num_batches, num_processors):
+def estimate_allele_ages(threads, out, num_threads):
     logging.info("Starting allele age estimation with the following parameters:")
-    logging.info(f"threads:        {threads}")
-    logging.info(f"out:            {out}")
-    logging.info(f"num_batches:    {num_batches}")
-    logging.info(f"num_processors: {num_processors}")
+    logging.info(f"threads:     {threads}")
+    logging.info(f"out:         {out}")
+    logging.info(f"num_threads: {num_threads}")
+    num_batches = 3 * num_threads
     
     instructions = load_instructions(threads)
-    allele_age_estimates = estimate_ages(instructions, num_batches, num_processors)
+    allele_age_estimates = estimate_ages(instructions, num_batches, num_threads)
 
     # Temporary snp ids until #45 is resolved
     snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
