@@ -31,8 +31,8 @@ from threads_arg import (
     Matcher,
     ViterbiPath,
     ThreadingInstructions,
-    AgeEstimator,
-    ConsistencyWrapper
+    ConsistencyWrapper,
+    GenotypeIterator
 )
 from .utils import (
     make_recombination_from_map_and_pgen,
@@ -48,6 +48,8 @@ from .utils import (
 )
 
 from .serialization import serialize_instructions
+
+from .allele_ages import estimate_ages
 
 logger = logging.getLogger(__name__)
 
@@ -308,15 +310,11 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
     if fit_to_data:
         logger.info("Starting data-consistency post-processing")
-        start_idx = np.searchsorted(physical_positions, region_start)
-        end_idx = np.searchsorted(physical_positions, region_end, side="right")
 
         allele_age_estimates = None
         if allele_ages is None:
             logger.info("Inferring allele ages from data")
-            age_estimator = AgeEstimator(instructions)
-            iterate_pgen(pgen, lambda i, g: age_estimator.process_site(g), start_idx=start_idx, end_idx=end_idx)
-            allele_age_estimates = age_estimator.get_inferred_ages()
+            allele_age_estimates = estimate_ages(instructions, 3 * actual_num_threads, actual_num_threads)
             assert len(allele_age_estimates) == len(instructions.positions)
         else:
             logger.info(f"Reading allele ages from {allele_ages}")
@@ -332,8 +330,12 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
         # Start the consistifying
         logger.info("Post-processing threading instructions to fit to data")
+        gt_it = GenotypeIterator(instructions)
         cw = ConsistencyWrapper(instructions, allele_age_estimates)
-        iterate_pgen(pgen, lambda i, g: cw.process_site(g), start_idx=start_idx, end_idx=end_idx)
+        while gt_it.has_next_genotype():
+            g = np.array(gt_it.next_genotype())
+            cw.process_site(g)
+
         consistent_instructions = cw.get_consistent_instructions()
         logger.info(f"Writing to {out}")
         serialize_instructions(consistent_instructions,

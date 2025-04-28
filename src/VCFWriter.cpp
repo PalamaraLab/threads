@@ -20,7 +20,7 @@
 #include <iostream>
 #include <vector>
 
-VCFWriter::VCFWriter(ThreadingInstructions& instructions) 
+VCFWriter::VCFWriter(const ThreadingInstructions& instructions) 
     : gt_iterator(GenotypeIterator(instructions)) {
 }
 
@@ -52,11 +52,11 @@ void VCFWriter::write_vcf() {
 
         // Output genotype
         int j = 0;
-        for (auto& gt : gt_iterator.next_genotype()) {
+        for (const auto& g : gt_iterator.next_genotype()) {
             if (j % 2) {
-                std::cout << gt << "\t";
+                std::cout << g << "\t";
             } else {
-                std::cout << gt << "|";
+                std::cout << g << "|";
             }
             j++;
         }
