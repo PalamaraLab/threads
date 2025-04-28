@@ -15,11 +15,16 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "AlleleAges.hpp"
+
+#include <numeric>
+#include <execution>
 #include <vector>
 #include <unordered_map>
 #include <map>
 
-AgeEstimator::AgeEstimator(ThreadingInstructions& instructions) {
+#include <boost/container/flat_set.hpp>
+
+AgeEstimator::AgeEstimator(const ThreadingInstructions& instructions) {
     num_samples = instructions.num_samples;
     positions = instructions.positions;
     threading_iterators.reserve(instructions.instructions.size());
@@ -40,10 +45,10 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
     // Find carrier clusters
     // Algorithm: find paths in the marginal threading tree consisting only of carriers
     // Index those by "start" (highest index)
-    std::unordered_map<size_t, size_t> path_lengths;
     std::vector<size_t> max_path_starts;
     size_t max_path_len = 0;
 
+    std::vector<size_t> path_lengths(genotypes.size(), 0);
     for (size_t i = 0; i < genotypes.size(); i++) {
         if (i == 0) {
             path_lengths[i] = genotypes.at(i);
@@ -87,6 +92,7 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         if (start_tmp != 0) {
             throw std::runtime_error("Invalid threading instruction traversal.");
         }
+
         for (int i = 0; i < num_samples; i++) {
             if (tmrcas.at(i) < 0) {
                 int target = threading_iterators.at(i).current_target;
@@ -95,27 +101,32 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
             }
         }
 
-        // We make a note of all unique coalescence times (sorted)
-        std::map<double, int> scores;
-        for (double t : tmrcas) {
-            if (!scores.count(t)) {
-                scores[t] = 0;
-            }
-        }
+        // Create a sorted unique list of coalescence times as transform_reduce
+        // below must be done in order. For performance, boost's flat_set is
+        // faster than std::set or sorting a std::vector in this instance.
+        boost::container::flat_set<double> unique_tmrcas(tmrcas.begin(), tmrcas.end());
 
-        // For each sample, check its tmrca with path_start and 
+        // For each sample, check its tmrca with path_start and
         // update the score for each tmrca bin accordingly
-        for (int i = 0; i < num_samples; i++) {
-            double tmrca = tmrcas.at(i);
-            bool is_carrier = (genotypes.at(i) > 0);
-            for (const auto &[key, value] : scores) {
-                if (is_carrier && tmrca <= key) {
-                    scores[key]++;
+        std::map<double, int> scores;
+        for (double t : unique_tmrcas) {
+            scores[t] = std::transform_reduce(
+                tmrcas.begin(),
+                tmrcas.end(),
+                genotypes.begin(),
+                0,
+                std::plus<>(),
+                [t](double tmrca, int genotype) {
+                    bool is_carrier = genotype > 0;
+                    if (is_carrier && tmrca <= t) {
+                        return 1;
+                    }
+                    if (!is_carrier && tmrca > t) {
+                        return 1;
+                    }
+                    return 0;
                 }
-                if (!is_carrier && tmrca > key) {
-                    scores[key]++;
-                }
-            }
+            );
         }
 
         std::vector<double> age_bin_boundaries;

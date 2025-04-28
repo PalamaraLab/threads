@@ -18,7 +18,9 @@
 #define THREADS_ARG_THREADING_INSTRUCTIONS_HPP
 
 #include "ViterbiLowMem.hpp"
-#include <iostream>
+
+#include <limits>
+#include <sstream>
 #include <vector>
 
 
@@ -36,16 +38,17 @@ public:
     std::size_t num_segments = 0;
     std::size_t num_mismatches = 0;
     ThreadingInstruction(
-        const std::vector<int> _starts,
-        const std::vector<double> _tmrcas,
-        const std::vector<int> _targets,
-        const std::vector<int> _mismatches);
+        std::vector<int> _starts,
+        std::vector<double> _tmrcas,
+        std::vector<int> _targets,
+        std::vector<int> _mismatches
+    );
 };
 
 class ThreadingInstructionIterator {
 // This is a container for iterating through a ThreadingInstruction object site-by-site
 private:
-    ThreadingInstruction& instruction;
+    const ThreadingInstruction& instruction;
     const std::vector<int>& positions;
     int sites_processed = 0;
     int next_segment_start = 0;
@@ -59,7 +62,7 @@ public:
     bool is_mismatch = false;
 public:
     void increment_site(const int pos);
-    ThreadingInstructionIterator(ThreadingInstruction& _instruction, const std::vector<int>& _positions);
+    ThreadingInstructionIterator(const ThreadingInstruction& _instruction, const std::vector<int>& _positions);
 };
 
 class ThreadingInstructions {
@@ -72,13 +75,15 @@ public:
     std::vector<std::vector<int>> all_mismatches();
 
     // Constructors
-    ThreadingInstructions(const std::vector<ThreadingInstruction>& _instructions, const std::vector<int>& _positions);
+    ThreadingInstructions(std::vector<ThreadingInstruction> _instructions, std::vector<int> _positions);
     ThreadingInstructions(const std::vector<ViterbiPath>& paths, const int start, const int end, const std::vector<int>& all_positions);
     ThreadingInstructions(const std::vector<std::vector<int>>& starts,
                           const std::vector<std::vector<double>>& tmrcas,
                           const std::vector<std::vector<int>>& targets,
                           const std::vector<std::vector<int>>& mismatches,
                           const std::vector<int>& _positions, int _start, int _end);
+
+    ThreadingInstructions sub_range(const int range_start, const int range_end) const;
 
 public:
     int start = 0;
@@ -88,5 +93,5 @@ public:
     std::vector<int> positions;
     std::vector<ThreadingInstruction> instructions;
 };
-#endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP
 
+#endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP

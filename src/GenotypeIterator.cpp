@@ -16,10 +16,9 @@
 
 #include "GenotypeIterator.hpp"
 
-#include <iostream>
 #include <vector>
 
-GenotypeIterator::GenotypeIterator(ThreadingInstructions& instructions) {
+GenotypeIterator::GenotypeIterator(const ThreadingInstructions& instructions) {
     positions = instructions.positions;
     for (auto& instruction : instructions.instructions) {
         threading_iterators.emplace_back(instruction, positions);
@@ -35,7 +34,7 @@ GenotypeIterator::GenotypeIterator(ThreadingInstructions& instructions) {
     }
 }
 
-std::vector<int>& GenotypeIterator::next_genotype() {
+const std::vector<int>& GenotypeIterator::next_genotype() {
     // Recover the current site
     for (int i = 0; i < num_samples; i++) {
         if (i == 0) {
@@ -49,10 +48,8 @@ std::vector<int>& GenotypeIterator::next_genotype() {
     // Increment the iterators
     current_site++;
     if (current_site < positions.size()) {
-        int j = 0;
         for (auto& iterator : threading_iterators) {
             iterator.increment_site(positions.at(current_site));
-            j++;
         }
         current_position = positions.at(current_site);
     } else {
