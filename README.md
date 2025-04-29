@@ -10,8 +10,8 @@ The user manual for threads can be found [here](https://palamaralab.github.io/so
 
 Clone the threads-arg repo:
 ```sh
-git clone https://github.com/PalamaraLab/TDPBWT.git
-cd TDPBWT
+git clone https://github.com/PalamaraLab/threads.git
+cd threads
 ```
 
 Load development modules:
