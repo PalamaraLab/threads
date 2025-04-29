@@ -46,7 +46,7 @@ jobs:
           pip install --upgrade pip setuptools wheel
           pip install cmake ninja
 
-      - name: install TDPBWT with dev dependencies
+      - name: install threads with dev dependencies
         run: |
           pip install ".[dev]"
 
