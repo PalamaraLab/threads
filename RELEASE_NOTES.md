@@ -9,7 +9,7 @@
 - Upgrade to numpy 2.0 (#39)
 - Consistent SHAPEIT format for regions (#42)
 - Ability to write impute output directly to stdout (#42)
-- Optimised allele age estimation (#51)
+- Allele age estimation and data consistency (#51)
 
 ### Fixed
 
