@@ -53,6 +53,7 @@ def main():
 @click.option("--num_threads", type=int, default=1, help="Number of computational threads to request")
 @click.option("--region", help="Region of genome in chr:start-end format for which ARG is output. The full genotype is still used for inference")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread", default=None, type=int) 
+@click.option("--save_metadata", is_flag=True, default=False, help="If specified, the output will include sample/variant metadata (sample IDs, marker names, allele symbols, etc).")
 @click.option("--out")
 def infer(**kwargs):
     from .infer import threads_infer

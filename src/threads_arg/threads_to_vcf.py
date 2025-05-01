@@ -7,7 +7,7 @@ def threads_to_vcf(threads, samples=None, variants=None):
         try:
             sample_names = load_sample_names(threads)
         except KeyError:
-            raise RuntimeError("Unable to load sample information from threading instructions. This may because files were inferred using an older version of threads. Please provide files with variant information (in .bim/.pvar format) and sample IDs in a file with one sample per line.")
+            raise RuntimeError("Unable to load sample information from threading instructions. This may because the input was inferred using an older version of Threads or without the --save_metadata flag. Please provide files with variant information (in .bim/.pvar format) and sample IDs in a file with one sample per line.")
     else:
         with open(samples, "r") as samplefile:
             sample_names = [l.strip() for l in samplefile]
@@ -16,9 +16,9 @@ def threads_to_vcf(threads, samples=None, variants=None):
         try:
             variant_metadata = load_metadata(threads)
         except KeyError:
-            raise RuntimeError("Unable to load sample information from threading instructions. This may because files were inferred using an older version of threads. Please provide files with variant information (in .bim/.pvar format) and sample IDs in a file with one sample per line.")
+            raise RuntimeError("Unable to load sample information from threading instructions. This may because the input was inferred using an older version of Threads or without the --save_metadata flag. Please provide files with variant information (in .bim/.pvar format) and sample IDs in a file with one sample per line.")
     else:
-        assert variants.endswith(".bim") or variants.endswith(".var")
+        assert variants.endswith(".bim") or variants.endswith(".pvar")
         if variants.endswith(".bim"):
             variant_metadata = read_variant_metadata(variants[:-4] + ".pgen")
         if variants.endswith(".pvar"):
@@ -26,7 +26,8 @@ def threads_to_vcf(threads, samples=None, variants=None):
 
     instructions = load_instructions(threads)
     assert len(sample_names) == len(instructions.all_starts()) // 2
-    assert variant_metadata.shape[0] == len(instructions.positions)
+    if variant_metadata.shape[0] != len(instructions.positions):
+        raise RuntimeError(f"Variant metadata does not match threading instructions, found {variant_metadata.shape[0]} variants with metadata and {len(instructions.positions)} in the threading instructions.")
 
     writer = VCFWriter(instructions)
     writer.set_chrom(variant_metadata["CHROM"].astype(str))
