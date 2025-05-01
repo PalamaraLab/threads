@@ -53,6 +53,7 @@ def main():
 @click.option("--num_threads", type=int, default=1, help="Number of computational threads to request")
 @click.option("--region", help="Region of genome in chr:start-end format for which ARG is output. The full genotype is still used for inference")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread", default=None, type=int) 
+@click.option("--save_metadata", is_flag=True, default=False, help="If specified, the output will include sample/variant metadata (sample IDs, marker names, allele symbols, etc).")
 @click.option("--out")
 def infer(**kwargs):
     from .infer import threads_infer
@@ -128,11 +129,13 @@ def impute(panel, target, map, mut, demography, out, stdout, region, mutation_ra
         goodbye()
 
 @main.command()
-@click.argument("threads", required=True)
-def vcf(threads):
+@click.option("--threads", required=True, help="Path to input .threads file")
+@click.option("--variants", default=None, help="Path to .pvar or .bim file with variant information")
+@click.option("--samples", default=None, help="Path to a file with one sample ID per line")
+def vcf(threads, variants, samples):
     """Convert THREADS to VCF format and print to stdout."""
     from .threads_to_vcf import threads_to_vcf
-    threads_to_vcf(threads)
+    threads_to_vcf(threads, samples=samples, variants=variants)
 
 if __name__ == "__main__":
     main()
