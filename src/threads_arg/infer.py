@@ -162,7 +162,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, out):
+def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, save_metadata, out):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logger.info(f"Starting Threads-infer with the following parameters:")
@@ -178,6 +178,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     logger.info(f"  match_group_interval:  {match_group_interval}")
     logger.info(f"  num_threads:           {num_threads}")
     logger.info(f"  max_sample_batch_size: {max_sample_batch_size}")
+    logger.info(f"  save_metadata:         {save_metadata}")
     logger.info(f"  out:                   {out}")
 
     out_start = None
@@ -195,10 +196,10 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         genetic_positions, physical_positions = make_constant_recombination_from_pgen(pgen, recombination_rate, chrom)
 
     # Load/set CHR, POS, ID, REF, ALT, QUAL, FILTER
-    variant_metadata = read_variant_metadata(pgen)
+    variant_metadata = read_variant_metadata(pgen) if save_metadata else None
 
     # Load sample names
-    sample_names = read_sample_names(pgen)
+    sample_names = read_sample_names(pgen) if save_metadata else None
 
     if fit_to_data and (physical_positions[1:] - physical_positions[:-1] <= 0).any():
         raise RuntimeError("Sites must be strictly increasing when --fit-to-data is set.")
