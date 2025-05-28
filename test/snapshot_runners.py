@@ -21,7 +21,8 @@ def run_infer_snapshot(out_threads_path: Path, fit_to_data: bool):
         fit_to_data=fit_to_data,
         allele_ages=None,
         max_sample_batch_size=None,
-        out=str(out_threads_path)
+        out=str(out_threads_path),
+        save_metadata=False
     )
 
 
