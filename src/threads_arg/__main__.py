@@ -53,21 +53,12 @@ def main():
 @click.option("--num_threads", type=int, default=1, help="Number of computational threads to request")
 @click.option("--region", help="Region of genome in chr:start-end format for which ARG is output. The full genotype is still used for inference")
 @click.option("--max_sample_batch_size", help="Max number of LS processes run simultaneously per thread", default=None, type=int) 
+@click.option("--save_metadata", is_flag=True, default=False, help="If specified, the output will include sample/variant metadata (sample IDs, marker names, allele symbols, etc).")
 @click.option("--out")
 def infer(**kwargs):
+    """Infer an ARG from genotype data"""
     from .infer import threads_infer
     threads_infer(**kwargs)
-    goodbye()
-
-@main.command()
-@click.option("--scaffold", required=True, help="Path to vcf containing phased scaffold of common variants")
-@click.option("--argn", help="Path to reference ARG in .argn format")
-@click.option("--ts", help="Path to reference ARG in .ts format")
-@click.option("--unphased", required=True, help="Path to vcf containing the full target dataset (including scaffold variants)")
-@click.option("--out", required=True, help="Path to phased output vcf")
-def phase(**kwargs):
-    from .phase import threads_phase
-    threads_phase(**kwargs)
     goodbye()
 
 @main.command()
@@ -76,6 +67,7 @@ def phase(**kwargs):
 @click.option("--tsz", default=None, help="Path to an output .tsz file")
 @click.option("--add_mutations", is_flag=True, default=False, help="If passed, mutations are parsimoniously added to the output ARG. This may result in a high number of mutations if the --fit_to_data flag was not used.")
 def convert(**kwargs):
+    """Convert Threads ARGs to ARG-Needle or tskit format"""
     from .convert import threads_convert
     threads_convert(**kwargs)
     goodbye()
@@ -85,6 +77,7 @@ def convert(**kwargs):
 @click.option("--out", required=True, help="Path to output.")
 @click.option("--num_threads", type=int, help="Size of processor pool to process batches", default=None)
 def allele_ages(**kwargs):
+    """Infer allele ages from a Threads ARG"""
     from .allele_ages import estimate_allele_ages
     estimate_allele_ages(**kwargs)
     goodbye()
@@ -97,6 +90,7 @@ def allele_ages(**kwargs):
 @click.option("--region", type=str, help="Region in chr:start-end format (start and end inclusive)")
 @click.option("--num_threads", type=int, help="Number of computational threads to request", default=1)
 def map(**kwargs):
+    """Map genotypes to an ARG in ARG-Needle format"""
     from .map_mutations_to_arg import threads_map_mutations_to_arg
     threads_map_mutations_to_arg(**kwargs)
     goodbye()
@@ -112,6 +106,7 @@ def map(**kwargs):
 @click.option("--stdout", help="Redirect output to stdout (will disable logging)", is_flag=True)
 @click.option("--region", required=True, type=str, help="Region in chr:start-end format (start and end inclusive)")
 def impute(panel, target, map, mut, demography, out, stdout, region, mutation_rate=1.4e-8):
+    """Impute missing genotypes using a reference panel"""
     # --stdout flag is mutually exclusive to --out flag. It is used only here to
     # confirm the user wants to redirect (potentially a lot of data) to stdout.
     # The Impute class does not use this variable, instead 'out' is just None.
@@ -128,11 +123,13 @@ def impute(panel, target, map, mut, demography, out, stdout, region, mutation_ra
         goodbye()
 
 @main.command()
-@click.argument("threads", required=True)
-def vcf(threads):
-    """Convert THREADS to VCF format and print to stdout."""
+@click.option("--threads", required=True, help="Path to input .threads file")
+@click.option("--variants", default=None, help="Path to .pvar or .bim file with variant information")
+@click.option("--samples", default=None, help="Path to a file with one sample ID per line")
+def vcf(threads, variants, samples):
+    """Print genotypes from Threads ARGs to stdout in VCF format"""
     from .threads_to_vcf import threads_to_vcf
-    threads_to_vcf(threads)
+    threads_to_vcf(threads, samples=samples, variants=variants)
 
 if __name__ == "__main__":
     main()
