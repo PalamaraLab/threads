@@ -46,6 +46,7 @@ jobs:
       CIBW_SKIP: cp3*-musllinux_*
       CIBW_ARCHS: ${{ matrix.arch }}
       CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+      CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
       CIBW_BEFORE_ALL: ${{ matrix.before-all }}
       CIBW_BEFORE_BUILD: pip install --upgrade pip setuptools wheel
       CIBW_ENVIRONMENT: ${{ matrix.extra-env }}
