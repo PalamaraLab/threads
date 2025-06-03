@@ -4,7 +4,7 @@
 
 ### Added
 
-- VCF conversion backwards compatability (#76)
+- VCF conversion backwards compatibility (#76)
 - Add Linux ARM platform to Python wheels (#82)
 
 ## [0.2.0] - 2025-04-29
