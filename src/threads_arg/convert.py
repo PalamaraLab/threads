@@ -28,7 +28,7 @@ from .serialization import load_instructions
 logger = logging.getLogger(__name__)
 
 
-def threads_to_arg(instructions, add_mutations=False, noise=0.0):
+def threads_to_arg(instructions, add_mutations=False, noise=0.0, strategy_mask=0):
     """
     Assemble threading instructions into an ARG
     """
@@ -54,9 +54,9 @@ def threads_to_arg(instructions, add_mutations=False, noise=0.0):
             # the caller will increase the amount of noise to offset further and try again.
             arg_starts = [s - arg.offset for s in section_starts]
             if arg_starts[-1] >= arg.end:
-                arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1])
+                arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1], strategy_mask)
             else:
-                arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights)
+                arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights, strategy_mask)
     logger.info(f"Done threading")
 
     if add_mutations:
@@ -73,7 +73,7 @@ def threads_to_arg(instructions, add_mutations=False, noise=0.0):
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_convert(threads, argn, tsz, add_mutations=False):
+def threads_convert(threads, argn, tsz, add_mutations=False, strategy_mask=None):
     """
     Convert input .threads file into .threads or .argn file
     """
@@ -83,6 +83,7 @@ def threads_convert(threads, argn, tsz, add_mutations=False):
     logger.info(f"  argn:          {argn}")
     logger.info(f"  tsz:           {tsz}")
     logger.info(f"  add_mutations: {add_mutations}")
+    logger.info(f"  strategy_mask: {strategy_mask}")
 
     if argn is None and tsz is None:
         logger.info("Nothing to do, quitting.")
@@ -90,15 +91,15 @@ def threads_convert(threads, argn, tsz, add_mutations=False):
     instructions = load_instructions(threads)
     try:
         logger.info("Attempting to convert to arg format...")
-        arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=0.0)
+        arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=0.0, strategy_mask=strategy_mask)
     except:
         # arg_needle_lib does not allow polytomies
         logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
         try:
-            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-5)
+            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-5, strategy_mask=strategy_mask)
         except:# tskit.LibraryError:
             logger.info(f"Conflicting branches, retrying with noise=1e-3...")
-            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-3)
+            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-3, strategy_mask=strategy_mask)
     if argn is not None:
         logger.info(f"Writing to {argn}")
         arg_needle_lib.serialize_arg(arg, argn)
