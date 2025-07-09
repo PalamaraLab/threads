@@ -167,3 +167,84 @@ def load_metadata(threads):
 def load_sample_names(threads):
     f = h5py.File(threads, "r")
     return f["sample_names"][:]
+
+def instructions_to_weft(instructions, out):
+    num_threads = instructions.num_samples
+    num_sites = instructions.num_sites
+    positions = instructions.positions
+    num_samples = num_threads
+
+    all_starts = instructions.all_starts()
+    all_targets = instructions.all_targets()
+    all_mismatches = instructions.all_mismatches()
+
+    weft_data = []
+    init_targets = []
+    for sample_id, (starts, targets) in enumerate(zip(all_starts, all_targets)):
+        if sample_id == 0:
+            init_targets.append(0)
+            continue
+        assert len(starts) == len(targets)
+        assert len(starts) >= 1
+        init_targets.append(targets[0])
+        for start, target in zip(starts[1:], targets[1:]):
+            weft_data.append((start, sample_id, target))
+    weft_data.sort(key=lambda x: x[0])
+    num_wefts = len(weft_data)
+
+    all_mismatches_by_site = [list() for _ in range(num_sites)]
+    for i, mismatches in enumerate(all_mismatches):
+        for mismatch in mismatches:
+            all_mismatches_by_site[mismatch].append(i)
+    
+    init_mismatches = []
+    derived_mismatches_by_site = []
+    for mismatch_haps in all_mismatches_by_site:
+        assert len(mismatch_haps) >= 1
+        smh = sorted(mismatch_haps)
+        init_mismatches.append(smh[0])
+        derived_mismatches_by_site.append(smh[1:])
+    num_derived_mismatches = [len(h) for h in derived_mismatches_by_site]
+    derived_mismatch_indices = [0] + list(np.cumsum(num_derived_mismatches)[:-1])
+    flat_derived_mismatches = [m for ms in derived_mismatches_by_site for m in ms]
+    assert len(init_mismatches) == len(derived_mismatches_by_site) == len(positions) == len(derived_mismatch_indices)
+
+    num_hets = sum(num_derived_mismatches)
+
+    f = h5py.File(out, "w")
+    f.attrs['datetime_created'] = datetime.now().isoformat()
+    compression_opts = 9
+    dset_wefts = f.create_dataset("wefts", (num_wefts, 3), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+    dset_sites = f.create_dataset("sites", (num_sites, 3), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+    dset_targets = f.create_dataset("init_targets", (num_samples), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+    dset_hets = f.create_dataset("hets", (num_hets), dtype=int, compression='gzip',
+                                    compression_opts=compression_opts)
+
+    dset_wefts[:] = np.array(weft_data, dtype=int)
+    dset_sites[:, 0] = positions
+    dset_sites[:, 1] = init_mismatches
+    dset_sites[:, 2] = derived_mismatch_indices
+    dset_targets[:] = init_targets
+    dset_hets[:] = flat_derived_mismatches
+
+    f.close()
+
+def load_weft(weftfile):
+    from threads_arg import Shuttle
+    f = h5py.File(weftfile, "r")
+
+    weft_starts, weft_ids, weft_targets = f["wefts"][:, 0], f["wefts"][:, 1], f["wefts"][:, 2]
+    positions, init_mismatches, derived_mismatch_indices = f["sites"][:, 0], f["sites"][:, 1], f["sites"][:, 2]
+    init_targets = f["init_targets"][:]
+    flat_hets  = f["hets"][:]
+    derived_hets = []
+    for i, idx in enumerate(derived_mismatch_indices):
+        if i == len(derived_mismatch_indices) - 1:
+            derived_hets.append(set(flat_hets[idx:]))
+        else:
+            next_idx = derived_mismatch_indices[i + 1]
+            derived_hets.append(set(flat_hets[idx:next_idx]))
+    return Shuttle(init_targets, init_mismatches, derived_hets, positions, weft_ids, weft_targets, weft_starts)

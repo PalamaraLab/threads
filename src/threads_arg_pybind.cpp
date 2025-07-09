@@ -20,9 +20,11 @@
 #include "AlleleAges.hpp"
 #include "GenotypeIterator.hpp"
 #include "VCFWriter.hpp"
+#include "Shuttle.hpp"
 #include "pybind_utils.hpp"
 
 #include <vector>
+#include <pybind11/eigen.h>
 
 namespace py = pybind11;
 
@@ -173,4 +175,29 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("set_filter", &VCFWriter::set_filter)
       .def("set_sample_names", &VCFWriter::set_sample_names)
       .def("write_vcf", &VCFWriter::write_vcf);
+
+  py::class_<Shuttle>(m, "Shuttle")
+      .def(py::init<std::vector<int>,
+                    std::vector<int>,
+                    std::vector<std::unordered_set<int>>&,
+                    std::vector<int>&,
+                    const std::vector<int>&,
+                    const std::vector<int>&,
+                    const std::vector<int>&>(), "initialize",
+            py::arg("init_targets"),
+            py::arg("_site_first_carriers"),
+            py::arg("_site_hets"),
+            py::arg("_site_positions"),
+            py::arg("weft_ids"),
+            py::arg("weft_targets"),
+            py::arg("weft_positions"))
+      .def("proceed_to_next_site", &Shuttle::proceed_to_next_site)
+      .def("GU_mult", &Shuttle::GU_mult)
+      .def_readonly("current_carriers", &Shuttle::current_carriers)
+      .def_readonly("site_positions", &Shuttle::site_positions)
+      .def_readonly("num_sites", &Shuttle::num_sites)
+      .def_readonly("num_samples", &Shuttle::num_samples)
+      .def_readonly("descendants", &Shuttle::descendants)
+      .def_readonly("targets", &Shuttle::targets)
+      .def_readonly("current_site", &Shuttle::current_site);
 }

@@ -34,6 +34,7 @@ set(threads_arg_src
     AlleleAges.cpp
     GenotypeIterator.cpp
     VCFWriter.cpp
+    Shuttle.cpp
 )
 
 set(threads_arg_hdr
@@ -52,6 +53,7 @@ set(threads_arg_hdr
     AlleleAges.hpp
     GenotypeIterator.hpp
     VCFWriter.hpp
+    Shuttle.hpp
 )
 
 add_library(threads_arg STATIC
