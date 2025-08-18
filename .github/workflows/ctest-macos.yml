@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: checkout repo & submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: install system packages
         run: brew install boost
