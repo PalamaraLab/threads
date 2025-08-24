@@ -46,6 +46,7 @@ def main():
 @click.option("--demography", required=True, help="Path to input genotype")
 @click.option("--mode", required=True, type=click.Choice(['array', 'wgs']), default="wgs", help="Inference mode (wgs or array)")
 @click.option("--fit_to_data", is_flag=True, default=False, help="If specified, Threads performs a post-processing step to ensure the inferred ARG contains an edge matching each input mutation.")
+@click.option("--normalize", is_flag=True, default=False, help="If specified, Threads will normalize output to fit with the input demography.")
 @click.option("--allele_ages", default=None, help="Allele ages used for post-processing with the --fit_to_data flag, otherwise ignored. If not specified, allele ages are inferred automatically.")
 @click.option("--query_interval", type=float, default=0.01, help="Hyperparameter for the preliminary haplotype matching in cM")
 @click.option("--match_group_interval", type=float, default=0.5, help="Hyperparameter for the preliminary haplotype matching in cM")

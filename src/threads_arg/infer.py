@@ -51,6 +51,8 @@ from .serialization import serialize_instructions
 
 from .allele_ages import estimate_ages
 
+from .normalization import Normalizer
+
 logger = logging.getLogger(__name__)
 
 
@@ -164,7 +166,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, save_metadata, out):
+def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_to_data, normalize, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, save_metadata, out):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logger.info(f"Starting Threads-infer with the following parameters:")
@@ -176,6 +178,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     logger.info(f"  mutation_rate:         {mutation_rate}")
     logger.info(f"  allele_ages:           {allele_ages}")
     logger.info(f"  fit_to_data:           {fit_to_data}")
+    logger.info(f"  normalize:             {normalize}")
     logger.info(f"  query_interval:        {query_interval}")
     logger.info(f"  match_group_interval:  {match_group_interval}")
     logger.info(f"  num_threads:           {num_threads}")
@@ -308,6 +311,11 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     region_start = physical_positions[0] if out_start is None else max(physical_positions[0], out_start)
     region_end = physical_positions[-1] + 1 if out_end is None else min(physical_positions[-1] + 1, out_end + 1)
     instructions = ThreadingInstructions(paths, int(region_start), int(region_end), physical_positions.astype(int))
+
+    if normalize:
+        logger.info("Applying normalization")
+        normalizer = Normalizer(demography, 2 * num_samples)
+        instructions = normalizer.normalize(instructions)
 
     if fit_to_data:
         logger.info("Starting data-consistency post-processing")
