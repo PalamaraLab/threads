@@ -35,10 +35,13 @@ class Normalizer:
     """
     def __init__(self, demography_file, num_samples):
         self.num_samples = num_samples
-        self.demography_file = demography_file
         self.demography = self.read_demography(demography_file)
 
     def read_demography(self, demography_file):
+        """
+        Read the input demography file into an msprime.Demography object.
+        The input demography is assumed to be haploid.
+        """
         df = pd.read_table(demography_file, header=None)
         df.columns  = ['GEN', 'NE']
         demography = msprime.Demography()
@@ -50,6 +53,9 @@ class Normalizer:
         return demography
 
     def simulation(self, length, random_seed=10):
+        """
+        Return a single, simulated coalescence tree
+        """
         ts = msprime.sim_ancestry(
             samples={"A": self.num_samples // 2},  # again, diploid
             demography=self.demography,
@@ -59,41 +65,48 @@ class Normalizer:
         return ts
 
     def normalize(self, threading_instructions, num_seeds=1000, start_seed=1):
+        """
+        Return a new ThreadingInstructions object, normalized to the specified demography.
+        This is achieved by obtaining an empirical coalescence time distribution
+        through msprime simulations, and redistributing threading instructions
+        coalescence times to match the empirical distribution. This code is adapted from 
+        https://github.com/PalamaraLab/arg_needle/blob/main/src/inference.py
+        """
         num_samples = threading_instructions.num_samples
         assert num_samples == self.num_samples
         
         heights_to_span = {}
         positions = threading_instructions.positions
 
+        # Obtain the empirical distribution of threading instruction coalescence times
+        # by weighing TMRCAs by their span
         for start_vec, tmrca_vec in zip(threading_instructions.all_starts(), threading_instructions.all_tmrcas()):
             assert len(start_vec) == len(tmrca_vec)
             for i, (start, tmrca) in enumerate(zip(start_vec, tmrca_vec)):
-                try:
-                    span = start_vec[i + 1] - start
-                except IndexError:
+                if i == len(start_vec) - 1:
                     span = positions[-1] - start
+                else:
+                    span = start_vec[i + 1] - start
                 heights_to_span[tmrca] = heights_to_span[tmrca] + span if tmrca in heights_to_span else span
+        sorted_spans = np.array(sorted(heights_to_span.items()))
 
-        numpy_stuff = np.array(sorted(heights_to_span.items()))
-
-        cumsum = np.cumsum(numpy_stuff[:, 1])
-        quantiles = (cumsum - 0.5 * numpy_stuff[:, 1]) / cumsum[-1]
-
+        # Compute coalescence time quantiles
+        cumsum = np.cumsum(sorted_spans[:, 1])
+        quantiles = (cumsum - 0.5 * sorted_spans[:, 1]) / cumsum[-1]
+        
+        # Perform simulations to obtain an empirical ground-truth distribution
         node_times = []
-
         for seed_offset in range(num_seeds):
             seed = seed_offset + start_seed
 
             # 1e6 doesn't matter here as rho = 0
             simulation = self.simulation(1e6, random_seed=seed)
-            highest = 0
             for node in simulation.nodes():
                 if node.time > 0:
                     node_times.append(node.time)
-                    highest = max(node.time, highest)
 
+        # Compute ground-truth quantiles
         node_times.sort()
-
         node_times = np.array(node_times)
         node_times_pad = np.zeros(len(node_times) + 2)
         node_times_pad[1:-1] = np.array(node_times)
@@ -101,9 +114,12 @@ class Normalizer:
         node_times_pad[-1] = node_times[-1] * 1.05  # 1.05 is tunable, as long as it's > 1
         sim_quantiles = np.linspace(0, 1, len(node_times_pad))
 
+        # Interpolate threading instruction coalescence times to ground-truth 
+        # coalescence times by quantile-quantile matching
         corrected = np.interp(quantiles, sim_quantiles, node_times_pad)
-        correction_dict = dict(zip(numpy_stuff[:, 0], corrected))
+        correction_dict = dict(zip(sorted_spans[:, 0], corrected))
 
+        # Map old tmrcas into a demography-adjusted tmrca list
         new_tmrcas = []
         for tmrca_vec in threading_instructions.all_tmrcas():
             new_tmrca_vec = []
