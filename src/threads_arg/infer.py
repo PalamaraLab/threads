@@ -166,7 +166,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_to_data, normalize, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, save_metadata, out):
+def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_to_data, allele_ages, query_interval, match_group_interval, mode, num_threads, region, max_sample_batch_size, save_metadata, out, normalize=False):
     """Infer an ARG from genotype data"""
     start_time = time.time()
     logger.info(f"Starting Threads-infer with the following parameters:")
