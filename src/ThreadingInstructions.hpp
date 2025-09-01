@@ -85,6 +85,10 @@ public:
 
     ThreadingInstructions sub_range(const int range_start, const int range_end) const;
 
+    // Common operations
+    std::vector<double> left_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
+    std::vector<double> right_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
+
 public:
     int start = 0;
     int end = 0;

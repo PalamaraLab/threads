@@ -140,7 +140,8 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("sub_range", &ThreadingInstructions::sub_range)
       .def(py::pickle(
            &threading_instructions_get_state,
-           &threading_instructions_set_state));
+           &threading_instructions_set_state))
+      .def("left_multiply", &ThreadingInstructions::left_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false);
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
