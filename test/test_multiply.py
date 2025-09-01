@@ -71,6 +71,5 @@ def test_left_multiply():
     assert np.allclose(expected_norm, found_norm)
     found_dip = instructions.left_multiply(x_dip, diploid=True)
     assert np.allclose(expected_dip, found_dip)
-    breakpoint()
     found_dip_norm = instructions.left_multiply(x_dip, normalize=True, diploid=True)
     assert np.allclose(expected_dip_norm, found_dip_norm)
