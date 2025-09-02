@@ -73,3 +73,45 @@ def test_left_multiply():
     assert np.allclose(expected_dip, found_dip)
     found_dip_norm = instructions.left_multiply(x_dip, normalize=True, diploid=True)
     assert np.allclose(expected_dip_norm, found_dip_norm)
+
+def test_right_multiply():
+    # Read ground truth genotypes
+    pgen_path = str(TEST_DATA_DIR / "panel.pgen")
+    reader = pgenlib.PgenReader(str(pgen_path).encode())
+    expected_num_variants = reader.get_variant_ct()
+    num_samples = reader.get_raw_sample_ct()
+    expected_gt = np.empty((expected_num_variants, 2 * num_samples), dtype=np.int32)
+    reader.read_alleles_range(0, expected_num_variants, expected_gt)
+    gt_matrix = expected_gt.transpose()
+    gt_matrix_dip = gt_matrix[::2] + gt_matrix[1::2]
+    gt_matrix_norm = _col_normalize(gt_matrix)
+    gt_matrix_dip_norm = _col_normalize(gt_matrix_dip)
+
+    # Read threading instructions
+    threads_path = str(TEST_DATA_DIR / "expected_infer_snapshot.threads")
+    instructions = load_instructions(threads_path)
+
+    # Random vector to multiply with
+    rng = np.random.default_rng(130222)
+    x = rng.normal(0, 1, expected_num_variants)
+    x_wrong_length = rng.normal(0, 1, expected_num_variants + 1)
+
+    # Make sure length check is performed
+    with pytest.raises(RuntimeError):
+        instructions.left_multiply(x_wrong_length)
+
+    # Do normal right-multiplication
+    expected = gt_matrix @ x
+    expected_norm = gt_matrix_norm @ x
+    expected_dip = gt_matrix_dip @ x
+    expected_dip_norm = gt_matrix_dip_norm @ x
+
+    # Do threads right-multiplication and confirm results are correct
+    found = instructions.right_multiply(x)
+    assert np.allclose(expected, found)
+    found_norm = instructions.right_multiply(x, normalize=True)
+    assert np.allclose(expected_norm, found_norm)
+    found_dip = instructions.right_multiply(x, diploid=True)
+    assert np.allclose(expected_dip, found_dip)
+    found_dip_norm = instructions.right_multiply(x, normalize=True, diploid=True)
+    assert np.allclose(expected_dip_norm, found_dip_norm)
