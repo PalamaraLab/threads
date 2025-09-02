@@ -261,6 +261,7 @@ ThreadingInstructions ThreadingInstructions::sub_range(const int range_start, co
         std::move(range_positions)
     };
 }
+
 std::vector<double> ThreadingInstructions::left_multiply(const std::vector<double>& x, bool diploid, bool normalize) {
     // Left-multiplication of the genotype matrix by a vector of doubles
 
@@ -332,4 +333,97 @@ std::vector<double> ThreadingInstructions::left_multiply(const std::vector<doubl
         site_counter++;
     }
     return out;
+}
+
+std::vector<double> ThreadingInstructions::right_multiply(const std::vector<double>& x, bool diploid, bool normalize) {
+    // Right-multiplication of the genotype matrix by a vector of doubles
+
+    // Check input vector lengths are correct
+    if (x.size() != num_sites) {
+        std::ostringstream oss;
+        oss << "Input vector must have length " << num_samples / 2 << ".";
+        throw std::runtime_error(oss.str());
+    }
+
+    GenotypeIterator gi = GenotypeIterator(*this);
+    std::size_t site_counter = 0;
+    if (diploid) {
+        // Initialize output
+        std::vector<double> out(num_samples / 2, 0.0);
+        if (normalize) {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+
+                // If we want to normalize, we need the mean and standard deviation of g.
+                double ac = 0.0;
+                for (auto a : g) {
+                    ac += a;
+                }
+
+                // We do the diploid standard deviation by hand
+                const double mu = 2.0 * ac / num_samples;
+                double sample_var = 0.0;
+                for (std::size_t i=0; i < out.size(); i++) {
+                    int h = g.at(2 * i) + g.at(2 * i + 1);
+                    double d = h - mu;
+                    sample_var += d * d;
+                }
+                sample_var /= (num_samples / 2);
+                const double std = std::sqrt(sample_var);
+
+                const double w = x.at(site_counter) / std;
+                for (std::size_t i=0; i < out.size(); i++) {
+                    const int h = g.at(2 * i) + g.at(2 * i + 1);
+                    out[i] += w * (h - mu);
+                }
+                site_counter++;
+            }
+        } else {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+                const double w = x.at(site_counter);
+                for (std::size_t i=0; i < out.size(); i++) {
+                    const int h = g.at(2 * i) + g.at(2 * i + 1);
+                    out[i] += w * h;
+                }
+                site_counter++;
+            }
+        }
+        return out;
+    } else {
+        // Initialize output
+        std::vector<double> out(num_samples, 0.0);
+        if (normalize) {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+                double ac = 0.0;
+                for (auto a : g) {
+                    ac += a;
+                }
+
+                // Normalization constants
+                double mu = ac / num_samples;
+                double std = std::sqrt(mu * (1 - mu));
+                const double w = x.at(site_counter) / std;
+                for (std::size_t i=0; i < out.size(); i++) {
+                    out[i] += w * (g.at(i) - mu);
+                }
+                site_counter++;
+            }
+        } else {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+                const double w = x.at(site_counter);
+                for (std::size_t i=0; i < out.size(); i++) {
+                    out[i] += w * g.at(i);
+                }
+                site_counter++;
+            }
+        }
+        return out;
+    }
 }
