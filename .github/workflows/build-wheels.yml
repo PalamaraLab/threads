@@ -33,12 +33,12 @@ jobs:
           - os: macos-13
             arch: x86_64
             py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
-            before-all: brew install cmake ninja boost
+            before-all: brew install ninja boost
             extra-env: CC="$(brew --prefix llvm@15)/bin/clang" CXX="$(brew --prefix llvm@15)/bin/clang++" HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
           - os: macos-14
             arch: arm64
             py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
-            before-all: brew install cmake ninja boost
+            before-all: brew install ninja boost
             extra-env: CC="$(brew --prefix llvm@15)/bin/clang" CXX="$(brew --prefix llvm@15)/bin/clang++" HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
 
     env:
