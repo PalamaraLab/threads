@@ -303,7 +303,7 @@ std::vector<double> ThreadingInstructions::left_multiply(const std::vector<doubl
                 double mu = 2.0 * ac / num_samples;
                 double sample_var = 0.0;
                 for (std::size_t i=0; i < x.size(); i++) {
-                    int h = g.at(2 * i) + g.at(2 * i + 1);
+                    int h = g[2 * i] + g[2 * i + 1];
                     double d = h - mu;
                     sample_var += d * d;
                 }
@@ -311,22 +311,22 @@ std::vector<double> ThreadingInstructions::left_multiply(const std::vector<doubl
 
                 double std = std::sqrt(sample_var);
                 for (std::size_t i=0; i < x.size(); i++) {
-                    int h = g.at(2 * i) + g.at(2 * i + 1);
-                    double w = x.at(i);
+                    int h = g[2 * i] + g[2 * i + 1];
+                    double w = x[i];
                     entry += w * (h - mu) / std;
                 }
             } else {
                 double mu = ac / num_samples;
                 double std = std::sqrt(mu * (1 - mu));
                 for (std::size_t i=0; i < g.size(); i++) {
-                    double w = x.at(i);
-                    entry += w * (g.at(i) - mu) / std;
+                    double w = x[i];
+                    entry += w * (g[i] - mu) / std;
                 }
             }
         } else {
             for (std::size_t i=0; i < g.size(); i++) {
-                double w = diploid ? x.at(i / 2) : x.at(i);
-                entry += w * g.at(i);
+                double w = diploid ? x[i / 2] : x[i];
+                entry += w * g[i];
             }
         }
         out[site_counter] = entry;
@@ -365,16 +365,16 @@ std::vector<double> ThreadingInstructions::right_multiply(const std::vector<doub
                 const double mu = 2.0 * ac / num_samples;
                 double sample_var = 0.0;
                 for (std::size_t i=0; i < out.size(); i++) {
-                    int h = g.at(2 * i) + g.at(2 * i + 1);
+                    int h = g[2 * i] + g[2 * i + 1];
                     double d = h - mu;
                     sample_var += d * d;
                 }
                 sample_var /= (num_samples / 2);
                 const double std = std::sqrt(sample_var);
 
-                const double w = x.at(site_counter) / std;
+                const double w = x[site_counter] / std;
                 for (std::size_t i=0; i < out.size(); i++) {
-                    const int h = g.at(2 * i) + g.at(2 * i + 1);
+                    const int h = g[2 * i] + g[2 * i + 1];
                     out[i] += w * (h - mu);
                 }
                 site_counter++;
@@ -383,9 +383,9 @@ std::vector<double> ThreadingInstructions::right_multiply(const std::vector<doub
             while (gi.has_next_genotype()) {
                 // Fetch the next genotype
                 const std::vector<int>& g = gi.next_genotype();
-                const double w = x.at(site_counter);
+                const double w = x[site_counter];
                 for (std::size_t i=0; i < out.size(); i++) {
-                    const int h = g.at(2 * i) + g.at(2 * i + 1);
+                    const int h = g[2 * i] + g[2 * i + 1];
                     out[i] += w * h;
                 }
                 site_counter++;
@@ -407,9 +407,9 @@ std::vector<double> ThreadingInstructions::right_multiply(const std::vector<doub
                 // Normalization constants
                 double mu = ac / num_samples;
                 double std = std::sqrt(mu * (1 - mu));
-                const double w = x.at(site_counter) / std;
+                const double w = x[site_counter] / std;
                 for (std::size_t i=0; i < out.size(); i++) {
-                    out[i] += w * (g.at(i) - mu);
+                    out[i] += w * (g[i] - mu);
                 }
                 site_counter++;
             }
@@ -417,9 +417,9 @@ std::vector<double> ThreadingInstructions::right_multiply(const std::vector<doub
             while (gi.has_next_genotype()) {
                 // Fetch the next genotype
                 const std::vector<int>& g = gi.next_genotype();
-                const double w = x.at(site_counter);
+                const double w = x[site_counter];
                 for (std::size_t i=0; i < out.size(); i++) {
-                    out[i] += w * g.at(i);
+                    out[i] += w * g[i];
                 }
                 site_counter++;
             }
