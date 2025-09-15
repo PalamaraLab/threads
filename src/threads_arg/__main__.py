@@ -66,7 +66,8 @@ def infer(**kwargs):
 @click.option("--argn", default=None, help="Path to an output .argn file")
 @click.option("--tsz", default=None, help="Path to an output .tsz file")
 @click.option("--add_mutations", is_flag=True, default=False, help="If passed, mutations are parsimoniously added to the output ARG. This may result in a high number of mutations if the --fit_to_data flag was not used.")
-@click.option("--strategy_mask", default=0, help="FIXME: experimental bitmask for polytomy behaviour")
+@click.option("--polytomy_threshold", default=None, help="If specified, allow equal heights in ARG then collapse connected edges within given height threshold")
+@click.option("--defragment", is_flag=True, default=False, help="Merge adjacent edges that share same parent and child node")
 def convert(**kwargs):
     """Convert Threads ARGs to ARG-Needle or tskit format"""
     from .convert import threads_convert

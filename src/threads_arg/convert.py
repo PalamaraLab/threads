@@ -28,7 +28,7 @@ from .serialization import load_instructions
 logger = logging.getLogger(__name__)
 
 
-def threads_to_arg(instructions, add_mutations=False, noise=0.0, strategy_mask=0):
+def threads_to_arg(instructions, add_mutations=False, noise=0.0, polytomy_threshold=None, defragment=False):
     """
     Assemble threading instructions into an ARG
     """
@@ -41,23 +41,40 @@ def threads_to_arg(instructions, add_mutations=False, noise=0.0, strategy_mask=0
 
     rng = np.random.default_rng(seed=1234)
 
+    # If polytomies are not allowed, fall back to original code that throws an error if matching heights found
+    allow_polytomy = polytomy_threshold is not None
+
     # How this should work:
     for i, (section_starts, thread_ids, thread_heights) in enumerate(zip(instructions.all_starts(), instructions.all_targets(), instructions.all_tmrcas())):
         if i == N:
             break
         arg.add_sample(str(i))
         if i > 0:
+            # If polytomy is not allowed, the ARG will throw exception if there is a collision in heights.
+            # In this instance, the caller will increase the amount of noise to offset further and try again.
             thread_heights = np.array(thread_heights)
-            thread_heights += thread_heights * rng.normal(0.0, noise, len(thread_heights))
+            if not allow_polytomy:
+                thread_heights += thread_heights * rng.normal(0.0, noise, len(thread_heights))
 
-            # arg will throw exception if there is a collision in heights. In this instance,
-            # the caller will increase the amount of noise to offset further and try again.
             arg_starts = [s - arg.offset for s in section_starts]
             if arg_starts[-1] >= arg.end:
-                arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1], strategy_mask)
+                arg.thread_sample([s - arg.offset for s in section_starts[:-1]], thread_ids[:-1], thread_heights[:-1], polytomy_threshold)
             else:
-                arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights, strategy_mask)
+                arg.thread_sample([s - arg.offset for s in section_starts], thread_ids, thread_heights, polytomy_threshold)
     logger.info(f"Done threading")
+
+    # Matching heights during threading cause stacked edges with same height as parent, these are collapsed to
+    # group together at the heighest parent. Node count reported as measure of how much this has changed ARG
+    if allow_polytomy:
+        logger.info(f"Grouping polytomies within height threshold {polytomy_threshold} (current node count {arg.num_nodes()})...")
+        arg.collapse_polytomies(polytomy_threshold)
+        logger.info(f"Node count after grouping polytomies {arg.num_nodes()}")
+
+    # Threading can cause adjacent edges that have same parent and child nodes, this is the most
+    # simple form of fragmentation and can be fixed by merging adjacent spans if found.
+    if defragment:
+        logger.info(f"Fixing fragmentation (currently {arg.fragmentation_count()} edges)...")
+        arg.fix_fragmentation()
 
     if add_mutations:
         arg.populate_children_and_roots()
@@ -73,7 +90,7 @@ def threads_to_arg(instructions, add_mutations=False, noise=0.0, strategy_mask=0
 
 
 # Implementation is separated from Click entrypoint for use in tests
-def threads_convert(threads, argn, tsz, add_mutations=False, strategy_mask=None):
+def threads_convert(threads, argn, tsz, add_mutations=False, polytomy_threshold=None, defragment=False):
     """
     Convert input .threads file into .threads or .argn file
     """
@@ -83,23 +100,32 @@ def threads_convert(threads, argn, tsz, add_mutations=False, strategy_mask=None)
     logger.info(f"  argn:          {argn}")
     logger.info(f"  tsz:           {tsz}")
     logger.info(f"  add_mutations: {add_mutations}")
-    logger.info(f"  strategy_mask: {strategy_mask}")
 
     if argn is None and tsz is None:
         logger.info("Nothing to do, quitting.")
         sys.exit(0)
     instructions = load_instructions(threads)
-    try:
-        logger.info("Attempting to convert to arg format...")
-        arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=0.0, strategy_mask=strategy_mask)
-    except:
-        # arg_needle_lib does not allow polytomies
-        logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
+    if polytomy_threshold is None:
         try:
-            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-5, strategy_mask=strategy_mask)
-        except:# tskit.LibraryError:
-            logger.info(f"Conflicting branches, retrying with noise=1e-3...")
-            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-3, strategy_mask=strategy_mask)
+            logger.info("Attempting to convert to arg format...")
+            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=0.0, defragment=defragment)
+        except:
+            # arg_needle_lib does not allow polytomies
+            logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
+            try:
+                arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-5, defragment=defragment)
+            except:# tskit.LibraryError:
+                logger.info(f"Conflicting branches, retrying with noise=1e-3...")
+                arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-3, defragment=defragment)
+    else:
+        logger.info(f"Convert to arg format, allowing for polytomies...")
+        arg = threads_to_arg(
+            instructions,
+            add_mutations=add_mutations,
+            polytomy_threshold=float(polytomy_threshold),
+            defragment=defragment
+        )
+
     if argn is not None:
         logger.info(f"Writing to {argn}")
         arg_needle_lib.serialize_arg(arg, argn)
