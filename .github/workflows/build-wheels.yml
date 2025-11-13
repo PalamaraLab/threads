@@ -75,7 +75,7 @@ jobs:
 
     steps:
       - name: Download wheels from cloud runners
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           pattern: wheels-cloud-*
           merge-multiple: true
