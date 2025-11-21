@@ -1,5 +1,11 @@
 # threads Release Notes
 
+## [Unreleased]
+
+### Changed
+
+- Build wheels on macOS 14 for arm64 and macOS 15 for x86_64 (#108)
+
 ## [0.2.1] - 2025-06-03
 
 ### Added
