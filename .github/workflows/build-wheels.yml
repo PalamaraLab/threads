@@ -22,27 +22,33 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: auto64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp310-*
             before-all: dnf -y install cmake ninja-build boost-devel
             extra-env: ""
           - os: ubuntu-24.04-arm
             arch: aarch64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp311-*
             before-all: dnf -y install cmake ninja-build boost-devel
             extra-env: ""
-          - os: macos-13
+          - os: macos-15-intel
             arch: x86_64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp312-*
             before-all: brew install ninja boost
-            extra-env: CC="$(brew --prefix llvm@15)/bin/clang" CXX="$(brew --prefix llvm@15)/bin/clang++" HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+            extra-env: CC=clang CXX=clang++
+            mdt: 15.0
           - os: macos-14
             arch: arm64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp313-*
             before-all: brew install ninja boost
-            extra-env: CC="$(brew --prefix llvm@15)/bin/clang" CXX="$(brew --prefix llvm@15)/bin/clang++" HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+            extra-env: CC=clang CXX=clang++
+            mdt: 14.0
 
     env:
-      CIBW_BUILD: ${{ matrix.py-vers }}
+      CIBW_BUILD: ${{ github.event_name != 'pull_request' && matrix.py-vers-full || matrix.py-vers-pr }}
       CIBW_SKIP: cp3*-musllinux_*
       CIBW_ARCHS: ${{ matrix.arch }}
       CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
@@ -50,18 +56,18 @@ jobs:
       CIBW_BEFORE_ALL: ${{ matrix.before-all }}
       CIBW_BEFORE_BUILD: pip install --upgrade pip setuptools wheel
       CIBW_ENVIRONMENT: ${{ matrix.extra-env }}
-      MACOSX_DEPLOYMENT_TARGET: 10.15
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.mdt }}
 
     steps:
       - name: checkout repo & submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.23.3
+        uses: pypa/cibuildwheel@v3.3.0
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: wheels-cloud-${{ matrix.os }}
           path: ./wheelhouse/*.whl
@@ -75,13 +81,13 @@ jobs:
 
     steps:
       - name: Download wheels from cloud runners
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           pattern: wheels-cloud-*
           merge-multiple: true
           path: wheels
 
-      - uses: pypa/gh-action-pypi-publish@v1.12.4
+      - uses: pypa/gh-action-pypi-publish@v1.13.0
         with:
           user: __token__
           password: ${{ secrets.PYPI_TOKEN }}
