@@ -15,7 +15,9 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ThreadingInstructions.hpp"
+#include "GenotypeIterator.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -258,4 +260,170 @@ ThreadingInstructions ThreadingInstructions::sub_range(const int range_start, co
         std::move(range_instructions),
         std::move(range_positions)
     };
+}
+
+std::vector<double> ThreadingInstructions::left_multiply(const std::vector<double>& x, bool diploid, bool normalize) {
+    // Left-multiplication of the genotype matrix by a vector of doubles
+
+    // Check input vector lengths are correct
+    if (diploid) {
+        if (x.size() != num_samples / 2) {
+            std::ostringstream oss;
+            oss << "Input vector must have length " << num_samples / 2 << ".";
+            throw std::runtime_error(oss.str());
+        }
+    } else {
+        if (x.size() != num_samples) {
+            std::ostringstream oss;
+            oss << "Input vector must have length " << num_samples << ".";
+            throw std::runtime_error(oss.str());
+        }
+    }
+
+    // Initialize genotype traversal
+    GenotypeIterator gi = GenotypeIterator(*this);
+    std::size_t site_counter = 0;
+    std::vector<double> out(num_sites);
+
+    while (gi.has_next_genotype()) {
+        // Fetch the next genotype
+        const std::vector<int>& g = gi.next_genotype();
+
+        // Initialize the next entry
+        double entry = 0.0;
+
+        if (normalize) {
+            // If we want to normalize, we need the mean and standard deviation of g.
+            double ac = 0.0;
+            for (auto a : g) {
+                ac += a;
+            }
+            if (diploid) {
+                // We do the diploid standard deviation by hand
+                double mu = 2.0 * ac / num_samples;
+                double sample_var = 0.0;
+                for (std::size_t i=0; i < x.size(); i++) {
+                    int h = g[2 * i] + g[2 * i + 1];
+                    double d = h - mu;
+                    sample_var += d * d;
+                }
+                sample_var /= (num_samples / 2);
+
+                double std = std::sqrt(sample_var);
+                for (std::size_t i=0; i < x.size(); i++) {
+                    int h = g[2 * i] + g[2 * i + 1];
+                    double w = x[i];
+                    entry += w * (h - mu) / std;
+                }
+            } else {
+                double mu = ac / num_samples;
+                double std = std::sqrt(mu * (1 - mu));
+                for (std::size_t i=0; i < g.size(); i++) {
+                    double w = x[i];
+                    entry += w * (g[i] - mu) / std;
+                }
+            }
+        } else {
+            for (std::size_t i=0; i < g.size(); i++) {
+                double w = diploid ? x[i / 2] : x[i];
+                entry += w * g[i];
+            }
+        }
+        out[site_counter] = entry;
+        site_counter++;
+    }
+    return out;
+}
+
+std::vector<double> ThreadingInstructions::right_multiply(const std::vector<double>& x, bool diploid, bool normalize) {
+    // Right-multiplication of the genotype matrix by a vector of doubles
+
+    // Check input vector lengths are correct
+    if (x.size() != num_sites) {
+        std::ostringstream oss;
+        oss << "Input vector must have length " << num_samples / 2 << ".";
+        throw std::runtime_error(oss.str());
+    }
+
+    GenotypeIterator gi = GenotypeIterator(*this);
+    std::size_t site_counter = 0;
+    if (diploid) {
+        // Initialize output
+        std::vector<double> out(num_samples / 2, 0.0);
+        if (normalize) {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+
+                // If we want to normalize, we need the mean and standard deviation of g.
+                double ac = 0.0;
+                for (auto a : g) {
+                    ac += a;
+                }
+
+                // We do the diploid standard deviation by hand
+                const double mu = 2.0 * ac / num_samples;
+                double sample_var = 0.0;
+                for (std::size_t i=0; i < out.size(); i++) {
+                    int h = g[2 * i] + g[2 * i + 1];
+                    double d = h - mu;
+                    sample_var += d * d;
+                }
+                sample_var /= (num_samples / 2);
+                const double std = std::sqrt(sample_var);
+
+                const double w = x[site_counter] / std;
+                for (std::size_t i=0; i < out.size(); i++) {
+                    const int h = g[2 * i] + g[2 * i + 1];
+                    out[i] += w * (h - mu);
+                }
+                site_counter++;
+            }
+        } else {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+                const double w = x[site_counter];
+                for (std::size_t i=0; i < out.size(); i++) {
+                    const int h = g[2 * i] + g[2 * i + 1];
+                    out[i] += w * h;
+                }
+                site_counter++;
+            }
+        }
+        return out;
+    } else {
+        // Initialize output
+        std::vector<double> out(num_samples, 0.0);
+        if (normalize) {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+                double ac = 0.0;
+                for (auto a : g) {
+                    ac += a;
+                }
+
+                // Normalization constants
+                double mu = ac / num_samples;
+                double std = std::sqrt(mu * (1 - mu));
+                const double w = x[site_counter] / std;
+                for (std::size_t i=0; i < out.size(); i++) {
+                    out[i] += w * (g[i] - mu);
+                }
+                site_counter++;
+            }
+        } else {
+            while (gi.has_next_genotype()) {
+                // Fetch the next genotype
+                const std::vector<int>& g = gi.next_genotype();
+                const double w = x[site_counter];
+                for (std::size_t i=0; i < out.size(); i++) {
+                    out[i] += w * g[i];
+                }
+                site_counter++;
+            }
+        }
+        return out;
+    }
 }

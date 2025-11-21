@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add left_multiplication and right_multiplication to ThreadingInstructions (#99)
+
 ### Changed
 
 - Build wheels on macOS 14 for arm64 and macOS 15 for x86_64 (#108)
