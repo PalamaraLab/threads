@@ -22,27 +22,31 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: auto64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp310-*
             before-all: dnf -y install cmake ninja-build boost-devel
             extra-env: ""
           - os: ubuntu-24.04-arm
             arch: aarch64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp311-*
             before-all: dnf -y install cmake ninja-build boost-devel
             extra-env: ""
           - os: macos-13
             arch: x86_64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp312-*
             before-all: brew install ninja boost
             extra-env: CC="$(brew --prefix llvm@15)/bin/clang" CXX="$(brew --prefix llvm@15)/bin/clang++" HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
           - os: macos-14
             arch: arm64
-            py-vers: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-full: cp39-* cp310-* cp311-* cp312-* cp313-*
+            py-vers-pr: cp313-*
             before-all: brew install ninja boost
             extra-env: CC="$(brew --prefix llvm@15)/bin/clang" CXX="$(brew --prefix llvm@15)/bin/clang++" HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
 
     env:
-      CIBW_BUILD: ${{ matrix.py-vers }}
+      CIBW_BUILD: ${{ github.event_name != 'pull_request' && matrix.py-vers-full || matrix.py-vers-pr }}
       CIBW_SKIP: cp3*-musllinux_*
       CIBW_ARCHS: ${{ matrix.arch }}
       CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
