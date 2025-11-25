@@ -76,7 +76,8 @@ def convert(**kwargs):
 @main.command()
 @click.option("--threads", required=True, help="Path to an input .threads file.")
 @click.option("--out", required=True, help="Path to output.")
-@click.option("--num_threads", type=int, help="Size of processor pool to process batches", default=None)
+@click.option("--num_threads", type=int, help="Size of processor pool to process batches. Does not currently work when --vcf is specified", default=None)
+@click.option("--vcf", help="If specified, estimate the ages of variants in this vcf, and not variants compressed within the provided Threads archive", default=None)
 def allele_ages(**kwargs):
     """Infer allele ages from a Threads ARG"""
     from .allele_ages import estimate_allele_ages

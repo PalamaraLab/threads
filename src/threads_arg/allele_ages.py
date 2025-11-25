@@ -43,6 +43,8 @@ def _nth_batch_worker_star(args):
     return _nth_batch_worker(*args)
 
 def estimate_ages(instructions, num_batches, num_threads):
+
+
     # Make sure we don't use more CPUs than requested
     if not num_threads:
         num_threads = 1
@@ -87,21 +89,37 @@ def estimate_ages(instructions, num_batches, num_threads):
         allele_age_estimates += allele_ages_results[i]
     return allele_age_estimates
 
-def estimate_allele_ages(threads, out, num_threads):
+def estimate_allele_ages(threads, out, num_threads, vcf):
     logging.info("Starting allele age estimation with the following parameters:")
     logging.info(f"threads:     {threads}")
     logging.info(f"out:         {out}")
     logging.info(f"num_threads: {num_threads}")
-    num_batches = 3 * num_threads
-    
+    logging.info(f"vcf:         {vcf}")
     instructions = load_instructions(threads)
-    allele_age_estimates = estimate_ages(instructions, num_batches, num_threads)
 
-    # Temporary snp ids until #45 is resolved
-    snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
+    if vcf is not None:
+        from cyvcf2 import VCF
+        vcf_wrapper = VCF(vcf)
+        assert 2 * len(vcf_wrapper.samples) == instructions.num_samples
+        age_estimator = AgeEstimator(instructions)
+        data = []
+        for record in VCF(vcf):
+            pos = record.POS
+            age_estimator.proceed_to_site(pos)
+            g = record.genotype.array()[:, :2].flatten()
+            data.append((record.ID, pos, age_estimator.estimate_age(g)))
+        with open(out, "w") as outfile:
+            for snp_id, pos, allele_age in data:
+                outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")
+    else:
+        num_batches = 3 * num_threads
+        allele_age_estimates = estimate_ages(instructions, num_batches, num_threads)
 
-    # Write results to file
-    logger.info(f"Writing results to {out}...")
-    with open(out, "w") as outfile:
-        for snp_id, pos, allele_age in zip(snp_ids, instructions.positions, allele_age_estimates):
-            outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")
+        # Temporary snp ids until #45 is resolved
+        snp_ids = [f"snp_{i}" for i in range(len(instructions.positions))]
+
+        # Write results to file
+        logger.info(f"Writing results to {out}...")
+        with open(out, "w") as outfile:
+            for snp_id, pos, allele_age in zip(snp_ids, instructions.positions, allele_age_estimates):
+                outfile.write(f"{snp_id}\t{pos}\t{allele_age}\n")

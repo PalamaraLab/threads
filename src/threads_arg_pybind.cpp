@@ -155,7 +155,9 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
   py::class_<AgeEstimator>(m, "AgeEstimator")
       .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))
       .def("process_site", &AgeEstimator::process_site)
-      .def("get_inferred_ages", &AgeEstimator::get_inferred_ages);
+      .def("get_inferred_ages", &AgeEstimator::get_inferred_ages)
+      .def("estimate_age", &AgeEstimator::estimate_age)
+      .def("proceed_to_site", &AgeEstimator::proceed_to_site);
 
   py::class_<GenotypeIterator>(m, "GenotypeIterator")
       .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))

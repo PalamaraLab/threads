@@ -33,15 +33,24 @@ AgeEstimator::AgeEstimator(const ThreadingInstructions& instructions) {
     }
 }
 
-void AgeEstimator::increment_site() {
-    int position = positions.at(sites_processed);
+void AgeEstimator::proceed_to_site(int position) {
     for (auto& iterator : threading_iterators) {
         iterator.increment_site(position);
     }
+}
+
+void AgeEstimator::increment_site() {
+    int position = positions.at(sites_processed);
+    proceed_to_site(position);
     sites_processed++;
 }
 
-void AgeEstimator::process_site(const std::vector<int>& genotypes) {
+double AgeEstimator::estimate_age(const std::vector<int>& genotypes) {
+    for (auto g : genotypes) {
+        if (g < 0) {
+            throw std::runtime_error("Age estimation does not currently support missing genotypes.");
+        }
+    }
     // Find carrier clusters
     // Algorithm: find paths in the marginal threading tree consisting only of carriers
     // Index those by "start" (highest index)
@@ -144,7 +153,11 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
             }
         }
     }
+    return allele_age;
+}
 
+void AgeEstimator::process_site(const std::vector<int>& genotypes) {
+    double allele_age = estimate_age(genotypes);
     estimated_ages.push_back(allele_age);
     increment_site();
 }

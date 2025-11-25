@@ -31,7 +31,9 @@ private:
 public:
     AgeEstimator(const ThreadingInstructions& instructions);
     void process_site(const std::vector<int>& genotypes);
+    double estimate_age(const std::vector<int>& genotypes);
     void increment_site();
+    void proceed_to_site(int position);
     std::vector<double> get_inferred_ages() const;
 public:
     std::vector<double> estimated_ages;
