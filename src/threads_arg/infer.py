@@ -81,7 +81,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     else:
         raise RuntimeError
 
-    # Batching here saves a small amount of memory 
+    # Batching here saves a small amount of memory
     num_samples = len(sample_batch)
     sample_indices = list(range(num_samples))
     num_subsets = int(np.ceil(num_samples / max_sample_batch_size))
@@ -198,7 +198,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         genetic_positions, physical_positions = make_recombination_from_map_and_pgen(map, pgen, chrom)
     else:
         logger.info(f"Using constant recombination rate of {recombination_rate}")
-        genetic_positions, physical_positions = make_constant_recombination_from_pgen(pgen, recombination_rate, chrom)
+        genetic_positions, physical_positions = make_constant_recombination_from_pgen(pgen, recombination_rate)
 
     # Load/set CHR, POS, ID, REF, ALT, QUAL, FILTER
     variant_metadata = read_variant_metadata(pgen) if save_metadata else None
@@ -361,4 +361,3 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
     # Save results
     logger.info(f"Done in (s): {time.time() - start_time}")
-
