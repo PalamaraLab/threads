@@ -55,7 +55,7 @@ def read_map_file(map_file, expected_chromosome=None) -> Tuple[np.ndarray, np.nd
 
 def _read_pgen_physical_positions(pgen_file):
     if not pgen_file.endswith("pgen"):
-        raise ValueError(f"Cannot read pvar or bim files, {pgen_file} does not end with 'pgen'.")
+        raise ValueError(f"Cannot find .pvar or .bim files, {pgen_file} does not end with 'pgen'.")
     pvar = pgen_file.rstrip("pgen") + "pvar"
     bim  = pgen_file.rstrip("pgen") + "bim"
     physical_positions = None
