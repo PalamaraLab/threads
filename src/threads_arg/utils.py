@@ -54,8 +54,10 @@ def read_map_file(map_file, expected_chromosome=None) -> Tuple[np.ndarray, np.nd
 
 
 def _read_pgen_physical_positions(pgen_file):
-    pvar = pgen_file.replace("pgen", "pvar")
-    bim = pgen_file.replace("pgen", "bim")
+    if not pgen_file.endswith("pgen"):
+        raise ValueError(f"Cannot find .pvar or .bim files, {pgen_file} does not end with 'pgen'.")
+    pvar = pgen_file.rstrip("pgen") + "pvar"
+    bim  = pgen_file.rstrip("pgen") + "bim"
     physical_positions = None
     if os.path.isfile(bim):
         physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(np.float64)
