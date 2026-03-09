@@ -28,7 +28,10 @@
 MatchGroup::MatchGroup(int _num_samples, double _cm_position)
     : num_samples(_num_samples), cm_position(_cm_position) {
   for (int i = 0; i < num_samples; i++) {
+    // For each sample, we have a mapping match->score assigning a
+    // matching score to each candidate closest cousin
     match_candidates_counts.push_back(std::unordered_map<int, int>());
+    match_candidates[i] = {};
   }
 }
 
@@ -44,6 +47,38 @@ MatchGroup::MatchGroup(const std::vector<int>& target_ids,
   }
 }
 
+MatchGroupDifference::MatchGroupDifference(const MatchGroup& prev, const MatchGroup& next, const int _site) 
+    : site(_site) {
+  // added = std::unordered_map<int, std::unordered_set<int>>();
+  // removed = std::unordered_map<int, std::unordered_set<int>>();
+  if (prev.cm_position >= next.cm_position) {
+    throw std::runtime_error("Match group position out of order");
+  }
+  if (prev.num_samples != next.num_samples) {
+    throw std::runtime_error("Incompatible match groups");
+  }
+  for (int i = 0; i < prev.num_samples; i++) {
+    // "added" is "next_group - prev_group"
+    std::unordered_set<int> added_i(next.match_candidates.at(i));
+    for (auto s : prev.match_candidates.at(i)) {
+      added_i.erase(s);
+    }
+
+    // "removed" is "prev_group - next_group"
+    std::unordered_set<int> removed_i(prev.match_candidates.at(i));
+    for (auto s : next.match_candidates.at(i)) {
+      removed_i.erase(s);
+    }
+
+    if (added_i.size() > 0) {
+      added[i] = added_i;
+    }
+    if (removed_i.size() > 0) {
+      removed[i] = removed_i;
+    }
+  }
+}
+
 void MatchGroup::filter_matches(int min_matches) {
   // First set the candidates for this group
   // For sequences of high index, we lower the number of sequences used to save time and memory
@@ -56,6 +91,8 @@ void MatchGroup::filter_matches(int min_matches) {
     }
     else if (i < 1000) {
       for (auto counts : match_candidates_counts.at(i)) {
+        // TODO: should move this min(2, min_matches) to the "i<100" clause
+        // and have this identical with the 10,000 one
         if (counts.second >= std::min(2, min_matches)) {
           match_candidates.at(i).insert(counts.first);
         }
@@ -180,11 +217,20 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
   std::cout << "Will use " << query_sites.size() << " query sites and " << match_group_sites.size()
             << " match_group_sites" << std::endl;
 
-  match_groups.reserve(match_group_sites.size());
-  for (int match_group_site : match_group_sites) {
-    match_groups.emplace_back(num_samples, genetic_positions[match_group_site]);
-  }
+  // once "current_group" has been constructed, we can process "prev_group"
+  // and compute the match_group_diff
+  current_group = MatchGroup(num_samples, genetic_positions[0]);
+  prev_group = MatchGroup(num_samples, genetic_positions[0] - 1);
+  prevprev_group = MatchGroup(num_samples, genetic_positions[0] - 2);
 
+  match_diffs.reserve(match_group_sites.size());
+
+  // match_groups.reserve(match_group_sites.size());
+  // for (int match_group_site : match_group_sites) {
+  //   match_groups.emplace_back(num_samples, genetic_positions[match_group_site]);
+  // }
+
+  // PBWT quantities
   sorting.reserve(num_samples);
   next_sorting.reserve(num_samples);
   permutation.reserve(num_samples);
@@ -235,8 +281,34 @@ void Matcher::process_site(const std::vector<int>& genotype) {
   // Threading-neighbor queries
   if (match_group_idx < (static_cast<int>(match_group_sites.size()) - 1) &&
       (sites_processed >= match_group_sites.at(match_group_idx + 1))) {
+    // std::cout << "MATCH GROUP\n";
+    // std::cout << match_group_idx << "\n";
+    // Process all matches for this group
+    // std::cout << "filtering\n";
+    current_group.filter_matches(min_matches);
+    // int total_current = 0;
+    // for (int k = 0; k < num_samples; k++) {
+    //   total_current += current_group.match_candidates.at(k).size();
+    // }
+    // std::cout << "TOTAL CURRENT: " << total_current << "\n";
+
+    // Share top matches for adjacent groups
+    if (match_group_idx > 0) {
+      // std::cout << "tops\n";
+      prev_group.insert_tops_from(current_group);
+      current_group.insert_tops_from(prev_group);
+      // std::cout << "matchdiff\n";
+      match_diffs.emplace_back(prevprev_group, prev_group, match_group_sites[match_group_idx - 1]);
+    }
+
+    // std::cout << "increment\n";
+    prevprev_group = prev_group;
+    prev_group = current_group;
     match_group_idx++;
-    match_groups.at(match_group_idx - 1).filter_matches(min_matches);
+  
+    // std::cout << "new matchgroup\n";
+    current_group = MatchGroup(num_samples, genetic_positions[match_group_sites[match_group_idx]]);
+    // std::cout << "done\n";
   }
 
   // If we've reached a query site, query
@@ -274,7 +346,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
       }
       for (int m : matches) {
         std::unordered_map<int, int>& mmmap =
-            match_groups.at(match_group_idx).match_candidates_counts.at(i);
+            current_group.match_candidates_counts.at(i);
         if (m >= i) {
           throw std::runtime_error("Illegal match candidate " + std::to_string(m) +
                                    ", something is very wrong");
@@ -290,7 +362,12 @@ void Matcher::process_site(const std::vector<int>& genotype) {
 
     // Special case for last query
     if (next_query_site_idx == static_cast<int>(query_sites.size())) {
-      match_groups.at(match_group_sites.size() - 1).filter_matches(min_matches);
+      // match_groups.at(match_group_sites.size() - 1).filter_matches(min_matches);
+      current_group.filter_matches(min_matches);
+      prev_group.insert_tops_from(current_group);
+      current_group.insert_tops_from(prev_group);
+      match_diffs.emplace_back(prevprev_group, prev_group, match_group_sites[match_group_idx - 1]);
+      match_diffs.emplace_back(prev_group, current_group, match_group_sites[match_group_idx]);
     }
   }
   sites_processed++;
@@ -298,46 +375,77 @@ void Matcher::process_site(const std::vector<int>& genotype) {
 
 // Propagate top 4 matches from left and right match groups
 void Matcher::propagate_adjacent_matches() {
-  for (int i = 1; i < static_cast<int>(match_groups.size()); i++) {
-    MatchGroup& group = match_groups.at(i);
-    MatchGroup& prev = match_groups.at(i - 1);
-    group.insert_tops_from(prev);
-    prev.insert_tops_from(group);
-  }
+  // for (int i = 1; i < static_cast<int>(match_groups.size()); i++) {
+  //   MatchGroup& group = match_groups.at(i);
+  //   MatchGroup& prev = match_groups.at(i - 1);
+  //   group.insert_tops_from(prev);
+  //   prev.insert_tops_from(group);
+  // }
 }
 
-std::vector<MatchGroup> Matcher::get_matches() {
-  return match_groups;
-}
+// std::vector<MatchGroup> Matcher::get_matches() {
+//   return match_groups;
+// }
 
-// This returns a list (groups) of lists (targets) of sets (matches)
-std::vector<std::vector<std::unordered_set<int>>>
-Matcher::serializable_matches(std::vector<int>& target_ids) {
-  std::vector<std::vector<std::unordered_set<int>>> serialized_matches(match_groups.size());
-  int group_counter = 0;
-  for (MatchGroup& match_group : match_groups) {
-    std::vector<std::unordered_set<int>> current_group_matches(target_ids.size());
-    int match_counter = 0;
-    for (int target_id : target_ids) {
-      current_group_matches[match_counter] = std::move(match_group.match_candidates.at(target_id));
-      match_group.match_candidates.at(target_id).clear();
-      match_counter++;
+// This returns a list (match-group sites) of lists (probands) of sets (matches)
+// std::vector<std::vector<std::unordered_set<int>>>
+// Matcher::serializable_matches(std::vector<int>& target_ids) {
+//   std::vector<std::vector<std::unordered_set<int>>> serialized_matches(match_groups.size());
+//   int group_counter = 0;
+//   for (MatchGroup& match_group : match_groups) {
+//     std::vector<std::unordered_set<int>> current_group_matches(target_ids.size());
+//     int match_counter = 0;
+//     for (int target_id : target_ids) {
+//       current_group_matches[match_counter] = std::move(match_group.match_candidates.at(target_id));
+//       match_group.match_candidates.at(target_id).clear();
+//       match_counter++;
+//     }
+//     serialized_matches[group_counter] = std::move(current_group_matches);
+//     group_counter++;
+//   }
+//   return serialized_matches;
+// }
+
+// This returns a list of uint-quadruples:
+//  sample_id: the sample this entry refers to
+//  target_id: the closest cousin candidate
+//  added/removed: 1/0 depending on type of entry
+//  cm_idx: index of position of change indexed into the genetic_positions vector
+std::vector<std::vector<int>> Matcher::serializable_matches(std::vector<int>& sample_ids) {
+  std::vector<std::vector<int>> out;
+  int group_counter;
+  for (MatchGroupDifference& group_diff : match_diffs) {
+    int site = group_diff.site;
+    //
+    for (int sample_id : sample_ids) {
+      if (group_diff.added.find(sample_id) != group_diff.added.end()) {
+        for (auto target_id : group_diff.added[sample_id]) {
+          // int entry[4] = {sample_id, target_id, 1, site};
+          std::vector<int> entry = {sample_id, target_id, 1, site};
+          out.push_back(entry);
+        }
+      }
+      if (group_diff.removed.find(sample_id) != group_diff.removed.end()) {
+        for (auto target_id : group_diff.removed[sample_id]) {
+          // int entry[4] = {};
+          std::vector<int> entry = {sample_id, target_id, 0, site};
+          out.push_back(entry);
+        }
+      }
     }
-    serialized_matches[group_counter] = std::move(current_group_matches);
-    group_counter++;
   }
-  return serialized_matches;
+  return out;
 }
 
-void Matcher::clear() {
-  match_groups.clear();
-}
+// void Matcher::clear() {
+//   match_groups.clear();
+// }
 
 std::vector<double> Matcher::cm_positions() {
   std::vector<double> cms;
-  cms.reserve(match_groups.size());
-  for (MatchGroup& match_group : match_groups) {
-    cms.push_back(match_group.cm_position);
+  cms.reserve(match_diffs.size());
+  for (MatchGroupDifference& match_diff : match_diffs) {
+    cms.push_back(genetic_positions[match_diff.site]);
   }
   return cms;
 }

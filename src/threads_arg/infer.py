@@ -100,9 +100,9 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
 
         # Warning: this creates big copies of data
         if num_subsets == 1:
-            TLM.initialize_viterbi(s_match_group, match_cm_positions)
+            TLM.initialize_viterbi(s_match_group)#, match_cm_positions)
         else:
-            TLM.initialize_viterbi([[s[k] for k in sample_index_subset] for s in s_match_group], match_cm_positions)
+            TLM.initialize_viterbi([[s[k] for k in sample_index_subset] for s in s_match_group])#, match_cm_positions)
 
         M = reader.get_variant_ct()
         BATCH_SIZE = int(4e7 // num_samples_hap)
@@ -244,7 +244,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     iterate_pgen(pgen, matcher_callback, mask=ac_mask, matcher=matcher)
 
     # Add top matches from adjacent sites to each match-chunk
-    matcher.propagate_adjacent_matches()
+    # matcher.propagate_adjacent_matches()
 
     # From here we parallelise if we can
     actual_num_threads = min(default_process_count(), num_threads)
@@ -284,7 +284,8 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         sample_batch = list(range(2 * num_samples))
         s_match_group = matcher.serializable_matches(sample_batch)
         match_cm_positions = matcher.cm_positions()
-        matcher.clear()
+        # matcher.clear()
+        # breakpoint()
         del matcher
         gc.collect()
         thread_id = 1

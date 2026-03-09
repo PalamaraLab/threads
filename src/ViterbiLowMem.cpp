@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <vector>
 
 namespace {
@@ -121,8 +122,15 @@ ViterbiPath::dump_data_in_range(int start, int end) {
       out_starts, out_ids, out_heights);
 }
 
-ViterbiState::ViterbiState(int _target_id, std::vector<int> _sample_ids)
-    : target_id(_target_id), sample_ids(_sample_ids) {
+ViterbiState::ViterbiState(int _target_id, std::vector<int>& _sample_ids)
+    : target_id(_target_id) {
+
+  for (const auto s : _sample_ids) {
+    sample_ids.insert(s);
+  }
+}
+
+void ViterbiState::initialize() {
   // init current_tracebacks
   if (sample_ids.size() == 0) {
     throw std::runtime_error("found no samples for ViterbiState object for sample " +
@@ -134,7 +142,8 @@ ViterbiState::ViterbiState(int _target_id, std::vector<int> _sample_ids)
     current_tracebacks[sample_id] = &traceback_states.at(key);
   }
   best_score = 0;
-  best_match = sample_ids.at(0);
+  // best_match = sample_ids.at(0);
+  best_match = *(sample_ids.begin());
 }
 
 void ViterbiState::process_site(const std::vector<int>& genotype, double rho, double rho_c,
@@ -144,6 +153,7 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
   int best_new_match = best_match;
   double new_score;
   int observed_allele = genotype.at(target_id);
+
   TracebackNode* prev_best = current_tracebacks.at(best_match);
   for (int sample_id : sample_ids) {
     int allele = genotype.at(sample_id);
@@ -188,18 +198,41 @@ void ViterbiState::process_site(const std::vector<int>& genotype, double rho, do
   sites_processed++;
 }
 
-void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
-  std::vector<int> new_samples_vec(new_sample_ids.begin(), new_sample_ids.end());
-  if (!new_sample_ids.count(best_match)) {
-    new_samples_vec.push_back(best_match);
+// void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
+//   std::vector<int> new_samples_vec(new_sample_ids.begin(), new_sample_ids.end());
+//   if (!new_sample_ids.count(best_match)) {
+//     new_samples_vec.push_back(best_match);
+//   }
+//   for (int sample_id : sample_ids) {
+//     // clean up branches we definitely won't use
+//     if (!new_sample_ids.count(sample_id) && sample_id != best_match) {
+//       current_tracebacks.erase(sample_id);
+//     }
+//   }
+//   sample_ids = new_samples_vec;
+// }
+
+void ViterbiState::add_target(const int sample_id) {
+  if (sample_ids.find(sample_id) != sample_ids.end()) {
+    return;
+    // throw std::runtime_error("Attempting to insert illegal sample into Viterbi state.");
   }
-  for (int sample_id : sample_ids) {
-    // clean up branches we definitely won't use
-    if (!new_sample_ids.count(sample_id) && sample_id != best_match) {
-      current_tracebacks.erase(sample_id);
-    }
+  sample_ids.insert(sample_id);
+}
+
+void ViterbiState::remove_target(const int sample_id) {
+  if (sample_ids.find(sample_id) == sample_ids.end()) {
+    throw std::runtime_error("Attempting to remove illegal sample into Viterbi state.");
   }
-  sample_ids = new_samples_vec;
+  if (sample_id == best_match) {
+    // this may result in unexpected behaviour, consider renaming function
+    // remove_if_not_best
+    return;
+  }
+  sample_ids.erase(sample_id);
+  if (sample_id != best_match) {
+    current_tracebacks.erase(sample_id);
+  }
 }
 
 void ViterbiState::prune() {

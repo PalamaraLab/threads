@@ -24,6 +24,7 @@
 /// for a certain interval, store the matches for all samples
 class MatchGroup {
 public:
+  MatchGroup() : num_samples(0), cm_position(0.0) {};
   MatchGroup(int _num_samples, double cm_position);
   MatchGroup(const std::vector<int>& target_ids,
              const std::vector<std::unordered_set<int>>& matches, const double _cm_position);
@@ -39,6 +40,26 @@ public:
   double cm_position = 0.0;
 };
 
+class MatchGroupDifference {
+public:
+  MatchGroupDifference(const MatchGroup& prev, const MatchGroup& next, const int _site);
+
+public:
+  std::unordered_map<int, std::unordered_set<int>> added;
+  std::unordered_map<int, std::unordered_set<int>> removed;
+  int site = 0;
+};
+
+class MatchGroupEntry {
+public:
+  MatchGroupEntry(int _sample_id, int _target_id, int _added, int _site) 
+    : sample_id(_sample_id), target_id(_target_id), added(_added), site(_site) {};
+  const int sample_id = 0;
+  const int target_id = 0;
+  const int added = 0;
+  const int site = 0;
+};
+
 class Matcher {
 public:
   Matcher(int _n, const std::vector<double>& _genetic_positions, double _query_interval_size,
@@ -47,11 +68,12 @@ public:
   // Do all the work
   void process_site(const std::vector<int>& genotype);
   void propagate_adjacent_matches();
-  void clear();
+  // void clear();
 
-  std::vector<MatchGroup> get_matches();
-  std::vector<std::vector<std::unordered_set<int>>>
-  serializable_matches(std::vector<int>& target_ids);
+  // std::vector<MatchGroup> get_matches();
+  // std::vector<std::vector<std::unordered_set<int>>>
+  // serializable_matches(std::vector<int>& target_ids);
+  std::vector<std::vector<int>> serializable_matches(std::vector<int>& sample_ids);
   std::vector<double> cm_positions();
 
   std::vector<int> get_sorting();
@@ -66,6 +88,7 @@ public:
   std::vector<int> query_sites;
   std::vector<int> match_group_sites;
   int num_sites = 0;
+  std::vector<MatchGroupDifference> match_diffs;
   // matches in these groups are considered together in the hmm
 
 private:
@@ -73,7 +96,10 @@ private:
   int sites_processed = 0;
   int next_query_site_idx = 0;
   int match_group_idx = 0;
-  std::vector<MatchGroup> match_groups;
+  // std::vector<MatchGroup> match_groups;
+  MatchGroup current_group;
+  MatchGroup prev_group;
+  MatchGroup prevprev_group;
   std::vector<int> sorting;
   std::vector<int> next_sorting;
   std::vector<int> permutation;
