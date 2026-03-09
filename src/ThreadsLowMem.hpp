@@ -22,6 +22,7 @@
 #include "ThreadsFastLS.hpp"
 #include "ViterbiLowMem.hpp"
 #include <string>
+#include <queue>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -37,8 +38,10 @@ public:
   // 1. process all sites for the PBWT (done by the Matcher)
 
   // 2a. initialize hmms
-  void initialize_viterbi(std::vector<std::vector<std::unordered_set<int>>>& match_ids,
-                          const std::vector<double>& cm_positions);
+  // void initialize_viterbi(std::vector<std::vector<std::unordered_set<int>>>& match_ids,
+  //                         const std::vector<double>& cm_positions);
+  void initialize_viterbi(std::vector<std::vector<int>>& match_group_entries);
+
   // 2b. process all sites for the hmms
   void process_site_viterbi(const std::vector<int>& genotype);
   // 2c. prune branches at regular intervals (i.e. when there's a lot of them, figure this out soon)
@@ -85,7 +88,8 @@ private:
   int hmm_sites_processed = 0;
   std::unordered_map<int, ViterbiState> hmms;
   int match_group_idx = 0;
-  std::vector<MatchGroup> match_groups;
+  // std::vector<MatchGroup> match_groups;
+  std::queue<MatchGroupEntry> match_group_queue;
 
   // 3. Path segment and path dating quantites
   HMM psmc;

@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <set>
 
 class TracebackNode {
 public:
@@ -59,11 +60,13 @@ public:
 
 class ViterbiState {
 public:
-  ViterbiState(int _target_id, std::vector<int> _sample_ids);
-
+  ViterbiState(int _target_id, std::vector<int>& _sample_ids);
+  void initialize();
   void process_site(const std::vector<int>& genotype, double rho, double rho_c, double _mu,
                     double _mu_c);
-  void set_samples(std::unordered_set<int> new_sample_ids);
+  // void set_samples(std::unordered_set<int> new_sample_ids);
+  void add_target(const int sample_id);
+  void remove_target(const int sample_id);
   int count_branches() const;
   void prune();
   ViterbiPath traceback();
@@ -79,7 +82,7 @@ public:
   double best_score = 0.0;
   int sites_processed = 0;
   double mutation_penalty = 0.0;
-  std::vector<int> sample_ids;
+  std::set<int> sample_ids;
   std::vector<double> sample_scores;
   std::unordered_map<int, TracebackNode*> current_tracebacks;
 };

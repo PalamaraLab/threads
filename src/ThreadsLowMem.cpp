@@ -96,15 +96,33 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
   }
 }
 
-// Initialize Threads-Viterbi instances using IDs and genetic positions for each match group
-void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_set<int>>>& match_ids,
-                                       const std::vector<double>& cm_positions) {
-  if (match_ids.size() != cm_positions.size() || match_ids.size() < 1) {
-    throw std::runtime_error("Match-data is missing or does not have same shape as genetic map");
-  }
-  match_groups.reserve(match_ids.size());
-  for (std::size_t i = 0; i < match_ids.size(); i++) {
-    match_groups.emplace_back(target_ids, match_ids.at(i), cm_positions.at(i));
+// // Initialize Threads-Viterbi instances using IDs and genetic positions for each match group
+// void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_set<int>>>& match_ids,
+//                                        const std::vector<double>& cm_positions) {
+//   if (match_ids.size() != cm_positions.size() || match_ids.size() < 1) {
+//     throw std::runtime_error("Match-data is missing or does not have same shape as genetic map");
+//   }
+//   match_groups.reserve(match_ids.size());
+//   for (std::size_t i = 0; i < match_ids.size(); i++) {
+//     match_groups.emplace_back(target_ids, match_ids.at(i), cm_positions.at(i));
+//   }
+
+//   match_group_idx = 0;
+//   hmm_sites_processed = 0;
+//   for (int target_id : target_ids) {
+//     if (target_id == 0) {
+//       continue;
+//     }
+//     // THE WHOLE NOMENCLATURE HERE IS WRONG WE'VE SWAPPED SAMPLE/TARGET WRT Matcher.cpp
+//     std::vector<int> sample_ids(match_groups.at(0).match_candidates.at(target_id).begin(),
+//                                 match_groups.at(0).match_candidates.at(target_id).end());
+//     hmms.emplace(target_id, ViterbiState(target_id, sample_ids));
+//   }
+// }
+
+void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<int>>& match_group_entries) {
+  for (auto& mge : match_group_entries) {
+    match_group_queue.emplace(mge[0], mge[1], mge[2], mge[3]);
   }
 
   match_group_idx = 0;
@@ -113,32 +131,51 @@ void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_se
     if (target_id == 0) {
       continue;
     }
-    std::vector<int> sample_ids(match_groups.at(0).match_candidates.at(target_id).begin(),
-                                match_groups.at(0).match_candidates.at(target_id).end());
+    std::vector<int> sample_ids;
     hmms.emplace(target_id, ViterbiState(target_id, sample_ids));
   }
 }
 
 // Pass genotypes for a single site through the intialized Threads-Viterbi instances
 void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
-  bool group_change = false;
+  // bool group_change = false;
 
-  if (match_group_idx < (static_cast<int>(match_groups.size()) - 1) &&
-      (genetic_positions.at(hmm_sites_processed) >=
-       match_groups.at(match_group_idx + 1).cm_position)) {
-    match_group_idx++;
-    group_change = true;
+  // Here we pop the queue
+  while (!match_group_queue.empty() && hmm_sites_processed >= match_group_queue.front().site) {
+    MatchGroupEntry& entry = match_group_queue.front();
+    int sample_id = entry.sample_id;
+    int target_id = entry.target_id;
+    if (entry.added == 1) {
+      hmms.at(sample_id).add_target(target_id);
+    } else if (entry.added == 0) {
+      hmms.at(sample_id).remove_target(target_id);
+    }
+    match_group_queue.pop();
   }
+
+  if (hmm_sites_processed == 0) {
+    for (auto& it : hmms) {
+      it.second.initialize();
+    } 
+  }
+
+  // if (match_group_idx < (static_cast<int>(match_groups.size()) - 1) &&
+  //     (genetic_positions.at(hmm_sites_processed) >=
+  //      match_groups.at(match_group_idx + 1).cm_position)) {
+  //   match_group_idx++;
+  //   group_change = true;
+  // }
   double k = 2. * 0.01 * cm_sizes.at(hmm_sites_processed);
   double l = 2. * mutation_rate * bp_sizes.at(hmm_sites_processed);
+
   for (int target_id : target_ids) {
     if (target_id == 0) {
       continue;
     }
-    if (group_change) {
-      hmms.at(target_id).set_samples(
-          match_groups.at(match_group_idx).match_candidates.at(target_id));
-    }
+    // if (group_change) {
+    //   hmms.at(target_id).set_samples(
+    //       match_groups.at(match_group_idx).match_candidates.at(target_id));
+    // }
 
     double t = expected_branch_lengths.at(target_id);
     double rho_c = k * t;
@@ -146,9 +183,11 @@ void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
                         : -(std::log1p(-std::exp(-(k * t))) - std::log(target_id));
     double mu_c = l * t;
     double mu = -std::log1p(-std::exp(-(l * t)));
+
     hmms.at(target_id).process_site(genotype, rho, rho_c, mu, mu_c);
   }
   hmm_sites_processed++;
+
   return;
 }
 

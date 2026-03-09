@@ -77,6 +77,11 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def_readonly("match_candidates_counts", &MatchGroup::match_candidates_counts)
       .def_readonly("top_four_maps", &MatchGroup::top_four_maps)
       .def_readonly("cm_position", &MatchGroup::cm_position);
+    
+  py::class_<MatchGroupDifference>(m, "MatchGroupDifference")
+      .def_readonly("added", &MatchGroupDifference::added)
+      .def_readonly("removed", &MatchGroupDifference::removed)
+      .def_readonly("site", &MatchGroupDifference::site);
 
   py::class_<Matcher>(m, "Matcher")
       .def(py::init<int, std::vector<double>, double, double, int, int>(), "Initialize",
@@ -88,14 +93,15 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def_readonly("query_interval_size", &Matcher::query_interval_size)
       .def_readonly("num_samples", &Matcher::num_samples)
       .def_readonly("num_sites", &Matcher::num_sites)
+      .def_readonly("match_diffs", &Matcher::match_diffs)
       .def("process_site", &Matcher::process_site)
-      .def("propagate_adjacent_matches", &Matcher::propagate_adjacent_matches)
-      .def("get_matches", &Matcher::get_matches)
+    //   .def("propagate_adjacent_matches", &Matcher::propagate_adjacent_matches)
+    //   .def("get_matches", &Matcher::get_matches)
       .def("serializable_matches", &Matcher::serializable_matches)
       .def("cm_positions", &Matcher::cm_positions)
       .def("get_sorting", &Matcher::get_sorting)
-      .def("get_permutation", &Matcher::get_permutation)
-      .def("clear", &Matcher::clear);
+      .def("get_permutation", &Matcher::get_permutation);
+    //   .def("clear", &Matcher::clear);
 
   py::class_<ImputationMatcher>(m, "ImputationMatcher")
       .def(py::init<int, int, const std::vector<double>&, double, int>(), "Initialize",
