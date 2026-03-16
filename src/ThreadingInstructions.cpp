@@ -341,7 +341,7 @@ std::vector<double> ThreadingInstructions::right_multiply(const std::vector<doub
     // Check input vector lengths are correct
     if (x.size() != num_sites) {
         std::ostringstream oss;
-        oss << "Input vector must have length " << num_samples / 2 << ".";
+        oss << "Input vector must have length " << num_sites << ".";
         throw std::runtime_error(oss.str());
     }
 

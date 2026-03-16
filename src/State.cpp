@@ -81,25 +81,22 @@ void StateBranch::prune() {
 }
 
 StateTree::StateTree(std::vector<State>& states) {
-  for (auto s : states) {
+  for (const auto& s : states) {
     int sample_ID = s.below->sample_ID;
-    if (branches.find(sample_ID) == branches.end()) {
-      branches[sample_ID] = StateBranch();
-    }
     branches[sample_ID].insert(s);
   }
 }
 
 void StateTree::prune() {
-  for (auto pair : branches) {
-    branches[pair.first].prune();
+  for (auto& [key, branch] : branches) {
+    branch.prune();
   }
 }
 
 std::vector<State> StateTree::dump() const {
   std::vector<State> states;
-  for (auto pair : branches) {
-    for (auto s : pair.second.states) {
+  for (const auto& [key, branch] : branches) {
+    for (const auto& s : branch.states) {
       states.push_back(s);
     }
   }

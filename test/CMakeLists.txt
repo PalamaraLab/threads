@@ -24,7 +24,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Catch2)
 set(test_src
+    test_benchmark.cpp
     test_demography.cpp
+    test_demography_correctness.cpp
+    test_hmm.cpp
+    test_matcher.cpp
+    test_node.cpp
+    test_regression.cpp
+    test_threading_instructions.cpp
+    test_viterbi_lowmem.cpp
     test_viterbi_state.cpp
 )
 

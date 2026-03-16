@@ -222,7 +222,7 @@ ThreadingInstructions ConsistencyWrapper::get_consistent_instructions() {
     // Make output threading instructions
     std::vector<ThreadingInstruction> output_instructions;
     output_instructions.reserve(instruction_converters.size());
-    for (InstructionConverter converter : instruction_converters) {
+    for (auto& converter : instruction_converters) {
         output_instructions.push_back(converter.parse_converted_instructions());
     }
 

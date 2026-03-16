@@ -22,6 +22,7 @@
 #include "VCFWriter.hpp"
 #include "pybind_utils.hpp"
 
+#include <pybind11/numpy.h>
 #include <vector>
 
 namespace py = pybind11;
@@ -49,7 +50,23 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def_readonly("expected_branch_lengths", &ThreadsLowMem::expected_branch_lengths)
       .def("initialize_viterbi", &ThreadsLowMem::initialize_viterbi)
       .def("process_site_viterbi", &ThreadsLowMem::process_site_viterbi)
+      .def("process_all_sites_viterbi", &ThreadsLowMem::process_all_sites_viterbi)
+      .def("process_all_sites_viterbi_numpy", [](ThreadsLowMem& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        int n_sites = static_cast<int>(buf.shape[0]);
+        int n_haps = static_cast<int>(buf.shape[1]);
+        self.process_all_sites_viterbi_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);
+      })
       .def("process_site_hets", &ThreadsLowMem::process_site_hets)
+      .def("process_all_sites_hets", &ThreadsLowMem::process_all_sites_hets)
+      .def("process_all_sites_hets_numpy", [](ThreadsLowMem& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        int n_sites = static_cast<int>(buf.shape[0]);
+        int n_haps = static_cast<int>(buf.shape[1]);
+        self.process_all_sites_hets_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);
+      })
       .def("count_branches", &ThreadsLowMem::count_branches)
       .def("prune", &ThreadsLowMem::prune)
       .def("traceback", &ThreadsLowMem::traceback)
@@ -89,6 +106,14 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def_readonly("num_samples", &Matcher::num_samples)
       .def_readonly("num_sites", &Matcher::num_sites)
       .def("process_site", &Matcher::process_site)
+      .def("process_all_sites", &Matcher::process_all_sites)
+      .def("process_all_sites_numpy", [](Matcher& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        int n_sites = static_cast<int>(buf.shape[0]);
+        int n_haps = static_cast<int>(buf.shape[1]);
+        self.process_all_sites_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);
+      })
       .def("propagate_adjacent_matches", &Matcher::propagate_adjacent_matches)
       .def("get_matches", &Matcher::get_matches)
       .def("serializable_matches", &Matcher::serializable_matches)
