@@ -28,7 +28,8 @@ namespace {
 const int ALLELE_UNPHASED_HET = -7;
 
 inline std::size_t coord_id_key(int i, int j) {
-  return (static_cast<std::size_t>(i) << 32) | static_cast<std::size_t>(j);
+  return (static_cast<std::size_t>(static_cast<uint32_t>(i)) << 32) |
+         static_cast<std::size_t>(static_cast<uint32_t>(j));
 }
 
 } // namespace
@@ -128,95 +129,120 @@ ViterbiState::ViterbiState(int _target_id, std::vector<int> _sample_ids)
     throw std::runtime_error("found no samples for ViterbiState object for sample " +
                              std::to_string(target_id));
   }
+  current_traceback_ptrs.reserve(sample_ids.size());
   for (int sample_id : sample_ids) {
-    std::size_t key = coord_id_key(0, sample_id);
-    traceback_states.emplace(key, TracebackNode(sample_id, 0, nullptr, 0.));
-    current_tracebacks[sample_id] = &traceback_states.at(key);
+    current_traceback_ptrs.push_back(alloc_node(sample_id, 0, nullptr, 0.));
   }
   best_score = 0;
   best_match = sample_ids.at(0);
+  best_match_idx = 0;
 }
 
-void ViterbiState::process_site(const std::vector<int>& genotype, double rho, double rho_c,
+void ViterbiState::process_site(const int* genotype, double rho, double rho_c,
                                 double mu, double mu_c) {
-  int current_site = sites_processed;
+  const int current_site = sites_processed;
   double best_new_score = best_score + std::max(rho, rho_c) + std::max(mu, mu_c);
   int best_new_match = best_match;
-  double new_score;
-  int observed_allele = genotype.at(target_id);
-  TracebackNode* prev_best = current_tracebacks.at(best_match);
-  for (int sample_id : sample_ids) {
-    int allele = genotype.at(sample_id);
+  int best_new_match_idx = best_match_idx;
+  const int observed_allele = genotype[target_id];
+  const double recomb_threshold = best_score + rho;
+  const double unphased_penalty = (mu_c + mu) * 0.5;
+  const bool observed_is_unphased = (observed_allele == ALLELE_UNPHASED_HET);
+
+  TracebackNode* prev_best = current_traceback_ptrs[best_match_idx];
+
+  const int n_samples = static_cast<int>(sample_ids.size());
+  for (int idx = 0; idx < n_samples; ++idx) {
+    const int sample_id = sample_ids[idx];
+    const int allele = genotype[sample_id];
     double copy_penalty;
-    if ((allele == ALLELE_UNPHASED_HET) || (observed_allele == ALLELE_UNPHASED_HET)) {
-      copy_penalty = (mu_c + mu) / 2.;
+    if (observed_is_unphased || (allele == ALLELE_UNPHASED_HET)) {
+      copy_penalty = unphased_penalty;
     }
     else {
       copy_penalty = (allele == observed_allele) ? mu_c : mu;
     }
-    if (!current_tracebacks.count(sample_id)) {
-      // If we've just added new sites (this will happen vary rarely),
-      // recombine from previous best state
-      new_score = best_score + copy_penalty + rho;
-      std::size_t key = coord_id_key(current_site, sample_id);
-      traceback_states.emplace(key, TracebackNode(sample_id, current_site, prev_best, new_score));
-      current_tracebacks[sample_id] = &traceback_states.at(key);
+
+    double new_score;
+    TracebackNode* state = current_traceback_ptrs[idx];
+    if (state == nullptr) {
+      // Newly added sample (happens rarely, after set_samples)
+      new_score = recomb_threshold + copy_penalty;
+      current_traceback_ptrs[idx] = alloc_node(sample_id, current_site, prev_best, new_score);
     }
     else {
-      // Otherwise, check whether we should recombine or extend
-      TracebackNode* state = current_tracebacks.at(sample_id);
-      if (state->score + rho_c <= best_score + rho) {
-        // If extending is cheaper, simply update the score of the current traceback
+      if (state->score + rho_c <= recomb_threshold) {
+        // Extend: cheaper than recombining
         new_score = state->score + copy_penalty + rho_c;
         state->score = new_score;
       }
       else {
-        // If we recombine, add a new branch
-        new_score = best_score + copy_penalty + rho;
-        std::size_t key = coord_id_key(current_site, sample_id);
-        traceback_states.emplace(key, TracebackNode(sample_id, current_site, prev_best, new_score));
-        current_tracebacks.at(sample_id) = &traceback_states.at(key);
+        // Recombine: add a new branch
+        new_score = recomb_threshold + copy_penalty;
+        current_traceback_ptrs[idx] = alloc_node(sample_id, current_site, prev_best, new_score);
       }
     }
     if (new_score < best_new_score) {
       best_new_score = new_score;
       best_new_match = sample_id;
+      best_new_match_idx = idx;
     }
   }
   best_score = best_new_score;
   best_match = best_new_match;
+  best_match_idx = best_new_match_idx;
   sites_processed++;
 }
 
 void ViterbiState::set_samples(std::unordered_set<int> new_sample_ids) {
+  // Build old sample_id → ptr map from current parallel vectors
+  std::unordered_map<int, TracebackNode*> old_ptrs;
+  old_ptrs.reserve(sample_ids.size());
+  for (std::size_t i = 0; i < sample_ids.size(); ++i) {
+    old_ptrs[sample_ids[i]] = current_traceback_ptrs[i];
+  }
+
   std::vector<int> new_samples_vec(new_sample_ids.begin(), new_sample_ids.end());
   if (!new_sample_ids.count(best_match)) {
     new_samples_vec.push_back(best_match);
   }
-  for (int sample_id : sample_ids) {
-    // clean up branches we definitely won't use
-    if (!new_sample_ids.count(sample_id) && sample_id != best_match) {
-      current_tracebacks.erase(sample_id);
+  sample_ids = new_samples_vec;
+
+  // Rebuild parallel pointer vector to match new sample_ids ordering
+  current_traceback_ptrs.clear();
+  current_traceback_ptrs.reserve(sample_ids.size());
+  for (std::size_t i = 0; i < sample_ids.size(); ++i) {
+    int sample_id = sample_ids[i];
+    auto it = old_ptrs.find(sample_id);
+    current_traceback_ptrs.push_back(it != old_ptrs.end() ? it->second : nullptr);
+    if (sample_id == best_match) {
+      best_match_idx = static_cast<int>(i);
     }
   }
-  sample_ids = new_samples_vec;
 }
 
 void ViterbiState::prune() {
-  std::unordered_map<std::size_t, TracebackNode> tmp_traceback_states;
+  std::deque<TracebackNode> new_nodes;
+  std::unordered_map<std::size_t, TracebackNode*> key_to_ptr;
 
-  for (int sample_id : sample_ids) {
-    TracebackNode* state = current_tracebacks.at(sample_id);
-    TracebackNode* new_state = recursive_insert(tmp_traceback_states, state);
-    current_tracebacks[sample_id] = new_state;
+  // Recursively copy only reachable nodes into the new deque
+  auto copy_node = [&](auto& self, TracebackNode* state) -> TracebackNode* {
+    if (state == nullptr) return nullptr;
+    std::size_t key = state->key();
+    auto it = key_to_ptr.find(key);
+    if (it != key_to_ptr.end()) return it->second;
+    TracebackNode* new_parent = self(self, state->previous);
+    new_nodes.emplace_back(state->sample_id, state->site, new_parent, state->score);
+    TracebackNode* ptr = &new_nodes.back();
+    key_to_ptr[key] = ptr;
+    return ptr;
+  };
+
+  for (std::size_t idx = 0; idx < sample_ids.size(); ++idx) {
+    current_traceback_ptrs[idx] = copy_node(copy_node, current_traceback_ptrs[idx]);
   }
 
-  traceback_states.clear();
-  for (int sample_id : sample_ids) {
-    TracebackNode* state = current_tracebacks.at(sample_id);
-    TracebackNode* new_state = recursive_insert(traceback_states, state);
-    current_tracebacks[sample_id] = new_state;
-  }
+  traceback_nodes = std::move(new_nodes);
 }
 
 // add everything above and return a key to the new address
@@ -235,14 +261,19 @@ ViterbiState::recursive_insert(std::unordered_map<std::size_t, TracebackNode>& s
   return &state_map.at(key);
 }
 
+TracebackNode* ViterbiState::alloc_node(int sample_id, int site, TracebackNode* previous, double score) {
+  traceback_nodes.emplace_back(sample_id, site, previous, score);
+  return &traceback_nodes.back();
+}
+
 int ViterbiState::count_branches() const {
-  return static_cast<int>(traceback_states.size());
+  return static_cast<int>(traceback_nodes.size());
 }
 
 ViterbiPath ViterbiState::traceback() {
   ViterbiPath path(target_id);
   path.score = best_score;
-  TracebackNode* state = current_tracebacks.at(best_match);
+  TracebackNode* state = current_traceback_ptrs[best_match_idx];
   while (state != nullptr) {
     int match_id = state->sample_id;
     int seg_start = state->site;

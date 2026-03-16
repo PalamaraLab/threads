@@ -86,7 +86,7 @@ public:
                                          std::vector<std::vector<int>> target_IDs);
 
   static std::tuple<std::vector<double>, std::vector<double>>
-  site_sizes(std::vector<double> positions);
+  site_sizes(const std::vector<double>& positions);
 
   // More attributes
   std::vector<double> trimmed_positions() const;
@@ -194,7 +194,7 @@ public:
   std::vector<double> bp_boundaries;
   std::vector<double> cm_boundaries;
   Demography demography;
-  HMM* hmm = nullptr;
+  std::unique_ptr<HMM> hmm;
 
   // The dynamic reference panel
   std::vector<std::vector<std::unique_ptr<Node>>> panel;

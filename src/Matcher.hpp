@@ -17,6 +17,7 @@
 #ifndef THREADS_ARG_MATCHER_HPP
 #define THREADS_ARG_MATCHER_HPP
 
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -46,6 +47,8 @@ public:
 
   // Do all the work
   void process_site(const std::vector<int>& genotype);
+  void process_all_sites(const std::vector<std::vector<int>>& genotypes);
+  void process_all_sites_flat(const int32_t* data, int n_sites, int n_haps);
   void propagate_adjacent_matches();
   void clear();
 
