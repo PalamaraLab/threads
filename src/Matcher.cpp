@@ -55,14 +55,14 @@ void MatchGroup::filter_matches(int min_matches) {
       }
     }
     else if (i < 1000) {
-      for (auto counts : match_candidates_counts.at(i)) {
+      for (const auto& counts : match_candidates_counts.at(i)) {
         if (counts.second >= std::min(2, min_matches)) {
           match_candidates.at(i).insert(counts.first);
         }
       }
     }
     else if (i < 10000) {
-      for (auto counts : match_candidates_counts.at(i)) {
+      for (const auto& counts : match_candidates_counts.at(i)) {
         if (counts.second >= min_matches) {
           match_candidates.at(i).insert(counts.first);
         }
@@ -70,7 +70,7 @@ void MatchGroup::filter_matches(int min_matches) {
     }
     else {
       // Don't want too much stuff for very big studies
-      for (auto counts : match_candidates_counts.at(i)) {
+      for (const auto& counts : match_candidates_counts.at(i)) {
         if (counts.second >= 2 * min_matches) {
           match_candidates.at(i).insert(counts.first);
         }
@@ -80,7 +80,7 @@ void MatchGroup::filter_matches(int min_matches) {
     if (match_candidates.at(i).size() == 0) {
       int tmp_min_matches = min_matches;
       while (match_candidates.at(i).size() == 0 && tmp_min_matches > 0) {
-        for (auto counts : match_candidates_counts.at(i)) {
+        for (const auto& counts : match_candidates_counts.at(i)) {
           if (counts.second >= tmp_min_matches) {
             match_candidates.at(i).insert(counts.first);
           }
@@ -106,7 +106,7 @@ void MatchGroup::filter_matches(int min_matches) {
 
 void MatchGroup::insert_tops_from(MatchGroup& other) {
   for (int i = 1; i < num_samples; i++) {
-    for (auto p : other.top_four_maps.at(i)) {
+    for (const auto& p : other.top_four_maps.at(i)) {
       match_candidates.at(i).insert(p.first);
     }
   }
@@ -230,7 +230,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
       throw std::runtime_error(prompt);
     }
   }
-  sorting = next_sorting;
+  std::swap(sorting, next_sorting);
 
   // Threading-neighbor queries
   if (match_group_idx < (static_cast<int>(match_group_sites.size()) - 1) &&
@@ -248,42 +248,41 @@ void Matcher::process_site(const std::vector<int>& genotype) {
     }
     next_query_site_idx++;
 
-    // Initialize the red-black tree
-    std::set<int> threaded = {permutation.at(0)};
+    // Boolean array for O(1) mark + sequential scan neighbor finding
+    std::vector<char> inserted(num_samples, 0);
+    inserted[permutation[0]] = 1;
 
     // Insert sequences and query in order
     for (int i = 1; i < num_samples; i++) {
-      std::vector<int> matches;
-      matches.reserve(neighborhood_size);
-      auto iter = threaded.insert(permutation.at(i));
-      auto iter_up = iter.first;
-      auto iter_down = iter.first;
-      // Check if genotypes are identical, just to be sure
-      while ((static_cast<int>(matches.size()) < neighborhood_size) &&
-             (iter_down != threaded.begin() || iter_up != threaded.end())) {
-        if (iter_down != threaded.begin()) {
-          iter_down--;
-          matches.push_back(sorting.at(*iter_down));
-        }
-        if (static_cast<int>(matches.size()) < neighborhood_size && iter_up != threaded.end()) {
-          iter_up++;
-          if (iter_up != threaded.end()) {
-            matches.push_back(sorting.at(*iter_up));
+      const int pos = permutation[i];
+      inserted[pos] = 1;
+
+      // Find neighborhood_size nearest neighbors by scanning left/right
+      int n_found = 0;
+      int left = pos - 1;
+      int right = pos + 1;
+      std::unordered_map<int, int>& mmmap =
+          match_groups[match_group_idx].match_candidates_counts[i];
+      while (n_found < neighborhood_size && (left >= 0 || right < num_samples)) {
+        // Scan left for next set bit
+        if (left >= 0) {
+          while (left >= 0 && !inserted[left]) left--;
+          if (left >= 0) {
+            int m = sorting[left];
+            mmmap[m]++;
+            n_found++;
+            left--;
           }
         }
-      }
-      for (int m : matches) {
-        std::unordered_map<int, int>& mmmap =
-            match_groups.at(match_group_idx).match_candidates_counts.at(i);
-        if (m >= i) {
-          throw std::runtime_error("Illegal match candidate " + std::to_string(m) +
-                                   ", something is very wrong");
-        }
-        if (!mmmap.count(m)) {
-          mmmap[m] = 1;
-        }
-        else {
-          mmmap[m]++;
+        // Scan right for next set bit
+        if (n_found < neighborhood_size && right < num_samples) {
+          while (right < num_samples && !inserted[right]) right++;
+          if (right < num_samples) {
+            int m = sorting[right];
+            mmmap[m]++;
+            n_found++;
+            right++;
+          }
         }
       }
     }
@@ -294,6 +293,23 @@ void Matcher::process_site(const std::vector<int>& genotype) {
     }
   }
   sites_processed++;
+}
+
+void Matcher::process_all_sites(const std::vector<std::vector<int>>& genotypes) {
+  for (const auto& genotype : genotypes) {
+    process_site(genotype);
+  }
+}
+
+void Matcher::process_all_sites_flat(const int32_t* data, int n_sites, int n_haps) {
+  std::vector<int> genotype(n_haps);
+  for (int s = 0; s < n_sites; s++) {
+    const int32_t* row = data + static_cast<std::size_t>(s) * n_haps;
+    for (int h = 0; h < n_haps; h++) {
+      genotype[h] = row[h];
+    }
+    process_site(genotype);
+  }
 }
 
 // Propagate top 4 matches from left and right match groups

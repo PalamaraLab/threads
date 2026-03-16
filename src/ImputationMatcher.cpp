@@ -191,7 +191,7 @@ void ImputationMatcher::process_site(const std::vector<bool>& genotype) {
       throw std::runtime_error(prompt);
     }
   }
-  sorting = next_sorting;
+  std::swap(sorting, next_sorting);
   sites_processed++;
 }
 

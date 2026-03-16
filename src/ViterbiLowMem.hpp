@@ -17,6 +17,7 @@
 #ifndef THREADS_ARG_VITERBI_LOW_MEM_HPP
 #define THREADS_ARG_VITERBI_LOW_MEM_HPP
 
+#include <deque>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -61,27 +62,36 @@ class ViterbiState {
 public:
   ViterbiState(int _target_id, std::vector<int> _sample_ids);
 
-  void process_site(const std::vector<int>& genotype, double rho, double rho_c, double _mu,
+  void process_site(const int* genotype, double rho, double rho_c, double _mu,
                     double _mu_c);
+  void process_site(const std::vector<int>& genotype, double rho, double rho_c, double _mu,
+                    double _mu_c) {
+    process_site(genotype.data(), rho, rho_c, _mu, _mu_c);
+  }
   void set_samples(std::unordered_set<int> new_sample_ids);
   int count_branches() const;
   void prune();
   ViterbiPath traceback();
 
 private:
-  std::unordered_map<std::size_t, TracebackNode> traceback_states;
+  // Arena for TracebackNode storage — deque guarantees pointer stability
+  std::deque<TracebackNode> traceback_nodes;
+  TracebackNode* alloc_node(int sample_id, int site, TracebackNode* previous, double score);
+  // Used only during prune to deduplicate copied nodes
   TracebackNode* recursive_insert(std::unordered_map<std::size_t, TracebackNode>& state_map,
                                   TracebackNode* state);
 
 public:
   int target_id = 0;
   int best_match = -1;
+  int best_match_idx = 0;
   double best_score = 0.0;
   int sites_processed = 0;
   double mutation_penalty = 0.0;
   std::vector<int> sample_ids;
   std::vector<double> sample_scores;
-  std::unordered_map<int, TracebackNode*> current_tracebacks;
+  // Parallel to sample_ids: traceback pointer for each sample
+  std::vector<TracebackNode*> current_traceback_ptrs;
 };
 
 #endif // THREADS_ARG_VITERBI_LOW_MEM_HPP

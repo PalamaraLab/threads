@@ -28,17 +28,17 @@ HMM::HMM(Demography demography, std::vector<double> bp_sizes, std::vector<double
   compute_recombination_scores(cm_sizes);
   compute_mutation_scores(bp_sizes, mutation_rate);
 
-  // TODO Profile usage of std containers (ticket #25)
+  trellis.reserve(bp_sizes.size());
+  pointers.reserve(bp_sizes.size());
   for (std::size_t i = 0; i < bp_sizes.size(); i++) {
-    std::vector<double> trellis_row(num_states, 0.0);
-    std::vector<unsigned short> pointer_row(num_states, 0);
-    trellis.push_back(trellis_row);
-    pointers.push_back(pointer_row);
+    trellis.emplace_back(num_states, 0.0);
+    pointers.emplace_back(num_states, 0);
   }
 }
 
 std::vector<double> HMM::compute_expected_times(Demography demography, const int K) {
   std::vector<double> result;
+  result.reserve(K);
   double k = static_cast<double>(num_states);
   boost::math::exponential e;
 
@@ -50,39 +50,45 @@ std::vector<double> HMM::compute_expected_times(Demography demography, const int
 }
 
 void HMM::compute_recombination_scores(std::vector<double> cm_sizes) {
+  const double log_K = std::log(num_states);
+  non_transition_score.reserve(cm_sizes.size());
+  transition_score.reserve(cm_sizes.size());
   for (std::size_t i = 0; i < cm_sizes.size(); i++) {
-    non_transition_score.push_back(std::vector<double>());
-    transition_score.push_back(std::vector<double>());
+    std::vector<double> non_trans(num_states);
+    std::vector<double> trans(num_states);
     for (int k = 0; k < num_states; k++) {
-      double t = expected_times[k];
-      const double l = 2. * 0.01 * cm_sizes[i] * t;
-      const double trans = std::log1p(-std::exp(-l)) - std::log(num_states);
+      const double l = 2. * 0.01 * cm_sizes[i] * expected_times[k];
+      const double t = std::log1p(-std::exp(-l)) - log_K;
 
       // log-prob of transitioning
-      transition_score[i].push_back(trans);
+      trans[k] = t;
 
       // log-prob of *not* transitioning
-      non_transition_score[i].push_back(std::log(std::exp(-l) + std::exp(trans)));
+      non_trans[k] = std::log(std::exp(-l) + std::exp(t));
     }
+    transition_score.push_back(std::move(trans));
+    non_transition_score.push_back(std::move(non_trans));
   }
 }
 
 void HMM::compute_mutation_scores(std::vector<double> bp_sizes, double mutation_rate) {
+  hom_score.reserve(bp_sizes.size());
+  het_score.reserve(bp_sizes.size());
   for (std::size_t i = 0; i < bp_sizes.size(); i++) {
-    hom_score.push_back(std::vector<double>());
-    het_score.push_back(std::vector<double>());
+    std::vector<double> hom(num_states);
+    std::vector<double> het(num_states);
     for (int k = 0; k < num_states; k++) {
-      double t = expected_times[k];
-
       // TODO: use mean-bp sizes here as in the main algorithm
-      const double l = 2. * mutation_rate * bp_sizes[i] * t;
+      const double l = 2. * mutation_rate * bp_sizes[i] * expected_times[k];
 
       // log-prob of mutating
-      het_score[i].push_back(std::log1p(-std::exp(-l)));
+      het[k] = std::log1p(-std::exp(-l));
 
       // log-prob of *not* mutating
-      hom_score[i].push_back(-l);
+      hom[k] = -l;
     }
+    het_score.push_back(std::move(het));
+    hom_score.push_back(std::move(hom));
   }
 }
 
@@ -107,12 +113,14 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
   double score = 0.0;
   unsigned short running_argmax = 0;
   for (int j = 1; j < neighborhood_size; j++) {
+    const int js = j + start;
     for (int i = 0; i < num_states; i++) {
+      // Hoist mut_score out of the inner k-loop: it only depends on i, not k
+      const double mut_score = observations[j] ? het_score[js][i] : hom_score[js][i];
       double running_max = 0;
       for (int k = 0; k < num_states; k++) {
-        double mut_score = observations[j] ? het_score[j + start][i] : hom_score[j + start][i];
         double rec_score =
-            k == i ? non_transition_score[j + start][k] : transition_score[j + start][k];
+            k == i ? non_transition_score[js][k] : transition_score[js][k];
 
         score = trellis[j - 1 + start][k] + rec_score + mut_score;
 
@@ -121,8 +129,8 @@ std::vector<int> HMM::breakpoints(std::vector<bool> observations, int start) {
           running_argmax = static_cast<unsigned short>(k);
         }
       }
-      trellis[j + start][i] = running_max;
-      pointers[j + start][i] = running_argmax;
+      trellis[js][i] = running_max;
+      pointers[js][i] = running_argmax;
     }
   }
 
