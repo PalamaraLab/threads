@@ -21,7 +21,7 @@
 #include <cassert>
 #include <fstream>
 #include <iostream>
-#include <math.h>
+#include <cmath>
 #include <memory>
 #include <numeric>
 #include <set>
@@ -40,7 +40,8 @@ const int END_ALLELE = 0;
 const int HMM_SPLIT_THRESHOLD = 1000;
 
 inline std::size_t pair_key(int i, int j) {
-  return (static_cast<std::size_t>(i) << 32) | static_cast<std::size_t>(j);
+  return (static_cast<std::size_t>(static_cast<uint32_t>(i)) << 32) |
+         static_cast<std::size_t>(static_cast<uint32_t>(j));
 }
 
 } // namespace
@@ -56,16 +57,14 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
       physical_positions(_physical_positions), genetic_positions(_genetic_positions),
       demography(Demography(ne, ne_times)) {
   if (physical_positions.size() != genetic_positions.size()) {
-    std::cerr << "Map lengths don't match.\n";
-    exit(1);
+    throw std::runtime_error("Map lengths don't match.");
   }
   else if (physical_positions.size() <= 2) {
-    std::cerr << "Need at least 3 sites, found " << physical_positions.size() << std::endl;
-    exit(1);
+    throw std::runtime_error("Need at least 3 sites, found " +
+                             std::to_string(physical_positions.size()));
   }
   if (mutation_rate <= 0) {
-    std::cerr << "Need a strictly positive mutation rate.\n";
-    exit(1);
+    throw std::runtime_error("Need a strictly positive mutation rate.");
   }
   num_sites = static_cast<int>(physical_positions.size());
   num_samples = 0;
@@ -73,14 +72,14 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
 #ifdef THREADS_FAST_LS_CHECK_IN_ORDER
   for (int i = 0; i < num_sites - 1; i++) {
     if (physical_positions[i + 1] <= physical_positions[i]) {
-      cerr << "Physical positions must be strictly increasing, found ";
-      cerr << physical_positions[i + 1] << " after " << physical_positions[i] << endl;
-      exit(1);
+      throw std::runtime_error("Physical positions must be strictly increasing, found " +
+                               std::to_string(physical_positions[i + 1]) + " after " +
+                               std::to_string(physical_positions[i]));
     }
     if (genetic_positions[i + 1] <= genetic_positions[i]) {
-      cerr << "Genetic coordinates must be strictly increasing, found ";
-      cerr << genetic_positions[i + 1] << " after " << genetic_positions[i] << endl;
-      exit(1);
+      throw std::runtime_error("Genetic coordinates must be strictly increasing, found " +
+                               std::to_string(genetic_positions[i + 1]) + " after " +
+                               std::to_string(genetic_positions[i]));
     }
   }
 #endif // THREADS_FAST_LS_CHECK_IN_ORDER
@@ -108,9 +107,8 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
     }
   }
   if (trim_pos_start_idx >= trim_pos_end_idx - 3) {
-    std::cerr << "Too few positions left after applying burn-in, need at least 3. Aborting."
-              << std::endl;
-    exit(1);
+    throw std::runtime_error(
+        "Too few positions left after applying burn-in, need at least 3.");
   }
 
   // Initialize both ends of the linked-list columns
@@ -135,15 +133,12 @@ ThreadsFastLS::ThreadsFastLS(std::vector<double> _physical_positions,
   std::tie(cm_boundaries, cm_sizes) = site_sizes(genetic_positions);
 
   if (use_hmm) {
-    hmm = new HMM(demography, bp_sizes, cm_sizes, mutation_rate, 64);
-  }
-  else {
-    hmm = nullptr;
+    hmm = std::make_unique<HMM>(demography, bp_sizes, cm_sizes, mutation_rate, 64);
   }
 }
 
 std::tuple<std::vector<double>, std::vector<double>>
-ThreadsFastLS::site_sizes(std::vector<double> positions) {
+ThreadsFastLS::site_sizes(const std::vector<double>& positions) {
   // Find mid-points between sites
   std::size_t M = positions.size();
   std::vector<double> pos_means(M - 1);
@@ -161,8 +156,7 @@ ThreadsFastLS::site_sizes(std::vector<double> positions) {
   site_sizes[M - 1] = mean_size;
   for (double s : site_sizes) {
     if (s < 0) {
-      std::cerr << "Found negative site size " << s << std::endl;
-      exit(1);
+      throw std::runtime_error("Found negative site size " + std::to_string(s));
     }
   }
   std::vector<double> boundaries(M + 1);
@@ -182,7 +176,7 @@ std::vector<double> ThreadsFastLS::trimmed_positions() const {
 
 void ThreadsFastLS::delete_hmm() {
   if (use_hmm) {
-    delete hmm;
+    hmm.reset();
     use_hmm = false;
   }
 }
@@ -206,12 +200,10 @@ void ThreadsFastLS::insert(const std::vector<bool>& genotype) {
 void ThreadsFastLS::insert(const int ID, const std::vector<bool>& genotype) {
 
   if (ID_map.find(ID) != ID_map.end()) {
-    std::cerr << "ID " << ID << " is already in the panel.\n";
-    exit(1);
+    throw std::runtime_error("ID " + std::to_string(ID) + " is already in the panel.");
   }
   if (static_cast<int>(genotype.size()) != num_sites) {
-    std::cerr << "Number of input markers does not match map.\n";
-    exit(1);
+    throw std::runtime_error("Number of input markers does not match map.");
   }
   int insert_index = num_samples;
   ID_map[ID] = insert_index;
@@ -377,8 +369,7 @@ std::pair<TracebackState*, Node*> ThreadsFastLS::fastLS(const std::vector<bool>&
     int n_states = static_cast<int>(current_states.size());
     max_states = std::max(n_states, max_states);
     if (n_states == 0) {
-      std::cerr << "No states left on stack, something is messed up in the algorithm.\n";
-      exit(1);
+      throw std::runtime_error("No states left on stack, something is messed up in the algorithm.");
     }
 
     // Heuristically get a bound on states we want to add
@@ -418,8 +409,8 @@ std::pair<TracebackState*, Node*> ThreadsFastLS::fastLS(const std::vector<bool>&
     }
 
     if (new_states.size() == 0) {
-      std::cerr << "The algorithm is in an illegal state because no new_states were created.\n";
-      exit(1);
+      throw std::runtime_error(
+          "The algorithm is in an illegal state because no new_states were created.");
     }
 
     // Find a best state in the current layer and recombine.
@@ -428,9 +419,10 @@ std::pair<TracebackState*, Node*> ThreadsFastLS::fastLS(const std::vector<bool>&
                            [](const auto& s1, const auto& s2) { return s1.score < s2.score; }));
 
     if (best_extension.score < z - 0.001 || best_extension.score > z + 0.001) {
-      std::cerr << "The algorithm is in an illegal state because z != best_extension.score, found ";
-      std::cerr << "best_extension.score=" << best_extension.score << " and z=" << z << std::endl;
-      exit(1);
+      throw std::runtime_error(
+          "The algorithm is in an illegal state because z != best_extension.score, found "
+          "best_extension.score=" + std::to_string(best_extension.score) +
+          " and z=" + std::to_string(z));
     }
 
     // Add the new recombinant state to the stack (we never enter this clause on the first
@@ -510,8 +502,8 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
     std::vector<StatePair> new_pairs;
     max_state_pairs = std::max(n_state_pairs, max_state_pairs);
     if (n_state_pairs == 0) {
-      std::cerr << "No state pairs left on stack, something is messed up in the algorithm.\n";
-      exit(1);
+      throw std::runtime_error(
+          "No state pairs left on stack, something is messed up in the algorithm.");
     }
 
     // Heuristically get a bound on states we want to add,
@@ -556,8 +548,8 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
       }
     }
     else {
-      std::cerr << "Only 0, 1, 2-alleles allowed." << std::endl;
-      exit(1);
+      throw std::runtime_error("Only 0, 1, 2-alleles allowed, found " +
+                               std::to_string(allele));
     }
 
     // Set local minima, this maps (anchor, traceback) to a score
@@ -883,8 +875,8 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
     // END OF EXTENSION LOOP
 
     if (new_pairs.size() == 0) {
-      std::cerr << "The algorithm is in an illegal state because no new_states were created.\n";
-      exit(1);
+      throw std::runtime_error(
+          "The algorithm is in an illegal state because no new_states were created.");
     }
 
     // SINGLE RECOMBINATION EVENTS
@@ -939,9 +931,10 @@ ThreadsFastLS::fastLS_diploid(const std::vector<int>& genotype) {
       z = double_recombinant_score;
     }
     if (std::abs(best_pair.score - z) > 0.0001) {
-      std::cerr << "The algorithm is in an illegal state because z != best_pair.score, found ";
-      std::cerr << "best_pair.score=" << best_pair.score << " and z=" << z << std::endl;
-      exit(1);
+      throw std::runtime_error(
+          "The algorithm is in an illegal state because z != best_pair.score, found "
+          "best_pair.score=" + std::to_string(best_pair.score) +
+          " and z=" + std::to_string(z));
     }
     current_pairs = new_pairs;
     new_pairs.clear();
@@ -1183,8 +1176,8 @@ ThreadsFastLS::recombination_penalties_correct() {
 
 double ThreadsFastLS::date_segment(const int num_het_sites, const int start, const int end) {
   if (start > end) {
-    std::cerr << "Can't date a segment with length <= 0\n";
-    exit(1);
+    throw std::runtime_error("Can't date a segment with start > end (" +
+                             std::to_string(start) + " > " + std::to_string(end) + ")");
   }
   double bp_size = 0;
   double cm_size = 0;
@@ -1505,13 +1498,11 @@ std::pair<int, int> ThreadsFastLS::overflow_region(const std::vector<bool>& geno
 std::vector<bool> ThreadsFastLS::fetch_het_hom_sites(const int id1, const int id2, const int start,
                                                      const int end) {
   if (ID_map.find(id1) == ID_map.end()) {
-    std::cerr << "fetch_het_hom_sites bad id1 " << id1 << std::endl;
-    exit(1);
+    throw std::runtime_error("fetch_het_hom_sites bad id1 " + std::to_string(id1));
   }
 
   if (ID_map.find(id2) == ID_map.end()) {
-    std::cerr << "fetch_het_hom_sites bad id2 " << id2 << std::endl;
-    exit(1);
+    throw std::runtime_error("fetch_het_hom_sites bad id2 " + std::to_string(id2));
   }
   std::vector<bool> het_hom_sites(end - start);
   for (int i = start; i < end; i++) {
@@ -1534,8 +1525,8 @@ ThreadsFastLS::het_sites_from_thread(const int focal_ID, const std::vector<int> 
     int segment_end = seg_i == num_segments - 1 ? (static_cast<int>(physical_positions.back()) + 1)
                                                 : bp_starts[seg_i + 1];
     int target_ID = target_IDs[seg_i][0];
-    while (segment_start <= physical_positions[site_i] &&
-           physical_positions[site_i] < segment_end && site_i < num_sites) {
+    while (site_i < num_sites && segment_start <= physical_positions[site_i] &&
+           physical_positions[site_i] < segment_end) {
       if (panel[ID_map.at(focal_ID)][site_i]->genotype !=
           panel[ID_map.at(target_ID)][site_i]->genotype) {
         het_sites.push_back(static_cast<int>(physical_positions[site_i]));
@@ -1544,8 +1535,8 @@ ThreadsFastLS::het_sites_from_thread(const int focal_ID, const std::vector<int> 
     }
   }
   if (site_i != num_sites) {
-    std::cerr << "Found " << site_i + 1 << " sites, expected " << num_sites << std::endl;
-    exit(1);
+    throw std::runtime_error("Found " + std::to_string(site_i + 1) +
+                             " sites, expected " + std::to_string(num_sites));
   }
   return het_sites;
 }
