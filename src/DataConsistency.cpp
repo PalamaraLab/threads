@@ -189,7 +189,9 @@ void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
                 // Otherwise we try traversing the local threading graph to find another carrier
                 int current_target = converter.current_target;
                 while (current_target != -1 && genotypes.at(current_target) != 1) {
-                    current_target = instruction_converters.at(current_target).current_target;
+                    int next = instruction_converters.at(current_target).current_target;
+                    if (next == current_target) break;  // avoid self-referencing loop
+                    current_target = next;
                 }
                 if (current_target > 0 && genotypes.at(current_target) == 1) {
                     new_target = current_target;
@@ -198,6 +200,12 @@ void ConsistencyWrapper::process_site(std::vector<int>& genotypes) {
                     new_target = first_carrier;
                 }
             }
+        }
+        // Self-referencing targets break mismatch recording (comparing a
+        // sample's genotype with itself is always equal), so replace with
+        // sample 0 which is always correctly reconstructed.
+        if (new_target == current_hap) {
+            new_target = 0;
         }
         if (new_target != converter.current_target) {
             // Force a new threading segment bounded by [0, allele_age) and

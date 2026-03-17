@@ -17,7 +17,7 @@
 #include "AlleleAges.hpp"
 
 #include <algorithm>
-#include <numeric>
+#include <cmath>
 #include <vector>
 
 AgeEstimator::AgeEstimator(const ThreadingInstructions& instructions) {
@@ -51,7 +51,12 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         } else {
             if (genotypes.at(i) == 1) {
                 int target = threading_iterators.at(i).current_target;
-                path_lengths[i] = path_lengths[target] + 1;
+                // Self-referencing targets don't extend carrier chains
+                if (static_cast<size_t>(target) != i) {
+                    path_lengths[i] = path_lengths[target] + 1;
+                } else {
+                    path_lengths[i] = 1;
+                }
             } else {
                 path_lengths[i] = 0;
             }
@@ -80,26 +85,31 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         size_t start_tmp = path_start;
         while (start_tmp > 0) {
             int next_sample = threading_iterators.at(start_tmp).current_target;
+            // Skip self-referencing targets to avoid infinite loops
+            if (next_sample == static_cast<int>(start_tmp)) {
+                break;
+            }
             double this_tmrca = threading_iterators.at(start_tmp).current_tmrca;
             running_max = std::max(running_max, this_tmrca);
             tmrcas.at(next_sample) = running_max;
             start_tmp = next_sample;
-        }
-        if (start_tmp != 0) {
-            throw std::runtime_error("Invalid threading instruction traversal.");
         }
 
         for (int i = 0; i < num_samples; i++) {
             if (tmrcas.at(i) < 0) {
                 int target = threading_iterators.at(i).current_target;
                 double tmrca = threading_iterators.at(i).current_tmrca;
-                tmrcas.at(i) = std::max(tmrcas.at(target), tmrca);
+                if (target == i || target < 0 || tmrcas.at(target) < 0) {
+                    // Self-ref or unfilled target: use own tmrca
+                    tmrcas.at(i) = tmrca;
+                } else {
+                    tmrcas.at(i) = std::max(tmrcas.at(target), tmrca);
+                }
             }
         }
 
         // Sort samples by tmrca, then sweep to find the threshold that
         // maximizes: carriers_at_or_below(t) + non_carriers_above(t).
-        // This is O(n log n) vs O(n × k) for the previous transform_reduce.
         struct TmrcaSample {
             double tmrca;
             int genotype;
@@ -111,8 +121,11 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
             sorted_samples.push_back({tmrcas[i], genotypes[i]});
             if (genotypes[i] == 0) total_non_carriers++;
         }
+        // NaN-safe sort: put NaN values last
         std::sort(sorted_samples.begin(), sorted_samples.end(),
                   [](const TmrcaSample& a, const TmrcaSample& b) {
+                      if (std::isnan(a.tmrca)) return false;
+                      if (std::isnan(b.tmrca)) return true;
                       return a.tmrca < b.tmrca;
                   });
 
@@ -128,6 +141,8 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         size_t n_sorted = sorted_samples.size();
         while (i_sweep < n_sorted) {
             double current_t = sorted_samples[i_sweep].tmrca;
+            // Stop at NaN values (they are sorted to the end)
+            if (std::isnan(current_t)) break;
             // Process all samples at this tmrca
             int carriers_at_t = 0;
             int non_carriers_at_t = 0;

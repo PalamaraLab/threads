@@ -139,12 +139,14 @@ def checks(reference_panel, query, mutation_rate, recombination_rates):
 
 def set_emission_probabilities(reference_panel, query, mutation_rate):
     m, n = reference_panel.shape
-    n_alleles = np.int8(
-        [
-            len(np.unique(np.append(reference_panel[j, :], query[:, j])))
-            for j in range(reference_panel.shape[0])
-        ]
-    )
+
+    # Vectorized check: a site is biallelic if it has both 0s and 1s across
+    # the combined reference+query panel. For binary data this is equivalent
+    # to checking that the row min != row max (after including the query).
+    combined_min = np.minimum(reference_panel.min(axis=1), query.min(axis=0))
+    combined_max = np.maximum(reference_panel.max(axis=1), query.max(axis=0))
+    is_polymorphic = combined_min != combined_max
+    n_alleles = np.where(is_polymorphic, np.int8(2), np.int8(1))
 
     if not np.all((n_alleles == 2) | (n_alleles == 1)):
         raise ValueError("Only fixed or bi-allelic sites allowed")
@@ -158,13 +160,12 @@ def set_emission_probabilities(reference_panel, query, mutation_rate):
 
     # Evaluate emission probabilities here, using the mutation rate
     e = np.zeros((m, 2))
-    for j in range(m):
-        if n_alleles[j] == 1:  # In case we're at an invariant site
-            e[j, 0] = 0
-            e[j, 1] = 1
-        else:
-            e[j, 0] = mutation_rate[j]
-            e[j, 1] = 1 - mutation_rate[j]
+    e[:, 0] = mutation_rate
+    e[:, 1] = 1 - mutation_rate
+    # Invariant sites: emission for mismatch is 0, match is 1
+    invariant = n_alleles == 1
+    e[invariant, 0] = 0
+    e[invariant, 1] = 1
     return e
 
 
