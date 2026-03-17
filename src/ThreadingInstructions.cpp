@@ -697,10 +697,13 @@ std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector
 
     // Reference counting: how many future samples need each sample's cum row
     std::vector<int> cum_ref(n, 0);
-    for (int i = 1; i < n; i++) {
-        std::set<int> seen;
-        for (int t : instructions[i].targets) {
-            if (t != i && seen.insert(t).second) cum_ref[t]++;
+    {
+        std::vector<bool> seen(n, false);
+        for (int i = 1; i < n; i++) {
+            for (int t : instructions[i].targets)
+                if (t != i && !seen[t]) { seen[t] = true; cum_ref[t]++; }
+            for (int t : instructions[i].targets)
+                if (t != i) seen[t] = false;
         }
     }
 
@@ -751,10 +754,15 @@ std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector
         const int* mm_data = instructions[i].mismatches.data();
         const int n_mm = static_cast<int>(instructions[i].mismatches.size());
         const int8_t* my_signs = &tree_mm_sign[tree_mm_offset[i]];
+        const bool need_cum = (cum_ref[i] > 0);
 
-        int my_row = alloc_row();
-        sample_to_row[i] = my_row;
-        double* my_cum = cum_pool[my_row].data();
+        int my_row = -1;
+        double* my_cum = nullptr;
+        if (need_cum) {
+            my_row = alloc_row();
+            sample_to_row[i] = my_row;
+            my_cum = cum_pool[my_row].data();
+        }
 
         const int seg_off = tree_seg_offset[i];
         int n_mapped_segs;
@@ -789,20 +797,21 @@ std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector
                 }
                 total += base + corr;
 
-                // Build per-interval cum: offset copy from target + corrections
-                const double offset = my_cum[first_ivl] - tgt_cum[first_ivl];
-                std::memcpy(&my_cum[first_ivl + 1], &tgt_cum[first_ivl + 1],
-                            (last_ivl - first_ivl) * sizeof(double));
-                for (int j = first_ivl + 1; j <= last_ivl; j++) {
-                    my_cum[j] += offset;
-                }
-                const int* mm_ivl_data = tree_mm_ivl.data() + tree_mm_offset[i];
-                for (const int* it = lo; it != hi; ++it) {
-                    const int k = static_cast<int>(it - mm_data);
-                    const int mm_ivl = mm_ivl_data[k];
-                    const double c = xp[*it] * my_signs[k];
-                    for (int j = mm_ivl + 1; j <= last_ivl; j++) {
-                        my_cum[j] += c;
+                if (need_cum) {
+                    const double offset = my_cum[first_ivl] - tgt_cum[first_ivl];
+                    std::memcpy(&my_cum[first_ivl + 1], &tgt_cum[first_ivl + 1],
+                                (last_ivl - first_ivl) * sizeof(double));
+                    for (int j = first_ivl + 1; j <= last_ivl; j++) {
+                        my_cum[j] += offset;
+                    }
+                    const int* mm_ivl_data = tree_mm_ivl.data() + tree_mm_offset[i];
+                    for (const int* it = lo; it != hi; ++it) {
+                        const int k = static_cast<int>(it - mm_data);
+                        const int mm_ivl = mm_ivl_data[k];
+                        const double c = xp[*it] * my_signs[k];
+                        for (int j = mm_ivl + 1; j <= last_ivl; j++) {
+                            my_cum[j] += c;
+                        }
                     }
                 }
             } else {
@@ -826,7 +835,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector
                     }
                     if (b > prev)
                         ivl_sum += carry * (prefix_x[b] - prefix_x[prev]);
-                    my_cum[j + 1] = my_cum[j] + ivl_sum;
+                    if (need_cum) my_cum[j + 1] = my_cum[j] + ivl_sum;
                     total += ivl_sum;
                 }
             }
@@ -835,11 +844,15 @@ std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector
 
         // Release targets no longer needed
         {
-            std::set<int> seen;
-            for (int t : instructions[i].targets) {
-                if (t != i && seen.insert(t).second) {
-                    if (--cum_ref[t] == 0) release_row(t);
-                }
+            const auto& tgts = instructions[i].targets;
+            const int nt = static_cast<int>(tgts.size());
+            for (int si = 0; si < nt; si++) {
+                int t = tgts[si];
+                if (t == i) continue;
+                bool dup = false;
+                for (int sj = 0; sj < si; sj++)
+                    if (tgts[sj] == t) { dup = true; break; }
+                if (!dup && --cum_ref[t] == 0) release_row(t);
             }
         }
         // Release own row if no one references us
@@ -999,10 +1012,14 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
 
     const size_t cum_stride = static_cast<size_t>(ni + 1) * k;
     std::vector<int> cum_ref(n, 0);
-    for (int i = 1; i < n; i++) {
-        std::set<int> seen;
-        for (int t : instructions[i].targets)
-            if (t != i && seen.insert(t).second) cum_ref[t]++;
+    {
+        std::vector<bool> seen(n, false);
+        for (int i = 1; i < n; i++) {
+            for (int t : instructions[i].targets)
+                if (t != i && !seen[t]) { seen[t] = true; cum_ref[t]++; }
+            for (int t : instructions[i].targets)
+                if (t != i) seen[t] = false;
+        }
     }
     std::vector<std::vector<double>> cum_pool;
     std::vector<int> free_rows, sample_to_row(n, -1);
@@ -1042,8 +1059,13 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
         const int* mm_data = instructions[i].mismatches.data();
         const int n_mm = static_cast<int>(instructions[i].mismatches.size());
         const int8_t* my_signs = &tree_mm_sign[tree_mm_offset[i]];
-        int my_row = alloc_row(); sample_to_row[i] = my_row;
-        double* my_cum = cum_pool[my_row].data();
+        const bool need_cum = (cum_ref[i] > 0);
+        int my_row = -1;
+        double* my_cum = nullptr;
+        if (need_cum) {
+            my_row = alloc_row(); sample_to_row[i] = my_row;
+            my_cum = cum_pool[my_row].data();
+        }
         const int seg_off = tree_seg_offset[i];
         int n_mapped_segs = ((i+1<n) ? tree_seg_offset[i+1]
                               : static_cast<int>(tree_seg_first_ivl.size())-1) - seg_off;
@@ -1061,24 +1083,46 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
                 const int* lo = std::lower_bound(mm_data, mm_data+n_mm, sa);
                 const int* hi = std::lower_bound(mm_data, mm_data+n_mm, sb);
 
+                // Compute output: base from target cum + mismatch correction
                 for (int c = 0; c < k; c++) {
                     double base = tc[li*k+c] - tc[fi*k+c], corr = 0.0;
                     for (const int* it = lo; it != hi; ++it)
                         corr += xp[*it*k+c] * my_signs[it-mm_data];
                     sample_out[c] += base + corr;
                 }
-                // Build cum
-                for (int j = fi+1; j <= li; j++)
-                    for (int c = 0; c < k; c++)
-                        my_cum[j*k+c] = tc[j*k+c] + my_cum[fi*k+c] - tc[fi*k+c];
-                const int* miv = tree_mm_ivl.data() + tree_mm_offset[i];
-                for (const int* it = lo; it != hi; ++it) {
-                    int kk = static_cast<int>(it-mm_data);
-                    int mivl = miv[kk]; double sv = my_signs[kk];
-                    const double* xs = &xp[*it*k];
-                    for (int j = mivl+1; j <= li; j++) {
-                        double* d = &my_cum[j*k];
-                        for (int c = 0; c < k; c++) d[c] += xs[c]*sv;
+                // Build cum only if someone will reference us
+                if (need_cum) {
+                    const double* fi_cum = &my_cum[fi*k];
+                    const double* fi_tc = &tc[fi*k];
+                    for (int j = fi+1; j <= li; j++)
+                        for (int c = 0; c < k; c++)
+                            my_cum[j*k+c] = tc[j*k+c] + fi_cum[c] - fi_tc[c];
+                    // Apply mismatch corrections via deferred deltas + prefix sum
+                    const int n_seg_ivls = li - fi;
+                    if (lo != hi && n_seg_ivls > 0) {
+                        std::vector<double> mm_corr(static_cast<size_t>(n_seg_ivls) * k, 0.0);
+                        const int* miv = tree_mm_ivl.data() + tree_mm_offset[i];
+                        for (const int* it = lo; it != hi; ++it) {
+                            int kk = static_cast<int>(it-mm_data);
+                            int mivl = miv[kk]; double sv = my_signs[kk];
+                            const double* xs = &xp[*it*k];
+                            int idx = mivl - fi;
+                            if (idx >= 0 && idx < n_seg_ivls) {
+                                double* d = &mm_corr[idx * k];
+                                for (int c = 0; c < k; c++) d[c] += xs[c]*sv;
+                            }
+                        }
+                        double* running = &mm_corr[0];
+                        for (int c = 0; c < k; c++)
+                            my_cum[(fi+1)*k+c] += running[c];
+                        for (int j = 1; j < n_seg_ivls; j++) {
+                            double* cur = &mm_corr[j*k];
+                            const double* prv = &mm_corr[(j-1)*k];
+                            for (int c = 0; c < k; c++) {
+                                cur[c] += prv[c];
+                                my_cum[(fi+1+j)*k+c] += cur[c];
+                            }
+                        }
                     }
                 }
             } else {
@@ -1095,14 +1139,23 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
                             cc = 1-cc; ivl_sum += xp[ms*k+c]*cc; prev = ms+1;
                         }
                         if (b > prev) ivl_sum += cc*(prefix_x[b*k+c]-prefix_x[prev*k+c]);
-                        my_cum[(j+1)*k+c] = my_cum[j*k+c]+ivl_sum; sample_out[c] += ivl_sum;
+                        if (need_cum) my_cum[(j+1)*k+c] = my_cum[j*k+c]+ivl_sum;
+                        sample_out[c] += ivl_sum;
                     }
                 }
             }
         }
-        { std::set<int> seen;
-          for (int t : instructions[i].targets)
-              if (t!=i && seen.insert(t).second && --cum_ref[t]==0) release_row(t);
+        {
+            const auto& tgts = instructions[i].targets;
+            const int nt = static_cast<int>(tgts.size());
+            for (int si = 0; si < nt; si++) {
+                int t = tgts[si];
+                if (t == i) continue;
+                bool dup = false;
+                for (int sj = 0; sj < si; sj++)
+                    if (tgts[sj] == t) { dup = true; break; }
+                if (!dup && --cum_ref[t] == 0) release_row(t);
+            }
         }
         if (cum_ref[i]==0) release_row(i);
     }
