@@ -23,6 +23,7 @@
 #include "pybind_utils.hpp"
 
 #include <pybind11/numpy.h>
+#include <cstring>
 #include <vector>
 
 namespace py = pybind11;
@@ -175,7 +176,31 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"))
       .def("left_multiply_tree", &ThreadingInstructions::left_multiply_tree, py::arg("x"))
       .def("right_multiply_tree_batch", &ThreadingInstructions::right_multiply_tree_batch, py::arg("x_flat"), py::arg("k"))
-      .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"));
+      .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"))
+      .def("right_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
+        auto buf = arr.request();
+        if (buf.ndim != 1 || static_cast<int>(buf.shape[0]) != self.num_sites * k)
+            throw std::runtime_error("Input must be 1D array of length num_sites * k");
+        std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
+        auto result = self.right_multiply_tree_batch(x_flat, k);
+        py::array_t<double> out(static_cast<size_t>(result.size()));
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("x_flat"), py::arg("k"))
+      .def("left_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
+        auto buf = arr.request();
+        if (buf.ndim != 1 || static_cast<int>(buf.shape[0]) != self.num_samples * k)
+            throw std::runtime_error("Input must be 1D array of length num_samples * k");
+        std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
+        auto result = self.left_multiply_tree_batch(x_flat, k);
+        py::array_t<double> out(static_cast<size_t>(result.size()));
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("x_flat"), py::arg("k"));
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
