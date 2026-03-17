@@ -25,7 +25,7 @@
 /// for a certain interval, store the matches for all samples
 class MatchGroup {
 public:
-  MatchGroup(int _num_samples, double cm_position);
+  MatchGroup(int _num_samples, int _expected_queries, double cm_position);
   MatchGroup(const std::vector<int>& target_ids,
              const std::vector<std::unordered_set<int>>& matches, const double _cm_position);
   void filter_matches(int min_matches);
@@ -47,6 +47,7 @@ public:
 
   // Do all the work
   void process_site(const std::vector<int>& genotype);
+  void process_site_raw(const int* genotype);
   void process_all_sites(const std::vector<std::vector<int>>& genotypes);
   void process_all_sites_flat(const int32_t* data, int n_sites, int n_haps);
   void propagate_adjacent_matches();

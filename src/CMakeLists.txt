@@ -18,6 +18,14 @@
 find_package(Boost REQUIRED)
 message(STATUS "Found Boost ${Boost_VERSION}")
 
+# Optional OpenMP for parallel Viterbi across targets
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found — parallel Viterbi enabled")
+else()
+    message(STATUS "OpenMP not found — building single-threaded")
+endif()
+
 # Threads static library
 set(threads_arg_src
     Demography.cpp
@@ -72,7 +80,14 @@ target_link_libraries(threads_arg
     PRIVATE
         Boost::headers
         project_warnings
+        $<$<BOOL:${OpenMP_CXX_FOUND}>:OpenMP::OpenMP_CXX>
 )
+
+# Native-architecture tuning + LTO for hot numeric kernels
+target_compile_options(threads_arg PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-march=native -O3>
+)
+set_property(TARGET threads_arg PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 # Conditionally create python bindings
 if(PYTHON_BINDINGS)
@@ -91,6 +106,8 @@ if(PYTHON_BINDINGS)
             threads_arg
             project_warnings
     )
+
+    set_property(TARGET threads_arg_python_bindings PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
     install(TARGETS threads_arg_python_bindings LIBRARY DESTINATION .)
 endif()

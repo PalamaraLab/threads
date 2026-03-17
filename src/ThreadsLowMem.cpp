@@ -17,12 +17,15 @@
 #include "ThreadsLowMem.hpp"
 
 #include <algorithm>
-#include <iostream>
 #include <cmath>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
                              const std::vector<double>& _physical_positions,
@@ -94,6 +97,14 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
     }
   }
 
+  // Precompute per-site HMM parameters (avoids recomputing per target)
+  k_per_site.resize(num_sites);
+  l_per_site.resize(num_sites);
+  for (int i = 0; i < num_sites; i++) {
+    k_per_site[i] = 2.0 * 0.01 * cm_sizes[i];
+    l_per_site[i] = 2.0 * mutation_rate * bp_sizes[i];
+  }
+
   // Initialize the psmc-like segment-breaking algorithm
   int min_target_id = *(std::min_element(target_ids.begin(), target_ids.end()));
   if (min_target_id < n_hmm_samples) {
@@ -130,6 +141,7 @@ void ThreadsLowMem::initialize_viterbi(std::vector<std::vector<std::unordered_se
 }
 
 // Internal: process one site from raw pointer (no vector copy)
+// Used by the per-site API; batch methods use their own parallel loops
 void ThreadsLowMem::process_site_viterbi_raw(const int* genotype) {
   bool group_change = false;
 
@@ -139,8 +151,8 @@ void ThreadsLowMem::process_site_viterbi_raw(const int* genotype) {
     match_group_idx++;
     group_change = true;
   }
-  const double k = 2. * 0.01 * cm_sizes[hmm_sites_processed];
-  const double l = 2. * mutation_rate * bp_sizes[hmm_sites_processed];
+  const double k = k_per_site[hmm_sites_processed];
+  const double l = l_per_site[hmm_sites_processed];
   const int n_active = static_cast<int>(active_target_ids.size());
   for (int idx = 0; idx < n_active; ++idx) {
     const int target_id = active_target_ids[idx];
@@ -167,26 +179,110 @@ void ThreadsLowMem::process_site_viterbi(const std::vector<int>& genotype) {
   process_site_viterbi_raw(genotype.data());
 }
 
+// Batch Viterbi: parallelized across targets — each thread processes all sites for its target
 void ThreadsLowMem::process_all_sites_viterbi(const std::vector<std::vector<int>>& genotypes) {
   const int prune_interval = 500;
-  for (const auto& genotype : genotypes) {
-    process_site_viterbi_raw(genotype.data());
-    if (hmm_sites_processed % prune_interval == 0) {
-      prune();
+  const int n_active = static_cast<int>(active_target_ids.size());
+  const int n_groups = static_cast<int>(match_groups.size());
+  const int n_sites_batch = static_cast<int>(genotypes.size());
+  const int site_offset = hmm_sites_processed;
+
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (int idx = 0; idx < n_active; ++idx) {
+    const double t = branch_lengths_vec[idx];
+    const double log_tid = log_target_ids_vec[idx];
+    const int target_id = active_target_ids[idx];
+    int local_group_idx = match_group_idx;
+
+    for (int s = 0; s < n_sites_batch; s++) {
+      const int site = site_offset + s;
+
+      if (local_group_idx < (n_groups - 1) &&
+          (genetic_positions[site] >= match_groups[local_group_idx + 1].cm_position)) {
+        local_group_idx++;
+        hmm_ptrs[idx]->set_samples(
+            match_groups[local_group_idx].match_candidates.at(target_id));
+      }
+
+      const double kt = k_per_site[site] * t;
+      const double lt = l_per_site[site] * t;
+      const double rho_c = kt;
+      const double log1p_rho = -std::log1p(-std::exp(-kt));
+      const double rho = sparse ? log1p_rho : log1p_rho + log_tid;
+      const double mu_c = lt;
+      const double mu = -std::log1p(-std::exp(-lt));
+      hmm_ptrs[idx]->process_site(genotypes[s].data(), rho, rho_c, mu, mu_c);
+
+      if ((site + 1) % prune_interval == 0) {
+        hmm_ptrs[idx]->prune();
+      }
     }
   }
+
+  // Update shared state to reflect all sites processed
+  for (int s = 0; s < n_sites_batch; s++) {
+    const int site = site_offset + s;
+    if (match_group_idx < (n_groups - 1) &&
+        (genetic_positions[site] >= match_groups[match_group_idx + 1].cm_position)) {
+      match_group_idx++;
+    }
+  }
+  hmm_sites_processed += n_sites_batch;
 }
 
 void ThreadsLowMem::process_all_sites_viterbi_flat(const int32_t* data, int n_sites, int n_haps) {
   static_assert(sizeof(int) == sizeof(int32_t), "int and int32_t must be the same size");
   const int prune_interval = 500;
-  for (int s = 0; s < n_sites; s++) {
-    const int* row = reinterpret_cast<const int*>(data + static_cast<std::size_t>(s) * n_haps);
-    process_site_viterbi_raw(row);
-    if (hmm_sites_processed % prune_interval == 0) {
-      prune();
+  const int n_active = static_cast<int>(active_target_ids.size());
+  const int n_groups = static_cast<int>(match_groups.size());
+  const int site_offset = hmm_sites_processed;
+
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (int idx = 0; idx < n_active; ++idx) {
+    const double t = branch_lengths_vec[idx];
+    const double log_tid = log_target_ids_vec[idx];
+    const int target_id = active_target_ids[idx];
+    int local_group_idx = match_group_idx;
+
+    for (int s = 0; s < n_sites; s++) {
+      const int site = site_offset + s;
+      const int* row = reinterpret_cast<const int*>(data + static_cast<std::size_t>(s) * n_haps);
+
+      if (local_group_idx < (n_groups - 1) &&
+          (genetic_positions[site] >= match_groups[local_group_idx + 1].cm_position)) {
+        local_group_idx++;
+        hmm_ptrs[idx]->set_samples(
+            match_groups[local_group_idx].match_candidates.at(target_id));
+      }
+
+      const double kt = k_per_site[site] * t;
+      const double lt = l_per_site[site] * t;
+      const double rho_c = kt;
+      const double log1p_rho = -std::log1p(-std::exp(-kt));
+      const double rho = sparse ? log1p_rho : log1p_rho + log_tid;
+      const double mu_c = lt;
+      const double mu = -std::log1p(-std::exp(-lt));
+      hmm_ptrs[idx]->process_site(row, rho, rho_c, mu, mu_c);
+
+      if ((site + 1) % prune_interval == 0) {
+        hmm_ptrs[idx]->prune();
+      }
     }
   }
+
+  // Update shared state
+  for (int s = 0; s < n_sites; s++) {
+    const int site = site_offset + s;
+    if (match_group_idx < (n_groups - 1) &&
+        (genetic_positions[site] >= match_groups[match_group_idx + 1].cm_position)) {
+      match_group_idx++;
+    }
+  }
+  hmm_sites_processed += n_sites;
 }
 
 void ThreadsLowMem::traceback() {
@@ -197,10 +293,21 @@ void ThreadsLowMem::traceback() {
       break;
     }
   }
-  // Active targets get traceback from HMM
-  for (std::size_t i = 0; i < active_target_ids.size(); i++) {
-    paths.emplace(active_target_ids[i], hmm_ptrs[i]->traceback());
+  // Active targets: traceback in parallel, then insert into map
+  const int n_active = static_cast<int>(active_target_ids.size());
+  std::vector<ViterbiPath> path_vec(n_active, ViterbiPath(0));
+
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (int i = 0; i < n_active; i++) {
+    path_vec[i] = hmm_ptrs[i]->traceback();
   }
+
+  for (int i = 0; i < n_active; i++) {
+    paths.emplace(active_target_ids[i], std::move(path_vec[i]));
+  }
+
   // Build path_ptrs for hets/dating hot path
   path_ptrs.clear();
   path_ptrs.reserve(active_target_ids.size());
@@ -213,7 +320,7 @@ void ThreadsLowMem::traceback() {
 }
 
 // Internal: process one het site from raw pointer
-void ThreadsLowMem::process_site_hets_raw(const int* genotype, int n_haps) {
+void ThreadsLowMem::process_site_hets_raw(const int* genotype) {
   // Handle target 0
   for (int target_id : target_ids) {
     if (target_id == 0) {
@@ -244,21 +351,99 @@ void ThreadsLowMem::process_site_hets_raw(const int* genotype, int n_haps) {
 }
 
 void ThreadsLowMem::process_site_hets(const std::vector<int>& genotype) {
-  process_site_hets_raw(genotype.data(), static_cast<int>(genotype.size()));
+  process_site_hets_raw(genotype.data());
 }
 
+// Batch hets: parallelized across targets
 void ThreadsLowMem::process_all_sites_hets(const std::vector<std::vector<int>>& genotypes) {
-  for (const auto& genotype : genotypes) {
-    process_site_hets_raw(genotype.data(), static_cast<int>(genotype.size()));
+  const int n_active = static_cast<int>(active_target_ids.size());
+  const int n_sites_batch = static_cast<int>(genotypes.size());
+  const int site_offset = het_sites_processed;
+
+  // Handle target 0 sequentially (rare path, only for first target)
+  for (int target_id : target_ids) {
+    if (target_id == 0) {
+      for (int s = 0; s < n_sites_batch; s++) {
+        if (genotypes[s][0] == 1) {
+          paths.at(0).het_sites.push_back(site_offset + s);
+        }
+      }
+      break;
+    }
   }
+
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (int idx = 0; idx < n_active; ++idx) {
+    const int target_id = active_target_ids[idx];
+    ViterbiPath* path = path_ptrs[idx];
+    int current_seg_idx = segment_indices_vec[idx];
+
+    for (int s = 0; s < n_sites_batch; s++) {
+      const int site = site_offset + s;
+      const int* genotype = genotypes[s].data();
+
+      while (current_seg_idx < (static_cast<int>(path->segment_starts.size()) - 1) &&
+             (site >= path->segment_starts[current_seg_idx + 1])) {
+        current_seg_idx++;
+      }
+      const int sample = path->sample_ids[current_seg_idx];
+      if (genotype[sample] != genotype[target_id] &&
+          (genotype[sample] == 1 || genotype[target_id] == 1)) {
+        path->het_sites.push_back(site);
+      }
+    }
+    segment_indices_vec[idx] = current_seg_idx;
+  }
+
+  het_sites_processed += n_sites_batch;
 }
 
 void ThreadsLowMem::process_all_sites_hets_flat(const int32_t* data, int n_sites, int n_haps) {
   static_assert(sizeof(int) == sizeof(int32_t), "int and int32_t must be the same size");
-  for (int s = 0; s < n_sites; s++) {
-    const int* row = reinterpret_cast<const int*>(data + static_cast<std::size_t>(s) * n_haps);
-    process_site_hets_raw(row, n_haps);
+  const int n_active = static_cast<int>(active_target_ids.size());
+  const int site_offset = het_sites_processed;
+
+  // Handle target 0 sequentially
+  for (int target_id : target_ids) {
+    if (target_id == 0) {
+      for (int s = 0; s < n_sites; s++) {
+        const int* row = reinterpret_cast<const int*>(data + static_cast<std::size_t>(s) * n_haps);
+        if (row[0] == 1) {
+          paths.at(0).het_sites.push_back(site_offset + s);
+        }
+      }
+      break;
+    }
   }
+
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (int idx = 0; idx < n_active; ++idx) {
+    const int target_id = active_target_ids[idx];
+    ViterbiPath* path = path_ptrs[idx];
+    int current_seg_idx = segment_indices_vec[idx];
+
+    for (int s = 0; s < n_sites; s++) {
+      const int site = site_offset + s;
+      const int* row = reinterpret_cast<const int*>(data + static_cast<std::size_t>(s) * n_haps);
+
+      while (current_seg_idx < (static_cast<int>(path->segment_starts.size()) - 1) &&
+             (site >= path->segment_starts[current_seg_idx + 1])) {
+        current_seg_idx++;
+      }
+      const int sample = path->sample_ids[current_seg_idx];
+      if (row[sample] != row[target_id] &&
+          (row[sample] == 1 || row[target_id] == 1)) {
+        path->het_sites.push_back(site);
+      }
+    }
+    segment_indices_vec[idx] = current_seg_idx;
+  }
+
+  het_sites_processed += n_sites;
 }
 
 void ThreadsLowMem::date_segments() {
@@ -279,6 +464,9 @@ void ThreadsLowMem::date_segments() {
     }
   }
 
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(dynamic, 1)
+#endif
   for (int idx = 0; idx < n_active; idx++) {
     const int target_id = active_target_ids[idx];
     ViterbiPath& path = *path_ptrs[idx];
@@ -362,7 +550,11 @@ int ThreadsLowMem::count_branches() const {
 }
 
 void ThreadsLowMem::prune() {
-  for (std::size_t i = 0; i < hmm_ptrs.size(); i++) {
+  const int n = static_cast<int>(hmm_ptrs.size());
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (int i = 0; i < n; i++) {
     hmm_ptrs[i]->prune();
   }
 }

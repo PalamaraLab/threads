@@ -21,10 +21,7 @@ import logging
 import pgenlib
 import importlib
 
-os.environ["RAY_DEDUP_LOGS"] = "0"
-import ray
 import numpy as np
-import pandas as pd
 
 from threads_arg import (
     ThreadsLowMem,
@@ -40,6 +37,7 @@ from .utils import (
     split_list,
     parse_demography,
     iterate_pgen,
+    read_all_genotypes,
     read_positions_and_ids,
     parse_region_string,
     default_process_count,
@@ -47,11 +45,8 @@ from .utils import (
     read_sample_names
 )
 
-from .serialization import serialize_instructions
 
-from .allele_ages import estimate_ages
 
-from .normalization import Normalizer
 
 logger = logging.getLogger(__name__)
 
@@ -218,92 +213,102 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     if max_sample_batch_size is None:
         max_sample_batch_size = 2 * num_samples
 
+    # Check for batch numpy API (optimized build)
+    HAS_NUMPY_API = hasattr(Matcher, 'process_all_sites_numpy')
+
+    # Read all genotypes into memory once
+    logger.info("Reading genotypes")
+    all_genotypes = read_all_genotypes(pgen)
+    num_haps = all_genotypes.shape[1]
+
     logger.info("Finding singletons")
-    # Get singleton filter for the matching step
-    alleles_out = None
-    phased_out = None
-    ac_mask = []
-    iterate_pgen(pgen, lambda i, g: ac_mask.append(1 < g.sum() < 2 * num_samples))
-    ac_mask = np.array(ac_mask, dtype=bool)
+    ac = all_genotypes.sum(axis=1)
+    ac_mask = (ac > 1) & (ac < num_haps)
     assert ac_mask.shape == genetic_positions.shape
 
     logger.info("Running PBWT matching")
-    # There are four params here to mess with:
-    #   - query interval
-    #   - match group size
-    #   - neighborhood size
-    #   - min_matches
-    # Keep min_matches low for small sample sizes, can be 2 up to ~1,000 but then > 3
-    # Smaller numbers run faster and consume less memory
     MIN_MATCHES = 4
     neighborhood_size = 4
-    matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
-    def matcher_callback(i, g, mask, matcher):
-        if mask[i]:
+    matcher = Matcher(num_haps, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
+    if HAS_NUMPY_API:
+        matcher.process_all_sites_numpy(all_genotypes[ac_mask])
+    else:
+        for g in all_genotypes[ac_mask]:
             matcher.process_site(g)
-    iterate_pgen(pgen, matcher_callback, mask=ac_mask, matcher=matcher)
 
     # Add top matches from adjacent sites to each match-chunk
     matcher.propagate_adjacent_matches()
 
-    # From here we parallelise if we can
+    ne_times, ne = parse_demography(demography)
+    sparse = mode == "array"
+
+    # From here we parallelise: OpenMP (batch API) or Ray (per-site fallback)
     actual_num_threads = min(default_process_count(), num_threads)
     logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
     paths = []
-    if actual_num_threads > 1:
-        # Warning: this creates big copies, these matches are the main source of memory usage
-        sample_batches = split_list(list(range(2 * num_samples)), actual_num_threads)
-        match_cm_positions = matcher.cm_positions()
 
-        del alleles_out
-        del phased_out
-        gc.collect()
-        partial_viterbi_remote = ray.remote(partial_viterbi)
-        ray.init()
-        # Parallelised threading instructions
-        results = ray.get([partial_viterbi_remote.remote(
-            pgen,
-            mode,
-            2 * num_samples,
-            physical_positions,
-            genetic_positions,
-            demography,
-            mutation_rate,
-            sample_batch,
-            matcher.serializable_matches(sample_batch),
-            match_cm_positions,
-            max_sample_batch_size,
-            actual_num_threads,
-            thread_id) for thread_id, sample_batch in enumerate(sample_batches)])
-        ray.shutdown()
-        # Combine results from each thread
-        for sample_batch, result_tuple in zip(sample_batches, results):
-            for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_tuple):
-                paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
-    else:
-        sample_batch = list(range(2 * num_samples))
+    if HAS_NUMPY_API:
+        # Optimized path: single process, OpenMP parallelism across targets in C++
+        sample_batch = list(range(num_haps))
         s_match_group = matcher.serializable_matches(sample_batch)
         match_cm_positions = matcher.cm_positions()
         matcher.clear()
         del matcher
         gc.collect()
-        thread_id = 1
-        # Single-threaded threading instructions
-        results = partial_viterbi(
-            pgen,
-            mode,
-            2 * num_samples,
-            physical_positions,
-            genetic_positions,
-            demography,
-            mutation_rate,
-            sample_batch,
-            s_match_group,
-            match_cm_positions,
-            max_sample_batch_size,
-            actual_num_threads,
-            thread_id)
 
+        TLM = ThreadsLowMem(sample_batch, physical_positions, genetic_positions, ne, ne_times, mutation_rate, sparse)
+        TLM.initialize_viterbi(s_match_group, match_cm_positions)
+        del s_match_group
+        gc.collect()
+
+        logger.info("Running Viterbi (batch + OpenMP)")
+        TLM.process_all_sites_viterbi_numpy(all_genotypes)
+        TLM.prune()
+        TLM.traceback()
+
+        logger.info("Computing hets (batch + OpenMP)")
+        TLM.process_all_sites_hets_numpy(all_genotypes)
+
+        logger.info("Dating segments")
+        TLM.date_segments()
+
+        seg_starts, match_ids, heights, hetsites = TLM.serialize_paths()
+        for sample_id, ss, mi, ht, hs in zip(sample_batch, seg_starts, match_ids, heights, hetsites):
+            paths.append(ViterbiPath(sample_id, ss, mi, ht, hs))
+
+    elif actual_num_threads > 1:
+        # Released build multi-threaded: Ray process parallelism
+        os.environ["RAY_DEDUP_LOGS"] = "0"
+        import ray
+        sample_batches = split_list(list(range(num_haps)), actual_num_threads)
+        match_cm_positions = matcher.cm_positions()
+
+        del all_genotypes
+        gc.collect()
+        partial_viterbi_remote = ray.remote(partial_viterbi)
+        ray.init()
+        results = ray.get([partial_viterbi_remote.remote(
+            pgen, mode, num_haps, physical_positions, genetic_positions,
+            demography, mutation_rate, sample_batch,
+            matcher.serializable_matches(sample_batch), match_cm_positions,
+            max_sample_batch_size, actual_num_threads, thread_id)
+            for thread_id, sample_batch in enumerate(sample_batches)])
+        ray.shutdown()
+        for sample_batch, result_tuple in zip(sample_batches, results):
+            for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_tuple):
+                paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
+    else:
+        # Released build single-threaded
+        sample_batch = list(range(num_haps))
+        s_match_group = matcher.serializable_matches(sample_batch)
+        match_cm_positions = matcher.cm_positions()
+        matcher.clear()
+        del matcher
+        gc.collect()
+        results = partial_viterbi(
+            pgen, mode, num_haps, physical_positions, genetic_positions,
+            demography, mutation_rate, sample_batch, s_match_group,
+            match_cm_positions, max_sample_batch_size, actual_num_threads, 1)
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results):
             paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
 
@@ -314,6 +319,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
     if normalize:
         logger.info("Applying normalization")
+        from .normalization import Normalizer
         normalizer = Normalizer(demography, 2 * num_samples)
         instructions = normalizer.normalize(instructions)
 
@@ -323,12 +329,14 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         allele_age_estimates = None
         if allele_ages is None:
             logger.info("Inferring allele ages from data")
+            from .allele_ages import estimate_ages
             allele_age_estimates = estimate_ages(instructions, 3 * actual_num_threads, actual_num_threads)
             assert len(allele_age_estimates) == len(instructions.positions)
         else:
             logger.info(f"Reading allele ages from {allele_ages}")
             allele_age_estimates = []
             _, ids = read_positions_and_ids(pgen)
+            import pandas as pd
             age_table = pd.read_table(allele_ages, header=None, names=["SNP", "POS", "AGE"])
             age_table = age_table[age_table["SNP"].astype(str).isin(ids)]
             allele_age_estimates = age_table["AGE"].values
@@ -347,6 +355,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
         consistent_instructions = cw.get_consistent_instructions()
         logger.info(f"Writing to {out}")
+        from .serialization import serialize_instructions
         serialize_instructions(consistent_instructions,
                                out,
                                variant_metadata=variant_metadata,
@@ -354,6 +363,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
                                sample_names=sample_names)
     else:
         logger.info(f"Writing to {out}")
+        from .serialization import serialize_instructions
         serialize_instructions(instructions,
                                out,
                                variant_metadata=variant_metadata,

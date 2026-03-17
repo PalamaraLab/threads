@@ -25,10 +25,16 @@
 #include <vector>
 
 // For a given interval, this contains all the matches for all the samples
-MatchGroup::MatchGroup(int _num_samples, double _cm_position)
+MatchGroup::MatchGroup(int _num_samples, int _expected_queries, double _cm_position)
     : num_samples(_num_samples), cm_position(_cm_position) {
+  // Pre-reserve hash maps to avoid rehashing during neighbor counting.
+  // Each query site adds ~4 neighbors per sample; reserve for expected total.
+  int reserve_size = std::max(16, _expected_queries * 4);
+  match_candidates_counts.reserve(num_samples);
   for (int i = 0; i < num_samples; i++) {
-    match_candidates_counts.push_back(std::unordered_map<int, int>());
+    std::unordered_map<int, int> m;
+    m.reserve(reserve_size);
+    match_candidates_counts.push_back(std::move(m));
   }
 }
 
@@ -180,9 +186,13 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
   std::cout << "Will use " << query_sites.size() << " query sites and " << match_group_sites.size()
             << " match_group_sites" << std::endl;
 
+  // Estimate queries per match group for hash map pre-reservation
+  int expected_queries_per_group = std::max(1,
+      static_cast<int>(query_sites.size()) / std::max(1, static_cast<int>(match_group_sites.size())));
+
   match_groups.reserve(match_group_sites.size());
   for (int match_group_site : match_group_sites) {
-    match_groups.emplace_back(num_samples, genetic_positions[match_group_site]);
+    match_groups.emplace_back(num_samples, expected_queries_per_group, genetic_positions[match_group_site]);
   }
 
   sorting.reserve(num_samples);
@@ -196,65 +206,68 @@ Matcher::Matcher(int _n, const std::vector<double>& _genetic_positions, double _
 }
 
 void Matcher::process_site(const std::vector<int>& genotype) {
-  // Pass genotypes for a single site through the matcher
+  if (static_cast<int>(genotype.size()) != num_samples) {
+    throw std::runtime_error("invalid genotype vector size");
+  }
+  process_site_raw(genotype.data());
+}
 
+void Matcher::process_site_raw(const int* genotype) {
   if (sites_processed >= num_sites) {
     throw std::runtime_error("all sites have already been processed");
   }
 
+  const int* sort_data = sorting.data();
+  int* next_sort_data = next_sorting.data();
+
   // Get allele count
   int allele_count = 0;
-  for (int g : genotype) {
-    if (g == 1) {
-      allele_count++;
-    }
-  }
-  int counter0 = 0;
-  int counter1 = 0;
-  if (static_cast<int>(genotype.size()) != num_samples) {
-    throw std::runtime_error("invalid genotype vector size");
+  for (int i = 0; i < num_samples; i++) {
+    allele_count += genotype[i];
   }
 
-  // PBWT step
+  // PBWT step — no bounds checking, alleles validated by caller
+  int counter0 = 0;
+  int counter1 = 0;
+  const int offset1 = num_samples - allele_count;
   for (int i = 0; i < num_samples; i++) {
-    if (genotype.at(sorting.at(i)) == 1) {
-      next_sorting[num_samples - allele_count + counter1] = sorting.at(i);
+    const int sid = sort_data[i];
+    if (genotype[sid] == 1) {
+      next_sort_data[offset1 + counter1] = sid;
       counter1++;
     }
-    else if (genotype.at(sorting.at(i)) == 0) {
-      next_sorting[counter0] = sorting.at(i);
-      counter0++;
-    }
     else {
-      std::string prompt = "invalid genotype" + std::to_string(genotype.at(sorting.at(i)));
-      throw std::runtime_error(prompt);
+      next_sort_data[counter0] = sid;
+      counter0++;
     }
   }
   std::swap(sorting, next_sorting);
 
   // Threading-neighbor queries
   if (match_group_idx < (static_cast<int>(match_group_sites.size()) - 1) &&
-      (sites_processed >= match_group_sites.at(match_group_idx + 1))) {
+      (sites_processed >= match_group_sites[match_group_idx + 1])) {
     match_group_idx++;
-    match_groups.at(match_group_idx - 1).filter_matches(min_matches);
+    match_groups[match_group_idx - 1].filter_matches(min_matches);
   }
 
   // If we've reached a query site, query
   if (next_query_site_idx < static_cast<int>(query_sites.size()) &&
-      sites_processed == query_sites.at(next_query_site_idx)) {
+      sites_processed == query_sites[next_query_site_idx]) {
     // Get the arg-sort of the sorting
+    const int* sort_ptr = sorting.data();
+    int* perm_data = permutation.data();
     for (int i = 0; i < num_samples; i++) {
-      permutation[sorting.at(i)] = i;
+      perm_data[sort_ptr[i]] = i;
     }
     next_query_site_idx++;
 
     // Boolean array for O(1) mark + sequential scan neighbor finding
     std::vector<char> inserted(num_samples, 0);
-    inserted[permutation[0]] = 1;
+    inserted[perm_data[0]] = 1;
 
     // Insert sequences and query in order
     for (int i = 1; i < num_samples; i++) {
-      const int pos = permutation[i];
+      const int pos = perm_data[i];
       inserted[pos] = 1;
 
       // Find neighborhood_size nearest neighbors by scanning left/right
@@ -264,22 +277,18 @@ void Matcher::process_site(const std::vector<int>& genotype) {
       std::unordered_map<int, int>& mmmap =
           match_groups[match_group_idx].match_candidates_counts[i];
       while (n_found < neighborhood_size && (left >= 0 || right < num_samples)) {
-        // Scan left for next set bit
         if (left >= 0) {
           while (left >= 0 && !inserted[left]) left--;
           if (left >= 0) {
-            int m = sorting[left];
-            mmmap[m]++;
+            mmmap[sort_ptr[left]]++;
             n_found++;
             left--;
           }
         }
-        // Scan right for next set bit
         if (n_found < neighborhood_size && right < num_samples) {
           while (right < num_samples && !inserted[right]) right++;
           if (right < num_samples) {
-            int m = sorting[right];
-            mmmap[m]++;
+            mmmap[sort_ptr[right]]++;
             n_found++;
             right++;
           }
@@ -289,7 +298,7 @@ void Matcher::process_site(const std::vector<int>& genotype) {
 
     // Special case for last query
     if (next_query_site_idx == static_cast<int>(query_sites.size())) {
-      match_groups.at(match_group_sites.size() - 1).filter_matches(min_matches);
+      match_groups[match_group_sites.size() - 1].filter_matches(min_matches);
     }
   }
   sites_processed++;
@@ -297,18 +306,14 @@ void Matcher::process_site(const std::vector<int>& genotype) {
 
 void Matcher::process_all_sites(const std::vector<std::vector<int>>& genotypes) {
   for (const auto& genotype : genotypes) {
-    process_site(genotype);
+    process_site_raw(genotype.data());
   }
 }
 
 void Matcher::process_all_sites_flat(const int32_t* data, int n_sites, int n_haps) {
-  std::vector<int> genotype(n_haps);
+  static_assert(sizeof(int) == sizeof(int32_t), "int and int32_t must be the same size");
   for (int s = 0; s < n_sites; s++) {
-    const int32_t* row = data + static_cast<std::size_t>(s) * n_haps;
-    for (int h = 0; h < n_haps; h++) {
-      genotype[h] = row[h];
-    }
-    process_site(genotype);
+    process_site_raw(reinterpret_cast<const int*>(data + static_cast<std::size_t>(s) * n_haps));
   }
 }
 
