@@ -16,7 +16,6 @@
 
 import logging
 import multiprocessing
-import numpy as np
 from tqdm import tqdm
 
 from threads_arg import AgeEstimator, GenotypeIterator
@@ -26,21 +25,12 @@ from .utils import timer_block, default_process_count, split_list
 logger = logging.getLogger(__name__)
 
 
-def _nth_batch_worker(instructions, result_idx, allele_ages_results):
-    # Estimate ages on this instruction batch
+def _batch_worker(instructions):
     gt_it = GenotypeIterator(instructions)
     age_estimator = AgeEstimator(instructions)
     while gt_it.has_next_genotype():
-        g = np.array(gt_it.next_genotype())
-        age_estimator.process_site(g)
-    allele_age_estimates = age_estimator.get_inferred_ages()
-
-    # Index result so full data can be reconstructed in order
-    allele_ages_results[result_idx] = allele_age_estimates
-
-
-def _nth_batch_worker_star(args):
-    return _nth_batch_worker(*args)
+        age_estimator.process_site(gt_it.next_genotype())
+    return age_estimator.get_inferred_ages()
 
 def estimate_ages(instructions, num_batches, num_threads):
     # Make sure we don't use more CPUs than requested
@@ -64,27 +54,15 @@ def estimate_ages(instructions, num_batches, num_threads):
             batched_instructions.append(range_instructions)
 
     with timer_block(f"Estimating allele ages ({num_processors} CPUs)"):
-        # Process-safe dict so batch results can be reconstructed in order
-        manager = multiprocessing.Manager()
-        allele_ages_results = manager.dict()
-
-        # Create arguments for each job in process pool
-        jobs_args = [(range_inst, i, allele_ages_results)
-                        for i, range_inst in enumerate(batched_instructions)]
-
         with multiprocessing.Pool(processes=num_processors) as pool:
-            # To use tqdm with a pool, use imap with shim method to unpack args.
-            # Note the enclosing unassigned list() call is necessary. Otherwise
-            # no value is retrieved and the process is ignored/dropped.
-            list(tqdm(
-                pool.imap(_nth_batch_worker_star, jobs_args),
-                total=len(jobs_args)
+            batch_results = list(tqdm(
+                pool.imap(_batch_worker, batched_instructions),
+                total=len(batched_instructions)
             ))
 
-    # Collect batched estimates into single list in index sort order
     allele_age_estimates = []
-    for i in range(len(allele_ages_results)):
-        allele_age_estimates += allele_ages_results[i]
+    for batch in batch_results:
+        allele_age_estimates += batch
     return allele_age_estimates
 
 def estimate_allele_ages(threads, out, num_threads):
