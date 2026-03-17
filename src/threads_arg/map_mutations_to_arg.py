@@ -19,8 +19,6 @@ import os
 import time
 import logging
 
-os.environ["RAY_DEDUP_LOGS"] = "0"
-import ray
 import numpy as np
 import arg_needle_lib
 
@@ -78,8 +76,6 @@ def _map_region(argn, input, region, maf_threshold):
     n_parsimoniously_mapped = 0
 
     # Iterate over VCF records
-    read_time = 0
-    map_time = 0
     vcf = VCF(input)
     for record in vcf(region):
         ac = int(record.INFO.get("AC"))
@@ -101,16 +97,12 @@ def _map_region(argn, input, region, maf_threshold):
         name = record.ID
         pos = record.POS
 
-        rt = time.time()
         hap = np.array(record.genotypes)[:, :2].flatten()
-        read_time += time.time() - rt
         assert len(hap) == len(arg.leaf_ids)
         if flipped:
             hap = 1 - hap
 
-        mt = time.time()
         mapping, _ = arg_needle_lib.map_genotype_to_ARG_approximate(arg, hap, float(pos - arg.offset))
-        map_time += time.time() - mt
 
         if len(mapping) > 0:
             n_mapped += 1
@@ -165,6 +157,9 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads):
     if actual_num_threads == 1:
         return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = _map_region(argn, input, region, maf)
     else:
+        import ray
+        os.environ["RAY_DEDUP_LOGS"] = "0"
+
         logger.info("Parsing VCF")
         vcf = VCF(input)
         positions = [record.POS for record in vcf(region)]
