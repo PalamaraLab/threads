@@ -97,6 +97,13 @@ public:
     std::vector<double> right_multiply_tree(const std::vector<double>& x);
     std::vector<double> left_multiply_tree(const std::vector<double>& x);
 
+    // Batch tree multiply: process k vectors in a single tree traversal.
+    // Input/output are row-major flat arrays: X[row * k + col].
+    // right_multiply_tree_batch: X is (num_sites, k), returns (num_samples, k)
+    // left_multiply_tree_batch:  X is (num_samples, k), returns (num_sites, k)
+    std::vector<double> right_multiply_tree_batch(const std::vector<double>& x_flat, int k);
+    std::vector<double> left_multiply_tree_batch(const std::vector<double>& x_flat, int k);
+
     // Precompute and cache the dense genotype matrix (num_sites × num_samples, row-major).
     // Subsequent left_multiply/right_multiply calls use the cached matrix.
     void materialize_genotypes();
