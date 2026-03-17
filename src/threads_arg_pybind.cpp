@@ -167,7 +167,15 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            &threading_instructions_get_state,
            &threading_instructions_set_state))
       .def("left_multiply", &ThreadingInstructions::left_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false)
-      .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false);
+      .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false)
+      .def("materialize_genotypes", &ThreadingInstructions::materialize_genotypes)
+      .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid)
+      .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid)
+      .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply)
+      .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"))
+      .def("left_multiply_tree", &ThreadingInstructions::left_multiply_tree, py::arg("x"))
+      .def("right_multiply_tree_batch", &ThreadingInstructions::right_multiply_tree_batch, py::arg("x_flat"), py::arg("k"))
+      .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"));
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,

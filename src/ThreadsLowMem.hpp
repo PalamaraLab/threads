@@ -94,6 +94,10 @@ private:
 
   Demography demography;
 
+  // Precomputed per-site HMM parameters
+  std::vector<double> k_per_site;  // 2 * 0.01 * cm_sizes[i]
+  std::vector<double> l_per_site;  // 2 * mu * bp_sizes[i]
+
   // 2. HMM quantites
   int hmm_sites_processed = 0;
   std::vector<std::unique_ptr<ViterbiState>> hmm_vec; // owned, never moves
@@ -108,7 +112,7 @@ private:
 
   // Internal: process one site from raw pointer (no copy)
   void process_site_viterbi_raw(const int* genotype);
-  void process_site_hets_raw(const int* genotype, int n_haps);
+  void process_site_hets_raw(const int* genotype);
 };
 
 #endif // THREADS_ARG_THREADS_LOW_MEM_HPP

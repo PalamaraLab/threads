@@ -34,6 +34,7 @@ set(test_src
     test_threading_instructions.cpp
     test_viterbi_lowmem.cpp
     test_viterbi_state.cpp
+    test_allele_ages.cpp
 )
 
 # Main unit test exe

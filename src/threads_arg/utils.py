@@ -16,7 +16,6 @@
 
 import os
 import numpy as np
-import pandas as pd
 import logging
 import pgenlib
 import re
@@ -32,10 +31,20 @@ def read_map_file(map_file, expected_chromosome=None) -> Tuple[np.ndarray, np.nd
     """
     Reading in map file for Li-Stephens using genetic maps in the SHAPEIT format
     """
-    maps = pd.read_table(map_file, sep=r"\s+")
-    cm_pos = maps.cM.values.astype(np.float64)
-    phys_pos = maps.pos.values.astype(np.float64)
-    chromosomes = np.unique(maps.chr.values.astype(str))
+    phys_list, cm_list, chr_list = [], [], []
+    with open(map_file) as f:
+        header = f.readline().strip().split()
+        pos_idx = header.index('pos')
+        chr_idx = header.index('chr')
+        cm_idx = header.index('cM')
+        for line in f:
+            fields = line.strip().split()
+            phys_list.append(float(fields[pos_idx]))
+            chr_list.append(str(fields[chr_idx]))
+            cm_list.append(float(fields[cm_idx]))
+    cm_pos = np.array(cm_list, dtype=np.float64)
+    phys_pos = np.array(phys_list, dtype=np.float64)
+    chromosomes = np.unique(chr_list)
 
     # Currently we only allow for processing one chromosome at a time
     if len(chromosomes) > 1:
@@ -60,9 +69,19 @@ def _read_pgen_physical_positions(pgen_file):
     bim  = pgen_file.rstrip("pgen") + "bim"
     physical_positions = None
     if os.path.isfile(bim):
-        physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(np.float64)
+        pos = []
+        with open(bim) as f:
+            for line in f:
+                if line.startswith('#'): continue
+                pos.append(float(line.split()[3]))
+        physical_positions = np.array(pos, dtype=np.float64)
     elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(np.float64)
+        pos = []
+        with open(pvar) as f:
+            for line in f:
+                if line.startswith('#'): continue
+                pos.append(float(line.split()[1]))
+        physical_positions = np.array(pos, dtype=np.float64)
     else:
         raise RuntimeError(f"Can't find {bim} or {pvar} for {pgen_file}")
 
@@ -117,6 +136,7 @@ def read_variant_metadata(pgen):
     Attempt to read variant metadata in vcf style:
     CHR, POS, ID, REF, ALT, QUAL, FILTER
     """
+    import pandas as pd
     pvar = pgen.replace("pgen", "pvar")
     bim = pgen.replace("pgen", "bim")
     if os.path.isfile(bim):
@@ -162,6 +182,7 @@ def read_sample_names(pgen):
     """
     Read the sample names corresponding to the input pgen
     """
+    import pandas as pd
     fam = pgen.replace("pgen", "fam")
     psam = pgen.replace("pgen", "psam")
     if os.path.isfile(fam):
@@ -183,8 +204,14 @@ def read_sample_names(pgen):
 
 
 def parse_demography(demography):
-    d = pd.read_table(demography, sep="\\s+", header=None)
-    return list(d[0]), list(d[1])
+    times, sizes = [], []
+    with open(demography) as f:
+        for line in f:
+            fields = line.strip().split()
+            if len(fields) >= 2:
+                times.append(float(fields[0]))
+                sizes.append(float(fields[1]))
+    return times, sizes
 
 
 def split_list(list, n):
@@ -308,6 +335,30 @@ def iterate_pgen(pgen, callback, start_idx=None, end_idx=None, **kwargs):
             i += 1
     # Make sure we processed as many things as wanted to
     assert i == M
+
+
+def read_all_genotypes(pgen):
+    """Read all genotypes from a pgen file into a single (n_sites, n_haps) int32 array."""
+    reader = pgenlib.PgenReader(pgen.encode())
+    num_samples = reader.get_raw_sample_ct()
+    num_sites = reader.get_variant_ct()
+    n_haps = 2 * num_samples
+
+    alleles_out = np.empty((num_sites, n_haps), dtype=np.int32)
+    phasepresent_out = np.empty((num_sites, num_samples), dtype=np.uint8)
+
+    BATCH_SIZE = max(1, int(4e7 // n_haps))
+    for b_start in range(0, num_sites, BATCH_SIZE):
+        b_end = min(num_sites, b_start + BATCH_SIZE)
+        reader.read_alleles_and_phasepresent_range(
+            b_start, b_end,
+            alleles_out[b_start:b_end],
+            phasepresent_out[b_start:b_end])
+
+    if np.any(phasepresent_out == 0):
+        raise RuntimeError("Unphased variants are currently not supported.")
+
+    return alleles_out
 
 
 def default_process_count():
