@@ -169,16 +169,22 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def(py::pickle(
            &threading_instructions_get_state,
            &threading_instructions_set_state))
-      .def("left_multiply", &ThreadingInstructions::left_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false)
-      .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false)
+      .def("left_multiply", &ThreadingInstructions::left_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false,
+           py::call_guard<py::gil_scoped_release>())
+      .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false,
+           py::call_guard<py::gil_scoped_release>())
       .def("materialize_genotypes", &ThreadingInstructions::materialize_genotypes)
       .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid)
       .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid)
       .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply)
-      .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"))
-      .def("left_multiply_tree", &ThreadingInstructions::left_multiply_tree, py::arg("x"))
-      .def("right_multiply_tree_batch", &ThreadingInstructions::right_multiply_tree_batch, py::arg("x_flat"), py::arg("k"))
-      .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"))
+      .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"),
+           py::call_guard<py::gil_scoped_release>())
+      .def("left_multiply_tree", &ThreadingInstructions::left_multiply_tree, py::arg("x"),
+           py::call_guard<py::gil_scoped_release>())
+      .def("right_multiply_tree_batch", &ThreadingInstructions::right_multiply_tree_batch, py::arg("x_flat"), py::arg("k"),
+           py::call_guard<py::gil_scoped_release>())
+      .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"),
+           py::call_guard<py::gil_scoped_release>())
       .def("right_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
               py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
         auto buf = arr.request();
@@ -202,7 +208,13 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
         py::array_t<double> out(static_cast<size_t>(result.size()));
         std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
         return out;
-      }, py::arg("x_flat"), py::arg("k"));
+      }, py::arg("x_flat"), py::arg("k"))
+      .def("right_multiply_tree_range", &ThreadingInstructions::right_multiply_tree_range,
+           py::arg("x"), py::arg("site_start"), py::arg("site_end"),
+           py::call_guard<py::gil_scoped_release>())
+      .def("left_multiply_tree_range", &ThreadingInstructions::left_multiply_tree_range,
+           py::arg("x"), py::arg("site_start"), py::arg("site_end"),
+           py::call_guard<py::gil_scoped_release>());
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
