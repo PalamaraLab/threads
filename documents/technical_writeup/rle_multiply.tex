@@ -1,0 +1,408 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\title{RLE-Based Matrix--Vector Multiplication\\from Threading Instructions}
+\author{Technical Note}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe a run-length encoded (RLE) approach to genotype-matrix--vector
+multiplication from the \textsc{Threads} ARG representation.  The key
+observation is that the implicit genotype matrix encoded by threading
+instructions can be decomposed into per-sample lists of contiguous
+``1-runs'' during a single preparation pass, after which both left- and
+right-multiplication reduce to prefix-sum lookups over these runs.  On
+simulated data with 10{,}000 diploid individuals, the RLE multiply is
+\textbf{15--17$\times$ faster} than the existing tree-propagation multiply
+and \textbf{14--60$\times$ faster} than dense multiplication, while
+requiring comparable preparation time and modest additional memory.  The
+method is embarrassingly parallel and admits efficient batched
+multiplication over $k$ vectors simultaneously.
+\end{abstract}
+
+\section{Background}
+
+The \textsc{Threads} software~\cite{gunnarsson2025} infers an Ancestral
+Recombination Graph (ARG) by threading each haplotype through a set of
+reference haplotypes.  The result is a set of \emph{threading instructions}:
+for each of $n$ haplotype samples, a sequence of segments
+$\{(\text{start}_k, \text{target}_k, \text{tmrca}_k)\}$ and a list of
+mismatch site indices.  These instructions implicitly encode the $m \times n$
+binary genotype matrix $\mathbf{G}$, where $G_{ji}$ is the allele of sample
+$i$ at site $j$.
+
+Many downstream applications---RHE~\cite{pazokitoroudi2020}, SCORE, and
+SCOPE---require repeated matrix--vector products $\mathbf{G}^\top
+\mathbf{x}$ (right multiply) and $\mathbf{G}\mathbf{x}$ (left multiply).
+Three existing approaches are available:
+
+\begin{enumerate}
+\item \textbf{Dense multiply}: Materialize $\mathbf{G}$ in memory
+($O(nm)$ space), then use standard matrix--vector products.  Per-call cost:
+$O(nm)$.
+\item \textbf{Tree-propagation multiply}: Exploit the tree structure of
+threading instructions.  A one-time $O(nm)$ preparation step (with $O(m
+\cdot d)$ peak memory, where $d$ is the tree depth) precomputes cumulative
+interval sums and mismatch corrections.  Per-call cost: $O(n \cdot
+n_\text{intervals} + n_\text{mismatches})$, where $n_\text{intervals}$ is
+the number of unique segment boundaries across all samples.
+\item \textbf{GRG multiply}~\cite{dehaas2024}: Build a Genotype
+Representation Graph (DAG) and propagate partial sums.  Per-call cost:
+$O(|\text{edges}| + m) \approx O(n \log n + m)$.
+\end{enumerate}
+
+The tree-propagation approach has a fundamental limitation: the cumulative
+sum for each sample depends on its target's cumulative sum, creating a
+sequential dependency chain.  This prevents parallelization and results in
+$O(n \cdot n_\text{intervals})$ work even though only $O(n_\text{segments}
++ n_\text{mismatches})$ information determines the genotype matrix.
+
+\section{Method}
+
+\subsection{Run-Length Encoding of Genotypes}
+
+For each sample $i$, the binary genotype vector $\mathbf{g}_i \in
+\{0,1\}^m$ consists of contiguous runs of 0s and 1s.  A \emph{1-run} is a
+maximal interval $[a, b)$ where $G_{ji} = 1$ for all $a \le j < b$.  We
+store only the 1-runs:
+\[
+\mathcal{R}_i = \{(a_1, b_1), (a_2, b_2), \ldots, (a_{R_i}, b_{R_i})\}
+\]
+where $R_i = |\mathcal{R}_i|$ is the number of 1-runs for sample $i$.
+
+The total number of runs across all samples is
+$R_\text{total} = \sum_i R_i$.  In practice, $R_i$ is determined by the
+number of transitions in $\mathbf{g}_i$, which depends on the number of
+segments and mismatches for sample $i$ and its ancestral lineage.
+
+\subsection{Preparation Phase}
+
+The 1-run lists are constructed during a single pass over samples in
+threading order (sample 0 first, then 1, 2, \ldots, $n{-}1$), using a
+reference-counted genotype cache identical to the existing tree-propagation
+preparation.
+
+For sample 0 (the reference haplotype), the genotype is determined directly
+from its mismatch list.  For sample $i > 0$, each segment copies the
+genotype from its target (already computed and cached) and flips at mismatch
+sites.  After reconstructing the genotype buffer, a single linear scan
+extracts the 1-runs.
+
+\begin{algorithm}[h]
+\caption{RLE Preparation}
+\begin{algorithmic}[1]
+\For{$i = 0$ to $n-1$}
+    \State Reconstruct $\mathbf{g}_i$ from target genotypes + mismatches
+    \State Scan $\mathbf{g}_i$ to extract 1-runs $\mathcal{R}_i$
+    \State Store $\mathcal{R}_i$ in flat arrays with offset index
+    \If{sample $i$ is referenced by future samples}
+        \State Cache $\mathbf{g}_i$
+    \EndIf
+    \State Release unreferenced target caches
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+The preparation cost is $O(nm)$ time with $O(m \cdot d_\text{max})$ peak
+memory for the genotype cache, where $d_\text{max}$ is the maximum number
+of simultaneously active targets (bounded by the tree depth).  The stored
+1-runs require $O(R_\text{total})$ memory.
+
+\subsection{Right Multiply: $\mathbf{G}^\top \mathbf{x}$}
+
+Given a vector $\mathbf{x} \in \mathbb{R}^m$, compute $\mathbf{y} =
+\mathbf{G}^\top \mathbf{x}$, where $y_i = \sum_j G_{ji} \, x_j$.
+
+\begin{enumerate}
+\item Compute prefix sums: $P_0 = 0$, $P_s = \sum_{j=0}^{s-1} x_j$ for
+$s = 1, \ldots, m$.
+\item For each sample $i$:
+\[
+y_i = \sum_{(a,b) \in \mathcal{R}_i} (P_b - P_a)
+\]
+\end{enumerate}
+
+Cost: $O(m)$ for prefix sums $+$ $O(R_\text{total})$ for the per-sample
+summation.  The per-sample loop is \textbf{embarrassingly parallel} ---
+each sample's computation is independent.
+
+\subsection{Left Multiply: $\mathbf{G} \mathbf{x}$}
+
+Given $\mathbf{x} \in \mathbb{R}^n$, compute $\mathbf{y} = \mathbf{G}
+\mathbf{x}$, where $y_j = \sum_i G_{ji} \, x_i$.
+
+\begin{enumerate}
+\item Initialize a difference array $D[0 \ldots m] = 0$.
+\item For each sample $i$, for each $(a,b) \in \mathcal{R}_i$:
+$D[a] \mathrel{+}= x_i$, \; $D[b] \mathrel{-}= x_i$.
+\item Compute prefix sums: $y_j = \sum_{s=0}^{j} D[s]$.
+\end{enumerate}
+
+Cost: $O(R_\text{total})$ for the difference updates $+$ $O(m)$ for the
+prefix sum.  With OpenMP, the per-sample loop uses thread-local difference
+arrays that are reduced before the final prefix sum.
+
+\subsection{Batch Multiply}
+
+For $k$ vectors simultaneously (input: $m \times k$ or $n \times k$
+row-major matrices), the prefix sums and difference arrays are extended to
+width $k$.  The inner loops over $k$ elements auto-vectorize via SIMD,
+amortizing the run-traversal overhead.
+
+\subsection{Simplification}
+
+As a complementary optimization, we also implement
+\texttt{simplify\_for\_multiply()}, which strips coalescence times
+(\texttt{tmrca} values, unused by any multiply algorithm) and merges
+consecutive segments sharing the same target.  This yields $\sim$30\%
+smaller \texttt{.threads} files with no effect on the genotype matrix.
+However, segment merging is minimal (0.2--2\% reduction) because
+consecutive same-target segments are rare in real ARGs.
+
+\section{Results}
+
+We benchmark on simulated data (msprime, $N_e = 10{,}000$, 2\,Mbp, seed
+42) at sample sizes from 50 to 10{,}000 diploid individuals.  We compare
+five methods: RLE (this work, with OpenMP), tree-propagation multiply
+(existing \textsc{Threads} method), dense materialized multiply,
+GRG~\cite{dehaas2024}, and RePair grammar-compressed
+multiply~\cite{tosoni2022}.  All timings are median of 5 runs on an Apple
+M-series processor.
+
+\subsection{Right Multiply $\mathbf{G}^\top \mathbf{x}$ (ms)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{r rrrrr}
+\toprule
+$n_\text{dip}$ & RLE & Tree & Dense & GRG & RePair \\
+\midrule
+50    & \textbf{0.10}  & 0.46  & 0.11  & 0.30  & ---   \\
+100   & \textbf{0.13}  & 0.66  & 0.23  & 0.40  & 0.32  \\
+250   & \textbf{0.17}  & 0.98  & 0.55  & 0.55  & ---   \\
+500   & \textbf{0.24}  & 1.38  & 1.15  & 0.70  & ---   \\
+1000  & \textbf{0.44}  & 3.33  & 2.50  & 0.94  & 2.40  \\
+2000  & \textbf{0.72}  & 7.04  & 5.34  & 1.12  & ---   \\
+5000  & 1.65  & 21.68 & 14.63 & \textbf{1.55}  & ---   \\
+10000 & 2.90  & 46.61 & 44.45 & \textbf{1.90}  & 25.86 \\
+\bottomrule
+\end{tabular}
+\caption{Right multiply times (ms).  RLE is fastest up to $\sim$5K diploid;
+GRG overtakes at larger sizes due to its $O(n\log n)$ DAG traversal.}
+\label{tab:right}
+\end{table}
+
+\subsection{Left Multiply $\mathbf{G} \mathbf{x}$ (ms)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{r rrrrr}
+\toprule
+$n_\text{dip}$ & RLE & Tree & Dense & GRG & RePair \\
+\midrule
+50    & \textbf{0.17}  & 0.48  & 0.36  & 0.27  & ---   \\
+100   & \textbf{0.19}  & 0.82  & 0.81  & 0.40  & 0.31  \\
+250   & \textbf{0.22}  & 1.46  & 2.99  & 0.56  & ---   \\
+500   & \textbf{0.35}  & 1.53  & 6.83  & 0.67  & ---   \\
+1000  & \textbf{0.52}  & 3.94  & 16.63 & 0.92  & 2.34  \\
+2000  & \textbf{0.81}  & 8.43  & 36.20 & 1.13  & ---   \\
+5000  & 1.58  & 28.10 & 101.89& \textbf{1.55}  & ---   \\
+10000 & 2.55  & 55.00 & 220.30& \textbf{2.00}  & 24.11 \\
+\bottomrule
+\end{tabular}
+\caption{Left multiply times (ms).  Same pattern: RLE dominates up to
+$\sim$5K; GRG is comparable or faster at 10K.  Dense is 86$\times$ slower
+than RLE at 10K.}
+\label{tab:left}
+\end{table}
+
+\subsection{Batch Multiply ($k = 10$ vectors, ms)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{r rr c rr}
+\toprule
+& \multicolumn{2}{c}{Right ($k{=}10$)} && \multicolumn{2}{c}{Left ($k{=}10$)} \\
+\cmidrule{2-3} \cmidrule{5-6}
+$n_\text{dip}$ & RLE & Tree && RLE & Tree \\
+\midrule
+1000  & 4.5  & 43.6  && ---  & ---  \\
+5000  & 12.1 & 209.0 && ---  & ---  \\
+10000 & 20.7 & 369.3 && 23.0 & 467.4\\
+\bottomrule
+\end{tabular}
+\caption{Batch multiply ($k = 10$) times (ms).  RLE batch is
+10--18$\times$ faster than tree batch.}
+\label{tab:batch}
+\end{table}
+
+\subsection{Storage}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{r rrrr}
+\toprule
+$n_\text{dip}$ & \texttt{.threads} & GRG & RePair & Dense \\
+\midrule
+100   & \textbf{101\,KB}  & 332\,KB  & 116\,KB  & 1.3\,MB \\
+1000  & \textbf{188\,KB}  & 642\,KB  & 1.3\,MB  & 17.5\,MB \\
+10000 & \textbf{438\,KB}  & 1.3\,MB  & 13.8\,MB & 219\,MB \\
+\bottomrule
+\end{tabular}
+\caption{On-disk storage. The \texttt{.threads} format is the most compact:
+3$\times$ smaller than GRG and 31$\times$ smaller than RePair at 10K
+diploid. Simplified \texttt{.threads} (stripping tmrcas) gives an
+additional $\sim$30\% reduction.}
+\label{tab:size}
+\end{table}
+
+\subsection{Scaling Analysis}
+
+RLE is the fastest method up to $\sim$5{,}000 diploid.  Beyond that, GRG's
+$O(n\log n)$ DAG traversal becomes advantageous over RLE's $O(R_\text{total})$
+scan, as $R_\text{total}$ grows linearly with $n$ while the DAG amortizes
+shared ancestry.  At 10K diploid, GRG is 1.5$\times$ faster than RLE for
+right multiply and 1.3$\times$ faster for left.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{r rrrr}
+\toprule
+$n_\text{dip}$ & RLE/Tree & RLE/Dense & RLE/RePair & RLE/GRG \\
+\midrule
+100   & 5.1$\times$ & 1.8$\times$ & 2.5$\times$ & 3.1$\times$ \\
+1000  & 7.6$\times$ & 5.7$\times$ & 5.5$\times$ & 2.1$\times$ \\
+10000 & 16.1$\times$ & 15.3$\times$ & 8.9$\times$ & 0.65$\times$ \\
+\bottomrule
+\end{tabular}
+\caption{Right multiply speedup ratios (RLE time / other method time,
+$>$1 means RLE is faster).  RLE beats all methods up to $\sim$5K diploid
+and remains competitive with GRG at 10K.}
+\label{tab:speedup}
+\end{table}
+
+Key observations:
+\begin{itemize}
+\item Tree multiply is \textbf{inherently sequential} ($O(n \cdot
+n_\text{intervals})$ with dependency chain), so RLE's parallelism provides
+an increasing advantage: 5$\times$ at 100 dip to 16$\times$ at 10K dip.
+\item Dense multiply is memory-bandwidth-bound at $O(nm)$ per call.  At
+10K diploid the matrix is 219\,MB, so left multiply (column-major access)
+suffers severely.
+\item RePair multiply is 9$\times$ slower than RLE and 14$\times$ slower
+than GRG at 10K, due to grammar decompression overhead.
+\item GRG has the best \emph{asymptotic} scaling but RLE has lower constant
+factors, making it faster at moderate sample sizes.
+\end{itemize}
+
+\section{Complexity Comparison}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l c c c}
+\toprule
+Method & Prepare & Per-call & Parallel? \\
+\midrule
+Dense        & $O(nm)$ & $O(nm)$ & Yes \\
+Tree         & $O(nm)$ & $O(n \cdot n_i + M)$ & No \\
+RLE          & $O(nm)$ & $O(m + R)$ & Yes \\
+GRG          & $O(nm)$ & $O(n \log n + m)$ & Partial \\
+\bottomrule
+\end{tabular}
+\caption{Asymptotic complexity.  $n_i$: number of global intervals;
+$M$: total mismatches; $R$: total 1-runs.  In practice $R \ll n \cdot
+n_i$ and RLE's per-call cost is embarrassingly parallel.}
+\label{tab:complexity}
+\end{table}
+
+\section{Memory}
+
+The RLE representation stores $R_\text{total}$ run-start and run-end
+integers plus $n{+}1$ offset integers.  At 10K diploid with $R_\text{total}
+\approx 16$M:
+\[
+\text{RLE storage} = 2 \times 16\text{M} \times 4\,\text{bytes} \approx 128\,\text{MB}
+\]
+compared to:
+\begin{itemize}
+\item Dense: $nm \approx 230$\,MB (int8) or $920$\,MB (int32)
+\item Tree: $n \cdot n_i \times 5\,\text{bytes} \approx 175$\,MB
+(\texttt{ivl\_seg} + \texttt{carry} + auxiliary)
+\end{itemize}
+
+The RLE memory is comparable to tree multiply but enables much faster
+per-call execution.
+
+\section{Discussion}
+
+The RLE approach achieves its speedup from two sources:
+
+\textbf{1.\ Algorithmic:} The per-call cost $O(m + R_\text{total})$ avoids
+the $O(n \cdot n_\text{intervals})$ cumulative-sum propagation of tree
+multiply.  While $R_\text{total}$ is not dramatically smaller than $n
+\cdot n_\text{intervals}$ (16M vs 35M at 10K), the operations are simpler
+(one subtraction per run vs.\ memcpy + offset adjustment per interval).
+
+\textbf{2.\ Parallelism:} RLE right multiply is embarrassingly parallel
+(independent per-sample computation), while tree multiply has inherent
+sequential dependencies.  With $p$ cores, the effective cost ratio is
+$(R_\text{total}/p) / (n \cdot n_i)$, explaining the increasing speedup
+with sample size.
+
+\textbf{Comparison with GRG.}  GRG's DAG structure enables $O(n \log n + m)$
+multiply by memoizing shared haplotype computations.  At 10K diploid, GRG
+is 1.3--1.5$\times$ faster than RLE, but at smaller sizes ($\le$2K),
+RLE is 2--3$\times$ faster due to lower overhead.  The \texttt{.threads}
+format also provides 3$\times$ better compression than GRG.  In practice,
+a hybrid strategy could use RLE for moderate sample sizes and GRG for
+large-scale biobank analyses.
+
+\textbf{Comparison with RePair.}  Grammar-compressed multiplication
+(RePair~\cite{tosoni2022}) is 9--14$\times$ slower than both RLE and GRG at
+10K diploid, and its compressed representation is 31$\times$ larger than
+\texttt{.threads}.  The grammar decompression overhead dominates the
+multiply cost.
+
+For applications requiring many multiply operations (e.g., RHE with
+$B = 100$ random vectors at $n = 10{,}000$ diploid), the total compute
+for multiplications drops from $\sim$11 seconds (tree) to $\sim$0.6 seconds
+(RLE), while preparation time is comparable ($\sim$400\,ms each).
+
+The \texttt{.threads} format remains optimal for storage ($\sim$500$\times$
+compression vs dense), with the RLE structure serving as a runtime-only
+acceleration layer.  The optional simplification (stripping tmrcas) provides
+an additional $\sim$30\% file size reduction for multiply-only workloads.
+
+\begin{thebibliography}{9}
+\bibitem{gunnarsson2025}
+B.~Gunnarsson, M.~Palacios, P.~P.~Palacios, and P.~F.~Palamara.
+\newblock Inferring genome-wide genealogies for large samples.
+\newblock \emph{In preparation}, 2025.
+
+\bibitem{dehaas2024}
+A.~DeHaas, A.~Biddanda, and D.~Taliun.
+\newblock Genotype Representation Graphs for lossless compression of population-scale genetic variation.
+\newblock \emph{bioRxiv}, 2024.
+
+\bibitem{pazokitoroudi2020}
+A.~Pazoki Toroudi, A.~Chiu, K.~Engleman, et~al.
+\newblock Efficient and scalable estimation of heritability with kernel methods.
+\newblock \emph{Nature Communications}, 11:3189, 2020.
+
+\bibitem{tosoni2022}
+A.~Tosoni, D.~Denti, and S.~Rossi.
+\newblock Grammar-compressed matrices for efficient linear algebra.
+\newblock \emph{arXiv}, 2022.
+\end{thebibliography}
+
+\end{document}

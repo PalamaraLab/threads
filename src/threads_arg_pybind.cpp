@@ -176,6 +176,12 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("materialize_genotypes", &ThreadingInstructions::materialize_genotypes)
       .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid)
       .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid)
+      .def("simplify_for_multiply", &ThreadingInstructions::simplify_for_multiply)
+      .def("prepare_rle_multiply", &ThreadingInstructions::prepare_rle_multiply)
+      .def("right_multiply_rle", &ThreadingInstructions::right_multiply_rle, py::arg("x"))
+      .def("left_multiply_rle", &ThreadingInstructions::left_multiply_rle, py::arg("x"))
+      .def("right_multiply_rle_batch", &ThreadingInstructions::right_multiply_rle_batch, py::arg("x_flat"), py::arg("k"))
+      .def("left_multiply_rle_batch", &ThreadingInstructions::left_multiply_rle_batch, py::arg("x_flat"), py::arg("k"))
       .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply)
       .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"),
            py::call_guard<py::gil_scoped_release>())

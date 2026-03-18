@@ -85,6 +85,12 @@ public:
 
     ThreadingInstructions sub_range(const int range_start, const int range_end) const;
 
+    // Simplify for multiply: strip tmrcas (set to 0) and merge consecutive
+    // segments that share the same target. Returns a new ThreadingInstructions
+    // with fewer segments. The genotype matrix is identical — only genealogical
+    // information is discarded. Useful for multiply-only workloads.
+    ThreadingInstructions simplify_for_multiply() const;
+
     // Common operations
     std::vector<double> left_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
     std::vector<double> right_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
@@ -111,6 +117,21 @@ public:
     // left:  x has length num_samples, returns (site_end - site_start,)
     std::vector<double> right_multiply_tree_range(const std::vector<double>& x, int site_start, int site_end);
     std::vector<double> left_multiply_tree_range(const std::vector<double>& x, int site_start, int site_end);
+
+    // RLE (run-length encoded) multiply: precomputes per-sample 1-runs,
+    // then multiplies via prefix-sum lookups in O(m + total_1_runs).
+    // Prepare is O(n*m) with O(m * tree_depth) peak memory (ref-counted cache).
+    // Per-call cost is much lower than tree multiply when total_1_runs << n*ni.
+    void prepare_rle_multiply();
+    std::vector<double> right_multiply_rle(const std::vector<double>& x);
+    std::vector<double> left_multiply_rle(const std::vector<double>& x);
+
+    // Batch RLE multiply: process k vectors in one call.
+    // Input/output are row-major flat arrays: X[row * k + col].
+    // right: X is (num_sites, k), returns (num_samples, k)
+    // left:  X is (num_samples, k), returns (num_sites, k)
+    std::vector<double> right_multiply_rle_batch(const std::vector<double>& x_flat, int k);
+    std::vector<double> left_multiply_rle_batch(const std::vector<double>& x_flat, int k);
 
     // Precompute and cache the dense genotype matrix (num_sites × num_samples, row-major).
     // Subsequent left_multiply/right_multiply calls use the cached matrix.
@@ -173,6 +194,14 @@ private:
     // Stored as flat vectors indexed by tree_seg_offset[sample] + seg.
     std::vector<int> tree_seg_first_ivl;  // first interval of each segment
     std::vector<int> tree_seg_offset;     // offset into tree_seg_first_ivl for each sample
+
+    // RLE multiply cache: per-sample 1-runs stored as flat (start, end) pairs.
+    // rle_run_start[rle_offset[i] .. rle_offset[i+1]) = start site indices of 1-runs
+    // rle_run_end  [rle_offset[i] .. rle_offset[i+1]) = end site indices of 1-runs
+    bool rle_ready = false;
+    std::vector<int> rle_offset;      // n+1 entries
+    std::vector<int> rle_run_start;   // total_runs entries
+    std::vector<int> rle_run_end;     // total_runs entries
 };
 
 #endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP
