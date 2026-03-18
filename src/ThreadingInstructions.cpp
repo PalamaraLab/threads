@@ -270,6 +270,382 @@ ThreadingInstructions ThreadingInstructions::sub_range(const int range_start, co
     };
 }
 
+ThreadingInstructions ThreadingInstructions::simplify_for_multiply() const {
+    std::vector<ThreadingInstruction> simplified;
+    simplified.reserve(num_samples);
+
+    for (const auto& inst : instructions) {
+        std::vector<int> new_starts;
+        std::vector<double> new_tmrcas;
+        std::vector<int> new_targets;
+
+        if (inst.num_segments > 0) {
+            new_starts.push_back(inst.starts[0]);
+            new_tmrcas.push_back(0.0);
+            new_targets.push_back(inst.targets[0]);
+
+            for (size_t k = 1; k < inst.num_segments; k++) {
+                if (inst.targets[k] != new_targets.back()) {
+                    new_starts.push_back(inst.starts[k]);
+                    new_tmrcas.push_back(0.0);
+                    new_targets.push_back(inst.targets[k]);
+                }
+                // else: same target, merge by skipping this segment boundary
+            }
+        }
+
+        // Mismatches are unchanged — they index into positions[], not segments
+        simplified.emplace_back(
+            std::move(new_starts),
+            std::move(new_tmrcas),
+            std::move(new_targets),
+            std::vector<int>(inst.mismatches)
+        );
+    }
+
+    ThreadingInstructions result(std::move(simplified), std::vector<int>(positions));
+    result.start = start;
+    result.end = end;
+    return result;
+}
+
+// ── RLE multiply ────────────────────────────────────────────────────────────
+
+void ThreadingInstructions::prepare_rle_multiply() {
+    if (rle_ready) return;
+
+    const int n = num_samples;
+    const int m = num_sites;
+
+    rle_offset.resize(n + 1);
+    std::vector<int> run_starts, run_ends;
+
+    // Reference counting for genotype cache (same as tree prepare)
+    std::vector<int> ref_count(n, 0);
+    for (int i = 1; i < n; i++) {
+        std::set<int> seen;
+        for (int t : instructions[i].targets) {
+            if (t != i && seen.insert(t).second) ref_count[t]++;
+        }
+    }
+
+    std::unordered_map<int, std::vector<uint8_t>> geno_cache;
+    std::vector<uint8_t> geno_buf(m, 0);
+
+    for (int i = 0; i < n; i++) {
+        const auto& inst_i = instructions[i];
+        const int n_segs = static_cast<int>(inst_i.num_segments);
+        const int* mm_data = inst_i.mismatches.data();
+        const int n_mm = static_cast<int>(inst_i.num_mismatches);
+
+        if (i == 0) {
+            // Sample 0: genotype from reference mismatches
+            std::fill(geno_buf.begin(), geno_buf.end(), 0);
+            for (int k = 0; k < n_mm; k++) {
+                if (mm_data[k] >= 0 && mm_data[k] < m) geno_buf[mm_data[k]] = 1;
+            }
+        } else {
+            // Build genotype from segments
+            for (int seg = 0; seg < n_segs; seg++) {
+                // Convert segment start position to site index
+                int site_start = 0;
+                if (seg > 0) {
+                    auto it = std::lower_bound(positions.begin(), positions.end(),
+                                               inst_i.starts[seg]);
+                    site_start = static_cast<int>(it - positions.begin());
+                }
+                int site_end = m;
+                if (seg + 1 < n_segs) {
+                    auto it = std::lower_bound(positions.begin(), positions.end(),
+                                               inst_i.starts[seg + 1]);
+                    site_end = static_cast<int>(it - positions.begin());
+                }
+
+                const int target = inst_i.targets[seg];
+
+                if (target != i) {
+                    const auto& tgt = geno_cache.at(target);
+                    std::memcpy(&geno_buf[site_start], &tgt[site_start],
+                                site_end - site_start);
+                    // Flip at mismatches
+                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, site_start);
+                    const int* hi = std::lower_bound(mm_data, mm_data + n_mm, site_end);
+                    for (const int* it = lo; it != hi; ++it) {
+                        geno_buf[*it] ^= 1;
+                    }
+                } else {
+                    // Self-ref: carry forward, flip at mismatches
+                    int carry = (site_start > 0) ? geno_buf[site_start - 1] : 0;
+                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, site_start);
+                    const int* hi = std::lower_bound(mm_data, mm_data + n_mm, site_end);
+                    const int* it = lo;
+                    for (int s = site_start; s < site_end; s++) {
+                        if (it != hi && *it == s) {
+                            carry ^= 1;
+                            ++it;
+                        }
+                        geno_buf[s] = static_cast<uint8_t>(carry);
+                    }
+                }
+            }
+        }
+
+        // Extract 1-runs
+        rle_offset[i] = static_cast<int>(run_starts.size());
+        bool in_run = false;
+        for (int s = 0; s < m; s++) {
+            if (geno_buf[s] && !in_run) {
+                run_starts.push_back(s);
+                in_run = true;
+            } else if (!geno_buf[s] && in_run) {
+                run_ends.push_back(s);
+                in_run = false;
+            }
+        }
+        if (in_run) run_ends.push_back(m);
+
+        // Cache if still referenced
+        if (ref_count[i] > 0) {
+            geno_cache[i] = geno_buf;
+        }
+        // Decrement refs
+        if (i > 0) {
+            std::set<int> seen;
+            for (int t : inst_i.targets) {
+                if (t != i && seen.insert(t).second) {
+                    if (--ref_count[t] == 0) geno_cache.erase(t);
+                }
+            }
+        }
+    }
+    rle_offset[n] = static_cast<int>(run_starts.size());
+
+    rle_run_start = std::move(run_starts);
+    rle_run_end = std::move(run_ends);
+    rle_ready = true;
+}
+
+std::vector<double> ThreadingInstructions::right_multiply_rle(const std::vector<double>& x) {
+    if (static_cast<int>(x.size()) != num_sites) {
+        throw std::runtime_error("Input vector must have length num_sites.");
+    }
+    prepare_rle_multiply();
+
+    const int n = num_samples;
+    const int m = num_sites;
+
+    // Prefix sums of x
+    std::vector<double> prefix(m + 1, 0.0);
+    for (int s = 0; s < m; s++) prefix[s + 1] = prefix[s] + x[s];
+
+    std::vector<double> out(n);
+    const double* pfx = prefix.data();
+    const int* rs_data = rle_run_start.data();
+    const int* re_data = rle_run_end.data();
+
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static)
+#endif
+    for (int i = 0; i < n; i++) {
+        const int rs = rle_offset[i];
+        const int re = rle_offset[i + 1];
+        double sum = 0.0;
+        for (int r = rs; r < re; r++) {
+            sum += pfx[re_data[r]] - pfx[rs_data[r]];
+        }
+        out[i] = sum;
+    }
+    return out;
+}
+
+std::vector<double> ThreadingInstructions::left_multiply_rle(const std::vector<double>& x) {
+    if (static_cast<int>(x.size()) != num_samples) {
+        throw std::runtime_error("Input vector must have length num_samples.");
+    }
+    prepare_rle_multiply();
+
+    const int n = num_samples;
+    const int m = num_sites;
+
+#ifdef _OPENMP
+    const int nt = omp_get_max_threads();
+    std::vector<double> all_diff(static_cast<size_t>(m + 1) * nt, 0.0);
+
+    #pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        double* my_diff = &all_diff[static_cast<size_t>(tid) * (m + 1)];
+
+        #pragma omp for schedule(static)
+        for (int i = 0; i < n; i++) {
+            const int rs = rle_offset[i];
+            const int re = rle_offset[i + 1];
+            const double xi = x[i];
+            for (int r = rs; r < re; r++) {
+                my_diff[rle_run_start[r]] += xi;
+                my_diff[rle_run_end[r]] -= xi;
+            }
+        }
+    }
+
+    // Reduce thread-local diffs and prefix sum
+    std::vector<double> out(m);
+    double running = 0.0;
+    for (int s = 0; s < m; s++) {
+        double d = 0.0;
+        for (int t = 0; t < nt; t++) {
+            d += all_diff[static_cast<size_t>(t) * (m + 1) + s];
+        }
+        running += d;
+        out[s] = running;
+    }
+#else
+    // Single-threaded: diff array approach
+    std::vector<double> diff(m + 1, 0.0);
+    for (int i = 0; i < n; i++) {
+        const int rs = rle_offset[i];
+        const int re = rle_offset[i + 1];
+        const double xi = x[i];
+        for (int r = rs; r < re; r++) {
+            diff[rle_run_start[r]] += xi;
+            diff[rle_run_end[r]] -= xi;
+        }
+    }
+
+    std::vector<double> out(m);
+    double running = 0.0;
+    for (int s = 0; s < m; s++) {
+        running += diff[s];
+        out[s] = running;
+    }
+#endif
+    return out;
+}
+
+std::vector<double> ThreadingInstructions::right_multiply_rle_batch(
+        const std::vector<double>& x_flat, int k) {
+    if (k == 1) return right_multiply_rle(x_flat);
+    if (static_cast<int>(x_flat.size()) != num_sites * k) {
+        throw std::runtime_error("Input must have length num_sites * k.");
+    }
+    prepare_rle_multiply();
+
+    const int n = num_samples;
+    const int m = num_sites;
+
+    // Prefix sums for each of k vectors: prefix[(s+1)*k + j] = sum x[0..s, j]
+    std::vector<double> prefix(static_cast<size_t>(m + 1) * k, 0.0);
+    for (int s = 0; s < m; s++) {
+        const double* xrow = &x_flat[static_cast<size_t>(s) * k];
+        const double* prev = &prefix[static_cast<size_t>(s) * k];
+        double* cur = &prefix[static_cast<size_t>(s + 1) * k];
+        for (int j = 0; j < k; j++) {
+            cur[j] = prev[j] + xrow[j];
+        }
+    }
+
+    std::vector<double> out(static_cast<size_t>(n) * k, 0.0);
+
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static)
+#endif
+    for (int i = 0; i < n; i++) {
+        const int rs = rle_offset[i];
+        const int re = rle_offset[i + 1];
+        double* out_i = &out[static_cast<size_t>(i) * k];
+        for (int r = rs; r < re; r++) {
+            const double* p_end = &prefix[static_cast<size_t>(rle_run_end[r]) * k];
+            const double* p_start = &prefix[static_cast<size_t>(rle_run_start[r]) * k];
+            for (int j = 0; j < k; j++) {
+                out_i[j] += p_end[j] - p_start[j];
+            }
+        }
+    }
+    return out;
+}
+
+std::vector<double> ThreadingInstructions::left_multiply_rle_batch(
+        const std::vector<double>& x_flat, int k) {
+    if (k == 1) return left_multiply_rle(x_flat);
+    if (static_cast<int>(x_flat.size()) != num_samples * k) {
+        throw std::runtime_error("Input must have length num_samples * k.");
+    }
+    prepare_rle_multiply();
+
+    const int n = num_samples;
+    const int m = num_sites;
+
+    const size_t diff_len = static_cast<size_t>(m + 1) * k;
+
+#ifdef _OPENMP
+    const int nt = omp_get_max_threads();
+    std::vector<double> all_diff(diff_len * nt, 0.0);
+
+    #pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        double* my_diff = &all_diff[static_cast<size_t>(tid) * diff_len];
+
+        #pragma omp for schedule(static)
+        for (int i = 0; i < n; i++) {
+            const int rs = rle_offset[i];
+            const int re = rle_offset[i + 1];
+            const double* x_i = &x_flat[static_cast<size_t>(i) * k];
+            for (int r = rs; r < re; r++) {
+                double* d_start = &my_diff[static_cast<size_t>(rle_run_start[r]) * k];
+                double* d_end = &my_diff[static_cast<size_t>(rle_run_end[r]) * k];
+                for (int j = 0; j < k; j++) {
+                    d_start[j] += x_i[j];
+                    d_end[j] -= x_i[j];
+                }
+            }
+        }
+    }
+
+    // Reduce + prefix sum
+    std::vector<double> out(static_cast<size_t>(m) * k);
+    std::vector<double> running(k, 0.0);
+    for (int s = 0; s < m; s++) {
+        double* o = &out[static_cast<size_t>(s) * k];
+        for (int j = 0; j < k; j++) {
+            double d = 0.0;
+            for (int t = 0; t < nt; t++) {
+                d += all_diff[static_cast<size_t>(t) * diff_len + static_cast<size_t>(s) * k + j];
+            }
+            running[j] += d;
+            o[j] = running[j];
+        }
+    }
+#else
+    std::vector<double> diff(diff_len, 0.0);
+    for (int i = 0; i < n; i++) {
+        const int rs = rle_offset[i];
+        const int re = rle_offset[i + 1];
+        const double* x_i = &x_flat[static_cast<size_t>(i) * k];
+        for (int r = rs; r < re; r++) {
+            double* d_start = &diff[static_cast<size_t>(rle_run_start[r]) * k];
+            double* d_end = &diff[static_cast<size_t>(rle_run_end[r]) * k];
+            for (int j = 0; j < k; j++) {
+                d_start[j] += x_i[j];
+                d_end[j] -= x_i[j];
+            }
+        }
+    }
+
+    std::vector<double> out(static_cast<size_t>(m) * k);
+    std::vector<double> running(k, 0.0);
+    for (int s = 0; s < m; s++) {
+        const double* d = &diff[static_cast<size_t>(s) * k];
+        double* o = &out[static_cast<size_t>(s) * k];
+        for (int j = 0; j < k; j++) {
+            running[j] += d[j];
+            o[j] = running[j];
+        }
+    }
+#endif
+    return out;
+}
+
 void ThreadingInstructions::materialize_genotypes() {
     if (genotypes_materialized) return;
     genotype_matrix.resize(static_cast<size_t>(num_sites) * num_samples);
