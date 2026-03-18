@@ -20,8 +20,12 @@
 #include "AlleleAges.hpp"
 #include "GenotypeIterator.hpp"
 #include "VCFWriter.hpp"
+#include "ForwardBackward.hpp"
+#include "ThreadsIO.hpp"
 #include "pybind_utils.hpp"
 
+#include <pybind11/numpy.h>
+#include <cstring>
 #include <vector>
 
 namespace py = pybind11;
@@ -49,7 +53,23 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def_readonly("expected_branch_lengths", &ThreadsLowMem::expected_branch_lengths)
       .def("initialize_viterbi", &ThreadsLowMem::initialize_viterbi)
       .def("process_site_viterbi", &ThreadsLowMem::process_site_viterbi)
+      .def("process_all_sites_viterbi", &ThreadsLowMem::process_all_sites_viterbi)
+      .def("process_all_sites_viterbi_numpy", [](ThreadsLowMem& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        int n_sites = static_cast<int>(buf.shape[0]);
+        int n_haps = static_cast<int>(buf.shape[1]);
+        self.process_all_sites_viterbi_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);
+      })
       .def("process_site_hets", &ThreadsLowMem::process_site_hets)
+      .def("process_all_sites_hets", &ThreadsLowMem::process_all_sites_hets)
+      .def("process_all_sites_hets_numpy", [](ThreadsLowMem& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        int n_sites = static_cast<int>(buf.shape[0]);
+        int n_haps = static_cast<int>(buf.shape[1]);
+        self.process_all_sites_hets_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);
+      })
       .def("count_branches", &ThreadsLowMem::count_branches)
       .def("prune", &ThreadsLowMem::prune)
       .def("traceback", &ThreadsLowMem::traceback)
@@ -89,6 +109,14 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def_readonly("num_samples", &Matcher::num_samples)
       .def_readonly("num_sites", &Matcher::num_sites)
       .def("process_site", &Matcher::process_site)
+      .def("process_all_sites", &Matcher::process_all_sites)
+      .def("process_all_sites_numpy", [](Matcher& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        int n_sites = static_cast<int>(buf.shape[0]);
+        int n_haps = static_cast<int>(buf.shape[1]);
+        self.process_all_sites_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);
+      })
       .def("propagate_adjacent_matches", &Matcher::propagate_adjacent_matches)
       .def("get_matches", &Matcher::get_matches)
       .def("serializable_matches", &Matcher::serializable_matches)
@@ -142,7 +170,39 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            &threading_instructions_get_state,
            &threading_instructions_set_state))
       .def("left_multiply", &ThreadingInstructions::left_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false)
-      .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false);
+      .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false)
+      .def("materialize_genotypes", &ThreadingInstructions::materialize_genotypes)
+      .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid)
+      .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid)
+      .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply)
+      .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"))
+      .def("left_multiply_tree", &ThreadingInstructions::left_multiply_tree, py::arg("x"))
+      .def("right_multiply_tree_batch", &ThreadingInstructions::right_multiply_tree_batch, py::arg("x_flat"), py::arg("k"))
+      .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"))
+      .def("right_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
+        auto buf = arr.request();
+        if (buf.ndim != 1 || static_cast<int>(buf.shape[0]) != self.num_sites * k)
+            throw std::runtime_error("Input must be 1D array of length num_sites * k");
+        std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
+        auto result = self.right_multiply_tree_batch(x_flat, k);
+        py::array_t<double> out(static_cast<size_t>(result.size()));
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("x_flat"), py::arg("k"))
+      .def("left_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
+        auto buf = arr.request();
+        if (buf.ndim != 1 || static_cast<int>(buf.shape[0]) != self.num_samples * k)
+            throw std::runtime_error("Input must be 1D array of length num_samples * k");
+        std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
+        auto result = self.left_multiply_tree_batch(x_flat, k);
+        py::array_t<double> out(static_cast<size_t>(result.size()));
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("x_flat"), py::arg("k"));
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,
@@ -154,10 +214,14 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("process_site", &ConsistencyWrapper::process_site)
       .def("get_consistent_instructions", &ConsistencyWrapper::get_consistent_instructions);
 
+  m.def("run_consistency", &run_consistency, py::arg("instructions"), py::arg("allele_ages"));
+
   py::class_<AgeEstimator>(m, "AgeEstimator")
       .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))
       .def("process_site", &AgeEstimator::process_site)
       .def("get_inferred_ages", &AgeEstimator::get_inferred_ages);
+
+  m.def("estimate_ages", &estimate_ages, py::arg("instructions"));
 
   py::class_<GenotypeIterator>(m, "GenotypeIterator")
       .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))
@@ -175,4 +239,62 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("set_filter", &VCFWriter::set_filter)
       .def("set_sample_names", &VCFWriter::set_sample_names)
       .def("write_vcf", &VCFWriter::write_vcf);
+
+  // Forward-backward Li-Stephens algorithm (replaces numba JIT'd fwbw)
+  m.def("forwards_ls_hap", [](
+      py::array_t<double, py::array::c_style | py::array::forcecast> H,
+      py::array_t<double, py::array::c_style | py::array::forcecast> s,
+      py::array_t<double, py::array::c_style | py::array::forcecast> e,
+      py::array_t<double, py::array::c_style | py::array::forcecast> r) {
+    auto H_buf = H.request();
+    auto s_buf = s.request();
+    int m_sites = H_buf.shape[0];
+    int n_refs = H_buf.shape[1];
+
+    auto [F_vec, c_vec] = forwards_ls_hap(
+        n_refs, m_sites,
+        static_cast<const double*>(H_buf.ptr),
+        static_cast<const double*>(s_buf.ptr),
+        static_cast<const double*>(e.request().ptr),
+        static_cast<const double*>(r.request().ptr));
+
+    py::array_t<double> F({m_sites, n_refs});
+    std::memcpy(F.mutable_data(), F_vec.data(), F_vec.size() * sizeof(double));
+    py::array_t<double> c(m_sites);
+    std::memcpy(c.mutable_data(), c_vec.data(), c_vec.size() * sizeof(double));
+    return py::make_tuple(F, c);
+  });
+
+  m.def("backwards_ls_hap", [](
+      py::array_t<double, py::array::c_style | py::array::forcecast> H,
+      py::array_t<double, py::array::c_style | py::array::forcecast> s,
+      py::array_t<double, py::array::c_style | py::array::forcecast> e,
+      py::array_t<double, py::array::c_style | py::array::forcecast> c,
+      py::array_t<double, py::array::c_style | py::array::forcecast> r) {
+    auto H_buf = H.request();
+    int m_sites = H_buf.shape[0];
+    int n_refs = H_buf.shape[1];
+
+    auto B_vec = backwards_ls_hap(
+        n_refs, m_sites,
+        static_cast<const double*>(H_buf.ptr),
+        static_cast<const double*>(s.request().ptr),
+        static_cast<const double*>(e.request().ptr),
+        static_cast<const double*>(c.request().ptr),
+        static_cast<const double*>(r.request().ptr));
+
+    py::array_t<double> B({m_sites, n_refs});
+    std::memcpy(B.mutable_data(), B_vec.data(), B_vec.size() * sizeof(double));
+    return B;
+  });
+
+  // .threads file I/O (replaces h5py)
+  m.def("serialize_threads", &serialize_threads,
+        py::arg("filename"), py::arg("instructions"),
+        py::arg("metadata_cols") = std::vector<std::vector<std::string>>(),
+        py::arg("allele_ages") = std::vector<double>(),
+        py::arg("sample_names") = std::vector<std::string>());
+  m.def("deserialize_threads", &deserialize_threads, py::arg("filename"));
+  m.def("read_threads_metadata", &read_threads_metadata, py::arg("filename"));
+  m.def("read_threads_sample_names", &read_threads_sample_names, py::arg("filename"));
 }

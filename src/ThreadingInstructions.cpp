@@ -17,10 +17,18 @@
 #include "ThreadingInstructions.hpp"
 #include "GenotypeIterator.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <limits>
+#include <set>
+#include <unordered_map>
 #include <vector>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 
 // perf: Note that args are passed by value rather than ref as they run faster
@@ -262,168 +270,993 @@ ThreadingInstructions ThreadingInstructions::sub_range(const int range_start, co
     };
 }
 
-std::vector<double> ThreadingInstructions::left_multiply(const std::vector<double>& x, bool diploid, bool normalize) {
-    // Left-multiplication of the genotype matrix by a vector of doubles
+void ThreadingInstructions::materialize_genotypes() {
+    if (genotypes_materialized) return;
+    genotype_matrix.resize(static_cast<size_t>(num_sites) * num_samples);
+    GenotypeIterator gi(*this);
+    int site = 0;
+    while (gi.has_next_genotype()) {
+        const std::vector<int>& g = gi.next_genotype();
+        std::copy(g.begin(), g.end(), genotype_matrix.begin() + static_cast<size_t>(site) * num_samples);
+        site++;
+    }
+    genotypes_materialized = true;
+}
 
-    // Check input vector lengths are correct
+void ThreadingInstructions::materialize_diploid() {
+    if (diploid_materialized) return;
+    materialize_genotypes();
+    const int n = num_samples;
+    const int n_dip = n / 2;
+    diploid_matrix.resize(static_cast<size_t>(num_sites) * n_dip);
+    const int* gmat = genotype_matrix.data();
+    int* dmat = diploid_matrix.data();
+    for (int s = 0; s < num_sites; s++) {
+        const int* g = gmat + static_cast<size_t>(s) * n;
+        int* d = dmat + static_cast<size_t>(s) * n_dip;
+        for (int i = 0; i < n_dip; i++) {
+            d[i] = g[2 * i] + g[2 * i + 1];
+        }
+    }
+    diploid_materialized = true;
+}
+
+void ThreadingInstructions::materialize_normalized_haploid() {
+    if (standardized_hap_ready) return;
+    materialize_genotypes();
+    const int n = num_samples;
+    standardized_hap.resize(static_cast<size_t>(num_sites) * n);
+    const int* gmat = genotype_matrix.data();
+    double* zmat = standardized_hap.data();
+    for (int s = 0; s < num_sites; s++) {
+        const int* g = gmat + static_cast<size_t>(s) * n;
+        double* z = zmat + static_cast<size_t>(s) * n;
+        int ac = 0;
+        for (int i = 0; i < n; i++) ac += g[i];
+        const double mu = static_cast<double>(ac) / n;
+        const double inv_std = 1.0 / std::sqrt(mu * (1.0 - mu));
+        for (int i = 0; i < n; i++) {
+            z[i] = (g[i] - mu) * inv_std;
+        }
+    }
+    standardized_hap_ready = true;
+}
+
+void ThreadingInstructions::materialize_normalized_diploid() {
+    if (standardized_dip_ready) return;
+    materialize_diploid();
+    const int n = num_samples;
+    const int n_dip = n / 2;
+    standardized_dip.resize(static_cast<size_t>(num_sites) * n_dip);
+    const int* dmat = diploid_matrix.data();
+    double* zmat = standardized_dip.data();
+    for (int s = 0; s < num_sites; s++) {
+        const int* d = dmat + static_cast<size_t>(s) * n_dip;
+        double* z = zmat + static_cast<size_t>(s) * n_dip;
+        int ac = 0;
+        for (int i = 0; i < n_dip; i++) ac += d[i];
+        const double mu = static_cast<double>(ac) / n_dip;
+        double sample_var = 0.0;
+        for (int i = 0; i < n_dip; i++) {
+            double diff = d[i] - mu;
+            sample_var += diff * diff;
+        }
+        sample_var /= n_dip;
+        const double inv_std = 1.0 / std::sqrt(sample_var);
+        for (int i = 0; i < n_dip; i++) {
+            z[i] = (d[i] - mu) * inv_std;
+        }
+    }
+    standardized_dip_ready = true;
+}
+
+std::vector<double> ThreadingInstructions::left_multiply(const std::vector<double>& x, bool diploid, bool normalize) {
+    const int n = num_samples;
+    const int n_dip = n / 2;
+
     if (diploid) {
-        if (x.size() != num_samples / 2) {
+        if (static_cast<int>(x.size()) != n_dip) {
             std::ostringstream oss;
-            oss << "Input vector must have length " << num_samples / 2 << ".";
+            oss << "Input vector must have length " << n_dip << ".";
             throw std::runtime_error(oss.str());
         }
     } else {
-        if (x.size() != num_samples) {
+        if (static_cast<int>(x.size()) != n) {
             std::ostringstream oss;
-            oss << "Input vector must have length " << num_samples << ".";
+            oss << "Input vector must have length " << n << ".";
             throw std::runtime_error(oss.str());
         }
     }
 
-    // Initialize genotype traversal
-    GenotypeIterator gi = GenotypeIterator(*this);
-    std::size_t site_counter = 0;
+    const double* xp = x.data();
     std::vector<double> out(num_sites);
+    double* outp = out.data();
 
-    while (gi.has_next_genotype()) {
-        // Fetch the next genotype
-        const std::vector<int>& g = gi.next_genotype();
-
-        // Initialize the next entry
-        double entry = 0.0;
-
-        if (normalize) {
-            // If we want to normalize, we need the mean and standard deviation of g.
-            double ac = 0.0;
-            for (auto a : g) {
-                ac += a;
+    if (normalize && diploid) {
+        materialize_normalized_diploid();
+        const double* zmat = standardized_dip.data();
+        for (int s = 0; s < num_sites; s++) {
+            const double* z = zmat + static_cast<size_t>(s) * n_dip;
+            double entry = 0.0;
+            for (int i = 0; i < n_dip; i++) {
+                entry += xp[i] * z[i];
             }
-            if (diploid) {
-                // We do the diploid standard deviation by hand
-                double mu = 2.0 * ac / num_samples;
-                double sample_var = 0.0;
-                for (std::size_t i=0; i < x.size(); i++) {
-                    int h = g[2 * i] + g[2 * i + 1];
-                    double d = h - mu;
-                    sample_var += d * d;
-                }
-                sample_var /= (num_samples / 2);
-
-                double std = std::sqrt(sample_var);
-                for (std::size_t i=0; i < x.size(); i++) {
-                    int h = g[2 * i] + g[2 * i + 1];
-                    double w = x[i];
-                    entry += w * (h - mu) / std;
-                }
-            } else {
-                double mu = ac / num_samples;
-                double std = std::sqrt(mu * (1 - mu));
-                for (std::size_t i=0; i < g.size(); i++) {
-                    double w = x[i];
-                    entry += w * (g[i] - mu) / std;
-                }
-            }
-        } else {
-            for (std::size_t i=0; i < g.size(); i++) {
-                double w = diploid ? x[i / 2] : x[i];
-                entry += w * g[i];
-            }
+            outp[s] = entry;
         }
-        out[site_counter] = entry;
-        site_counter++;
+    } else if (normalize) {
+        materialize_normalized_haploid();
+        const double* zmat = standardized_hap.data();
+        for (int s = 0; s < num_sites; s++) {
+            const double* z = zmat + static_cast<size_t>(s) * n;
+            double entry = 0.0;
+            for (int i = 0; i < n; i++) {
+                entry += xp[i] * z[i];
+            }
+            outp[s] = entry;
+        }
+    } else if (diploid) {
+        materialize_diploid();
+        const int* dmat = diploid_matrix.data();
+        for (int s = 0; s < num_sites; s++) {
+            const int* d = dmat + static_cast<size_t>(s) * n_dip;
+            double entry = 0.0;
+            for (int i = 0; i < n_dip; i++) {
+                entry += xp[i] * d[i];
+            }
+            outp[s] = entry;
+        }
+    } else {
+        materialize_genotypes();
+        const int* gmat = genotype_matrix.data();
+        for (int s = 0; s < num_sites; s++) {
+            const int* g = gmat + static_cast<size_t>(s) * n;
+            double entry = 0.0;
+            for (int i = 0; i < n; i++) {
+                entry += xp[i] * g[i];
+            }
+            outp[s] = entry;
+        }
     }
     return out;
 }
 
 std::vector<double> ThreadingInstructions::right_multiply(const std::vector<double>& x, bool diploid, bool normalize) {
-    // Right-multiplication of the genotype matrix by a vector of doubles
-
-    // Check input vector lengths are correct
-    if (x.size() != num_sites) {
+    if (static_cast<int>(x.size()) != num_sites) {
         std::ostringstream oss;
-        oss << "Input vector must have length " << num_samples / 2 << ".";
+        oss << "Input vector must have length " << num_sites << ".";
         throw std::runtime_error(oss.str());
     }
 
-    GenotypeIterator gi = GenotypeIterator(*this);
-    std::size_t site_counter = 0;
-    if (diploid) {
-        // Initialize output
-        std::vector<double> out(num_samples / 2, 0.0);
-        if (normalize) {
-            while (gi.has_next_genotype()) {
-                // Fetch the next genotype
-                const std::vector<int>& g = gi.next_genotype();
+    const int n = num_samples;
+    const int n_dip = n / 2;
+    const int out_size = diploid ? n_dip : n;
+    const double* xp = x.data();
 
-                // If we want to normalize, we need the mean and standard deviation of g.
-                double ac = 0.0;
-                for (auto a : g) {
-                    ac += a;
-                }
+    std::vector<double> out(out_size, 0.0);
+    double* outp = out.data();
 
-                // We do the diploid standard deviation by hand
-                const double mu = 2.0 * ac / num_samples;
-                double sample_var = 0.0;
-                for (std::size_t i=0; i < out.size(); i++) {
-                    int h = g[2 * i] + g[2 * i + 1];
-                    double d = h - mu;
-                    sample_var += d * d;
-                }
-                sample_var /= (num_samples / 2);
-                const double std = std::sqrt(sample_var);
-
-                const double w = x[site_counter] / std;
-                for (std::size_t i=0; i < out.size(); i++) {
-                    const int h = g[2 * i] + g[2 * i + 1];
-                    out[i] += w * (h - mu);
-                }
-                site_counter++;
-            }
-        } else {
-            while (gi.has_next_genotype()) {
-                // Fetch the next genotype
-                const std::vector<int>& g = gi.next_genotype();
-                const double w = x[site_counter];
-                for (std::size_t i=0; i < out.size(); i++) {
-                    const int h = g[2 * i] + g[2 * i + 1];
-                    out[i] += w * h;
-                }
-                site_counter++;
+    if (normalize && diploid) {
+        materialize_normalized_diploid();
+        const double* zmat = standardized_dip.data();
+        for (int s = 0; s < num_sites; s++) {
+            const double* z = zmat + static_cast<size_t>(s) * n_dip;
+            const double w = xp[s];
+            for (int i = 0; i < n_dip; i++) {
+                outp[i] += w * z[i];
             }
         }
-        return out;
+    } else if (normalize) {
+        materialize_normalized_haploid();
+        const double* zmat = standardized_hap.data();
+        for (int s = 0; s < num_sites; s++) {
+            const double* z = zmat + static_cast<size_t>(s) * n;
+            const double w = xp[s];
+            for (int i = 0; i < n; i++) {
+                outp[i] += w * z[i];
+            }
+        }
+    } else if (diploid) {
+        materialize_diploid();
+        const int* dmat = diploid_matrix.data();
+        for (int s = 0; s < num_sites; s++) {
+            const int* d = dmat + static_cast<size_t>(s) * n_dip;
+            const double w = xp[s];
+            for (int i = 0; i < n_dip; i++) {
+                outp[i] += w * d[i];
+            }
+        }
     } else {
-        // Initialize output
-        std::vector<double> out(num_samples, 0.0);
-        if (normalize) {
-            while (gi.has_next_genotype()) {
-                // Fetch the next genotype
-                const std::vector<int>& g = gi.next_genotype();
-                double ac = 0.0;
-                for (auto a : g) {
-                    ac += a;
-                }
-
-                // Normalization constants
-                double mu = ac / num_samples;
-                double std = std::sqrt(mu * (1 - mu));
-                const double w = x[site_counter] / std;
-                for (std::size_t i=0; i < out.size(); i++) {
-                    out[i] += w * (g[i] - mu);
-                }
-                site_counter++;
-            }
-        } else {
-            while (gi.has_next_genotype()) {
-                // Fetch the next genotype
-                const std::vector<int>& g = gi.next_genotype();
-                const double w = x[site_counter];
-                for (std::size_t i=0; i < out.size(); i++) {
-                    out[i] += w * g[i];
-                }
-                site_counter++;
+        materialize_genotypes();
+        const int* gmat = genotype_matrix.data();
+        for (int s = 0; s < num_sites; s++) {
+            const int* g = gmat + static_cast<size_t>(s) * n;
+            const double w = xp[s];
+            for (int i = 0; i < n; i++) {
+                outp[i] += w * g[i];
             }
         }
-        return out;
     }
+    return out;
+}
+
+void ThreadingInstructions::prepare_tree_multiply() {
+    if (tree_ready) return;
+
+    const int n = num_samples;
+    const int m = num_sites;
+
+    // ── Phase 1: Build global intervals (unchanged) ─────────────────────
+
+    tree_ref_genome.assign(m, 0);
+    for (int idx : instructions[0].mismatches) {
+        if (idx >= 0 && idx < m) tree_ref_genome[idx] = 1;
+    }
+
+    std::set<int> break_set;
+    break_set.insert(0);
+    for (int i = 0; i < n; i++) {
+        const auto& starts_i = instructions[i].starts;
+        const int n_segs = static_cast<int>(starts_i.size());
+        for (int k = 1; k < n_segs; k++) {
+            auto it = std::lower_bound(positions.begin() + 1, positions.end(), starts_i[k]);
+            if (it != positions.end()) {
+                break_set.insert(static_cast<int>(it - positions.begin()));
+            }
+        }
+    }
+
+    std::vector<int> breaks(break_set.begin(), break_set.end());
+    const int ni = static_cast<int>(breaks.size());
+    tree_n_intervals = ni;
+    tree_ivl_start.resize(ni);
+    tree_ivl_end.resize(ni);
+    for (int j = 0; j < ni; j++) {
+        tree_ivl_start[j] = breaks[j];
+        tree_ivl_end[j] = (j + 1 < ni) ? breaks[j + 1] : m;
+    }
+
+    tree_ivl_seg.resize(static_cast<size_t>(n) * ni);
+    for (int i = 0; i < n; i++) {
+        const auto& starts_i = instructions[i].starts;
+        const int n_segs = static_cast<int>(starts_i.size());
+        int seg = 0;
+        for (int j = 0; j < ni; j++) {
+            const int site = tree_ivl_start[j];
+            if (site == 0) {
+                seg = 0;
+            } else {
+                const int pos = positions[site];
+                while (seg + 1 < n_segs && starts_i[seg + 1] <= pos) {
+                    seg++;
+                }
+            }
+            tree_ivl_seg[static_cast<size_t>(i) * ni + j] = seg;
+        }
+    }
+
+    // ── Phase 2: Per-sample segment-to-interval mapping ─────────────────
+    // For each sample, record the first interval of each segment.
+    // This enables segment-level iteration in the multiply.
+
+    tree_seg_offset.resize(n);
+    tree_seg_first_ivl.clear();
+    for (int i = 0; i < n; i++) {
+        tree_seg_offset[i] = static_cast<int>(tree_seg_first_ivl.size());
+        int prev_seg = -1;
+        for (int j = 0; j < ni; j++) {
+            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
+            if (seg != prev_seg) {
+                tree_seg_first_ivl.push_back(j);
+                prev_seg = seg;
+            }
+        }
+    }
+    // Sentinel for end-of-last-sample
+    tree_seg_first_ivl.push_back(0);
+
+    // ── Phase 3: Precompute mismatch signs and carry values ─────────────
+    // Uses temporary reference-counted genotype cache.
+    // Peak memory: O(m * max_active_targets) instead of O(n * m).
+
+    // Count references: how many future samples use each target
+    std::vector<int> ref_count(n, 0);
+    for (int i = 1; i < n; i++) {
+        std::set<int> seen;
+        for (int t : instructions[i].targets) {
+            if (t != i && seen.insert(t).second) ref_count[t]++;
+        }
+    }
+
+    // Allocate mismatch sign storage
+    tree_mm_offset.resize(n);
+    size_t total_mm = 0;
+    for (int i = 0; i < n; i++) {
+        tree_mm_offset[i] = static_cast<int>(total_mm);
+        total_mm += instructions[i].mismatches.size();
+    }
+    tree_mm_sign.assign(total_mm, 0);
+    tree_mm_ivl.resize(total_mm);
+
+    // Allocate carry storage
+    tree_carry.assign(static_cast<size_t>(n) * ni, 0);
+
+    // Reference-counted genotype cache
+    std::unordered_map<int, std::vector<uint8_t>> geno_cache;
+    std::vector<uint8_t> geno_buf(m, 0);
+
+    for (int i = 0; i < n; i++) {
+        const int* mm_data = instructions[i].mismatches.data();
+        const int n_mm = static_cast<int>(instructions[i].mismatches.size());
+
+        if (i == 0) {
+            // Sample 0: genotype = ref_genome
+            for (int s = 0; s < m; s++) geno_buf[s] = static_cast<uint8_t>(tree_ref_genome[s]);
+        } else {
+            // Build genotype from target + mismatches
+            int carry = 0;
+            for (int j = 0; j < ni; j++) {
+                const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
+                const int target = instructions[i].targets[seg];
+                const int a = tree_ivl_start[j];
+                const int b = tree_ivl_end[j];
+
+                if (target != i) {
+                    const auto& tgt = geno_cache.at(target);
+                    std::memcpy(&geno_buf[a], &tgt[a], b - a);
+                    // Flip at mismatches
+                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
+                    const int* hi = std::lower_bound(mm_data, mm_data + n_mm, b);
+                    for (const int* it = lo; it != hi; ++it) {
+                        geno_buf[*it] ^= 1;
+                    }
+                    carry = geno_buf[b - 1];
+                } else {
+                    // Self-ref: carry forward, flip at mismatches
+                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
+                    const int* hi = std::lower_bound(mm_data, mm_data + n_mm, b);
+                    const int* it = lo;
+                    for (int s = a; s < b; s++) {
+                        if (it != hi && *it == s) {
+                            carry ^= 1;
+                            ++it;
+                        }
+                        geno_buf[s] = static_cast<uint8_t>(carry);
+                    }
+                }
+            }
+
+            // Compute mismatch correction signs and interval mapping
+            for (int k = 0; k < n_mm; k++) {
+                const int s = mm_data[k];
+                // Find interval containing site s (precompute for multiply)
+                auto ivl_it = std::upper_bound(tree_ivl_start.begin(), tree_ivl_start.end(), s);
+                const int j = static_cast<int>(ivl_it - tree_ivl_start.begin()) - 1;
+                tree_mm_ivl[tree_mm_offset[i] + k] = j;
+                const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
+                const int target = instructions[i].targets[seg];
+                if (target != i) {
+                    const int g_target = geno_cache.at(target)[s];
+                    tree_mm_sign[tree_mm_offset[i] + k] = static_cast<int8_t>(1 - 2 * g_target);
+                }
+                // Self-ref mismatches: leave as 0 (not used)
+            }
+        }
+
+        // Store carry at end of each interval
+        for (int j = 0; j < ni; j++) {
+            tree_carry[static_cast<size_t>(i) * ni + j] = static_cast<int8_t>(geno_buf[tree_ivl_end[j] - 1]);
+        }
+
+        // Cache genotype if still referenced
+        if (ref_count[i] > 0) {
+            geno_cache[i] = geno_buf;
+        }
+
+        // Decrement references and free unreferenced caches
+        if (i > 0) {
+            std::set<int> seen;
+            for (int t : instructions[i].targets) {
+                if (t != i && seen.insert(t).second) {
+                    if (--ref_count[t] == 0) {
+                        geno_cache.erase(t);
+                    }
+                }
+            }
+        }
+    }
+
+    tree_ready = true;
+}
+
+std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector<double>& x) {
+    if (static_cast<int>(x.size()) != num_sites) {
+        std::ostringstream oss;
+        oss << "Input vector must have length " << num_sites << ".";
+        throw std::runtime_error(oss.str());
+    }
+
+    prepare_tree_multiply();
+
+    const int n = num_samples;
+    const int m = num_sites;
+    const int ni = tree_n_intervals;
+    const double* xp = x.data();
+    const int* ref = tree_ref_genome.data();
+    const int* ivl_s = tree_ivl_start.data();
+    const int* ivl_e = tree_ivl_end.data();
+
+    // Prefix sums of x (for self-ref segments)
+    std::vector<double> prefix_x(m + 1, 0.0);
+    for (int s = 0; s < m; s++) {
+        prefix_x[s + 1] = prefix_x[s] + xp[s];
+    }
+
+    // ── Reference-counted cumulative interval sums ──
+    // Instead of n rows, allocate only O(tree_depth) rows via a pool.
+    const size_t cum_stride = static_cast<size_t>(ni + 1);
+
+    // Reference counting: how many future samples need each sample's cum row
+    std::vector<int> cum_ref(n, 0);
+    {
+        std::vector<bool> seen(n, false);
+        for (int i = 1; i < n; i++) {
+            for (int t : instructions[i].targets)
+                if (t != i && !seen[t]) { seen[t] = true; cum_ref[t]++; }
+            for (int t : instructions[i].targets)
+                if (t != i) seen[t] = false;
+        }
+    }
+
+    // Pool of cum rows
+    std::vector<std::vector<double>> cum_pool;
+    std::vector<int> free_rows;
+    std::vector<int> sample_to_row(n, -1);
+
+    auto alloc_row = [&]() -> int {
+        if (!free_rows.empty()) {
+            int r = free_rows.back();
+            free_rows.pop_back();
+            std::fill(cum_pool[r].begin(), cum_pool[r].end(), 0.0);
+            return r;
+        }
+        int r = static_cast<int>(cum_pool.size());
+        cum_pool.emplace_back(cum_stride, 0.0);
+        return r;
+    };
+
+    auto release_row = [&](int sample) {
+        int r = sample_to_row[sample];
+        if (r >= 0) {
+            free_rows.push_back(r);
+            sample_to_row[sample] = -1;
+        }
+    };
+
+    // Sample 0: reference genome
+    {
+        int r0 = alloc_row();
+        sample_to_row[0] = r0;
+        double* c0 = cum_pool[r0].data();
+        for (int j = 0; j < ni; j++) {
+            double s = 0.0;
+            for (int site = ivl_s[j]; site < ivl_e[j]; site++) {
+                s += xp[site] * ref[site];
+            }
+            c0[j + 1] = c0[j] + s;
+        }
+    }
+
+    std::vector<double> out(n, 0.0);
+    out[0] = cum_pool[sample_to_row[0]][ni];
+
+    // Process samples 1..n-1 using segment-level loop
+    for (int i = 1; i < n; i++) {
+        const int* mm_data = instructions[i].mismatches.data();
+        const int n_mm = static_cast<int>(instructions[i].mismatches.size());
+        const int8_t* my_signs = &tree_mm_sign[tree_mm_offset[i]];
+        const bool need_cum = (cum_ref[i] > 0);
+
+        int my_row = -1;
+        double* my_cum = nullptr;
+        if (need_cum) {
+            my_row = alloc_row();
+            sample_to_row[i] = my_row;
+            my_cum = cum_pool[my_row].data();
+        }
+
+        const int seg_off = tree_seg_offset[i];
+        int n_mapped_segs;
+        {
+            int next_off = (i + 1 < n) ? tree_seg_offset[i + 1]
+                                        : static_cast<int>(tree_seg_first_ivl.size()) - 1;
+            n_mapped_segs = next_off - seg_off;
+        }
+
+        double total = 0.0;
+
+        for (int sk = 0; sk < n_mapped_segs; sk++) {
+            const int first_ivl = tree_seg_first_ivl[seg_off + sk];
+            const int last_ivl = (sk + 1 < n_mapped_segs)
+                                     ? tree_seg_first_ivl[seg_off + sk + 1]
+                                     : ni;
+            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + first_ivl];
+            const int target = instructions[i].targets[seg];
+            const int site_a = ivl_s[first_ivl];
+            const int site_b = ivl_e[last_ivl - 1];
+
+            if (target != i) {
+                const double* tgt_cum = cum_pool[sample_to_row[target]].data();
+                const double base = tgt_cum[last_ivl] - tgt_cum[first_ivl];
+
+                const int* lo = std::lower_bound(mm_data, mm_data + n_mm, site_a);
+                const int* hi = std::lower_bound(mm_data, mm_data + n_mm, site_b);
+                double corr = 0.0;
+                for (const int* it = lo; it != hi; ++it) {
+                    const int k = static_cast<int>(it - mm_data);
+                    corr += xp[*it] * my_signs[k];
+                }
+                total += base + corr;
+
+                if (need_cum) {
+                    const double offset = my_cum[first_ivl] - tgt_cum[first_ivl];
+                    std::memcpy(&my_cum[first_ivl + 1], &tgt_cum[first_ivl + 1],
+                                (last_ivl - first_ivl) * sizeof(double));
+                    for (int j = first_ivl + 1; j <= last_ivl; j++) {
+                        my_cum[j] += offset;
+                    }
+                    const int* mm_ivl_data = tree_mm_ivl.data() + tree_mm_offset[i];
+                    for (const int* it = lo; it != hi; ++it) {
+                        const int k = static_cast<int>(it - mm_data);
+                        const int mm_ivl = mm_ivl_data[k];
+                        const double c = xp[*it] * my_signs[k];
+                        for (int j = mm_ivl + 1; j <= last_ivl; j++) {
+                            my_cum[j] += c;
+                        }
+                    }
+                }
+            } else {
+                // Self-ref: interval by interval
+                for (int j = first_ivl; j < last_ivl; j++) {
+                    const int a = ivl_s[j];
+                    const int b = ivl_e[j];
+                    int carry = (j == 0) ? 0
+                                : static_cast<int>(tree_carry[static_cast<size_t>(i) * ni + j - 1]);
+                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
+                    const int* hi = std::lower_bound(mm_data, mm_data + n_mm, b);
+                    double ivl_sum = 0.0;
+                    int prev = a;
+                    for (const int* it = lo; it != hi; ++it) {
+                        const int mm_site = *it;
+                        if (mm_site > prev)
+                            ivl_sum += carry * (prefix_x[mm_site] - prefix_x[prev]);
+                        carry = 1 - carry;
+                        ivl_sum += xp[mm_site] * carry;
+                        prev = mm_site + 1;
+                    }
+                    if (b > prev)
+                        ivl_sum += carry * (prefix_x[b] - prefix_x[prev]);
+                    if (need_cum) my_cum[j + 1] = my_cum[j] + ivl_sum;
+                    total += ivl_sum;
+                }
+            }
+        }
+        out[i] = total;
+
+        // Release targets no longer needed
+        {
+            const auto& tgts = instructions[i].targets;
+            const int nt = static_cast<int>(tgts.size());
+            for (int si = 0; si < nt; si++) {
+                int t = tgts[si];
+                if (t == i) continue;
+                bool dup = false;
+                for (int sj = 0; sj < si; sj++)
+                    if (tgts[sj] == t) { dup = true; break; }
+                if (!dup && --cum_ref[t] == 0) release_row(t);
+            }
+        }
+        // Release own row if no one references us
+        if (cum_ref[i] == 0) release_row(i);
+    }
+
+    return out;
+}
+
+std::vector<double> ThreadingInstructions::left_multiply_tree(const std::vector<double>& x) {
+    if (static_cast<int>(x.size()) != num_samples) {
+        std::ostringstream oss;
+        oss << "Input vector must have length " << num_samples << ".";
+        throw std::runtime_error(oss.str());
+    }
+
+    prepare_tree_multiply();
+
+    const int n = num_samples;
+    const int m = num_sites;
+    const int ni = tree_n_intervals;
+    const double* xp = x.data();
+
+    // Per-sample accumulated weight matrix: W[i * ni + j] = weight for sample i at interval j
+    // Initialized to x[i] for all intervals, then accumulated bottom-up.
+    std::vector<double> W(static_cast<size_t>(n) * ni);
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static)
+#endif
+    for (int i = 0; i < n; i++) {
+        const double xi = xp[i];
+        double* row = W.data() + static_cast<size_t>(i) * ni;
+        std::fill(row, row + ni, xi);
+    }
+
+    std::vector<double> out(m, 0.0);
+
+    // Bottom-up: push weights from children to targets, accumulate corrections
+    for (int i = n - 1; i >= 1; i--) {
+        const int* mm_data = instructions[i].mismatches.data();
+        const int n_mm = static_cast<int>(instructions[i].mismatches.size());
+        const int8_t* my_signs = &tree_mm_sign[tree_mm_offset[i]];
+        const double* Wi = &W[static_cast<size_t>(i) * ni];
+
+        const int seg_off = tree_seg_offset[i];
+        int n_mapped_segs;
+        {
+            int next_off = (i + 1 < n) ? tree_seg_offset[i + 1]
+                                        : static_cast<int>(tree_seg_first_ivl.size()) - 1;
+            n_mapped_segs = next_off - seg_off;
+        }
+
+        for (int sk = 0; sk < n_mapped_segs; sk++) {
+            const int first_ivl = tree_seg_first_ivl[seg_off + sk];
+            const int last_ivl = (sk + 1 < n_mapped_segs)
+                                     ? tree_seg_first_ivl[seg_off + sk + 1]
+                                     : ni;
+            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + first_ivl];
+            const int target = instructions[i].targets[seg];
+            const int site_a = tree_ivl_start[first_ivl];
+            const int site_b = tree_ivl_end[last_ivl - 1];
+
+            if (target != i) {
+                // Push accumulated weight to target
+                double* Wt = &W[static_cast<size_t>(target) * ni];
+                for (int j = first_ivl; j < last_ivl; j++) {
+                    Wt[j] += Wi[j];
+                }
+
+                // Mismatch corrections: out[mm] += W[i][mm_ivl] * sign
+                const int* lo = std::lower_bound(mm_data, mm_data + n_mm, site_a);
+                const int* hi = std::lower_bound(mm_data, mm_data + n_mm, site_b);
+                const int* mm_ivl_data = tree_mm_ivl.data() + tree_mm_offset[i];
+                for (const int* it = lo; it != hi; ++it) {
+                    const int k = static_cast<int>(it - mm_data);
+                    out[*it] += Wi[mm_ivl_data[k]] * my_signs[k];
+                }
+            } else {
+                // Self-ref: contribute to out using carry-run decomposition.
+                // Process contiguous carry=1 runs with vectorizable range-add,
+                // jumping over carry=0 runs entirely. This avoids the per-site
+                // branch in the naive loop and lets the compiler SIMD-vectorize
+                // the hot inner fill when carry=1.
+                for (int j = first_ivl; j < last_ivl; j++) {
+                    const int a = tree_ivl_start[j];
+                    const int b = tree_ivl_end[j];
+                    int carry = (j == 0) ? 0
+                                : static_cast<int>(tree_carry[static_cast<size_t>(i) * ni + j - 1]);
+                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
+                    const int* hi_mm = std::lower_bound(mm_data, mm_data + n_mm, b);
+                    const double wi = Wi[j];
+                    int prev = a;
+                    double* outp = out.data();
+                    for (const int* it = lo; it != hi_mm; ++it) {
+                        const int mm_site = *it;
+                        if (carry) {
+                            double* __restrict__ op = outp + prev;
+                            const int len = mm_site - prev;
+                            for (int s = 0; s < len; s++) op[s] += wi;
+                        }
+                        carry ^= 1;
+                        outp[mm_site] += wi * carry;
+                        prev = mm_site + 1;
+                    }
+                    if (carry && b > prev) {
+                        double* __restrict__ op = outp + prev;
+                        const int len = b - prev;
+                        for (int s = 0; s < len; s++) op[s] += wi;
+                    }
+                }
+            }
+        }
+    }
+
+    // Sample 0: multiply accumulated weight by reference genome
+    {
+        const double* W0 = &W[0];
+        const int* ref = tree_ref_genome.data();
+        for (int j = 0; j < ni; j++) {
+            const double w0j = W0[j];
+            for (int s = tree_ivl_start[j]; s < tree_ivl_end[j]; s++) {
+                out[s] += w0j * ref[s];
+            }
+        }
+    }
+
+    return out;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Batch tree multiply: process k vectors in a single tree traversal.
+// Layout: row-major flat arrays, X[row * k + col].
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
+        const std::vector<double>& x_flat, int k) {
+    if (static_cast<int>(x_flat.size()) != num_sites * k)
+        throw std::runtime_error("Input must have length num_sites * k");
+    if (k == 1) return right_multiply_tree(x_flat);
+
+    prepare_tree_multiply();
+    const int n = num_samples, m = num_sites, ni = tree_n_intervals;
+    const double* xp = x_flat.data();
+    const int* ref = tree_ref_genome.data();
+    const int* ivl_s = tree_ivl_start.data();
+    const int* ivl_e = tree_ivl_end.data();
+
+    // k prefix sums
+    std::vector<double> prefix_x(static_cast<size_t>(m + 1) * k, 0.0);
+    for (int s = 0; s < m; s++) {
+        const double* xs = &xp[s * k];
+        const double* ps = &prefix_x[s * k];
+        double* pd = &prefix_x[(s + 1) * k];
+        for (int c = 0; c < k; c++) pd[c] = ps[c] + xs[c];
+    }
+
+    const size_t cum_stride = static_cast<size_t>(ni + 1) * k;
+    std::vector<int> cum_ref(n, 0);
+    {
+        std::vector<bool> seen(n, false);
+        for (int i = 1; i < n; i++) {
+            for (int t : instructions[i].targets)
+                if (t != i && !seen[t]) { seen[t] = true; cum_ref[t]++; }
+            for (int t : instructions[i].targets)
+                if (t != i) seen[t] = false;
+        }
+    }
+    std::vector<std::vector<double>> cum_pool;
+    std::vector<int> free_rows, sample_to_row(n, -1);
+    auto alloc_row = [&]() -> int {
+        if (!free_rows.empty()) {
+            int r = free_rows.back(); free_rows.pop_back();
+            std::fill(cum_pool[r].begin(), cum_pool[r].end(), 0.0);
+            return r;
+        }
+        int r = static_cast<int>(cum_pool.size());
+        cum_pool.emplace_back(cum_stride, 0.0);
+        return r;
+    };
+    auto release_row = [&](int s) {
+        int r = sample_to_row[s];
+        if (r >= 0) { free_rows.push_back(r); sample_to_row[s] = -1; }
+    };
+
+    // Sample 0
+    { int r0 = alloc_row(); sample_to_row[0] = r0;
+      double* c0 = cum_pool[r0].data();
+      for (int j = 0; j < ni; j++) {
+          double* dst = &c0[(j + 1) * k];
+          const double* src = &c0[j * k];
+          for (int c = 0; c < k; c++) dst[c] = src[c];
+          for (int site = ivl_s[j]; site < ivl_e[j]; site++)
+              if (ref[site]) { const double* xs = &xp[site*k];
+                  for (int c = 0; c < k; c++) dst[c] += xs[c]; }
+      }
+    }
+
+    std::vector<double> out(static_cast<size_t>(n) * k, 0.0);
+    { const double* c0e = &cum_pool[sample_to_row[0]][ni * k];
+      for (int c = 0; c < k; c++) out[c] = c0e[c]; }
+
+    for (int i = 1; i < n; i++) {
+        const int* mm_data = instructions[i].mismatches.data();
+        const int n_mm = static_cast<int>(instructions[i].mismatches.size());
+        const int8_t* my_signs = &tree_mm_sign[tree_mm_offset[i]];
+        const bool need_cum = (cum_ref[i] > 0);
+        int my_row = -1;
+        double* my_cum = nullptr;
+        if (need_cum) {
+            my_row = alloc_row(); sample_to_row[i] = my_row;
+            my_cum = cum_pool[my_row].data();
+        }
+        const int seg_off = tree_seg_offset[i];
+        int n_mapped_segs = ((i+1<n) ? tree_seg_offset[i+1]
+                              : static_cast<int>(tree_seg_first_ivl.size())-1) - seg_off;
+        double* sample_out = &out[i * k];
+
+        for (int sk = 0; sk < n_mapped_segs; sk++) {
+            const int fi = tree_seg_first_ivl[seg_off + sk];
+            const int li = (sk+1<n_mapped_segs) ? tree_seg_first_ivl[seg_off+sk+1] : ni;
+            const int seg = tree_ivl_seg[static_cast<size_t>(i)*ni + fi];
+            const int target = instructions[i].targets[seg];
+            const int sa = ivl_s[fi], sb = ivl_e[li-1];
+
+            if (target != i) {
+                const double* tc = cum_pool[sample_to_row[target]].data();
+                const int* lo = std::lower_bound(mm_data, mm_data+n_mm, sa);
+                const int* hi = std::lower_bound(mm_data, mm_data+n_mm, sb);
+
+                // Compute output: base from target cum + mismatch correction
+                for (int c = 0; c < k; c++) {
+                    double base = tc[li*k+c] - tc[fi*k+c], corr = 0.0;
+                    for (const int* it = lo; it != hi; ++it)
+                        corr += xp[*it*k+c] * my_signs[it-mm_data];
+                    sample_out[c] += base + corr;
+                }
+                // Build cum only if someone will reference us
+                if (need_cum) {
+                    const double* fi_cum = &my_cum[fi*k];
+                    const double* fi_tc = &tc[fi*k];
+                    for (int j = fi+1; j <= li; j++)
+                        for (int c = 0; c < k; c++)
+                            my_cum[j*k+c] = tc[j*k+c] + fi_cum[c] - fi_tc[c];
+                    // Apply mismatch corrections via deferred deltas + prefix sum
+                    const int n_seg_ivls = li - fi;
+                    if (lo != hi && n_seg_ivls > 0) {
+                        std::vector<double> mm_corr(static_cast<size_t>(n_seg_ivls) * k, 0.0);
+                        const int* miv = tree_mm_ivl.data() + tree_mm_offset[i];
+                        for (const int* it = lo; it != hi; ++it) {
+                            int kk = static_cast<int>(it-mm_data);
+                            int mivl = miv[kk]; double sv = my_signs[kk];
+                            const double* xs = &xp[*it*k];
+                            int idx = mivl - fi;
+                            if (idx >= 0 && idx < n_seg_ivls) {
+                                double* d = &mm_corr[idx * k];
+                                for (int c = 0; c < k; c++) d[c] += xs[c]*sv;
+                            }
+                        }
+                        double* running = &mm_corr[0];
+                        for (int c = 0; c < k; c++)
+                            my_cum[(fi+1)*k+c] += running[c];
+                        for (int j = 1; j < n_seg_ivls; j++) {
+                            double* cur = &mm_corr[j*k];
+                            const double* prv = &mm_corr[(j-1)*k];
+                            for (int c = 0; c < k; c++) {
+                                cur[c] += prv[c];
+                                my_cum[(fi+1+j)*k+c] += cur[c];
+                            }
+                        }
+                    }
+                }
+            } else {
+                for (int j = fi; j < li; j++) {
+                    int a = ivl_s[j], b = ivl_e[j];
+                    int carry = (j==0)?0:static_cast<int>(tree_carry[static_cast<size_t>(i)*ni+j-1]);
+                    const int* lo = std::lower_bound(mm_data, mm_data+n_mm, a);
+                    const int* hi = std::lower_bound(mm_data, mm_data+n_mm, b);
+                    for (int c = 0; c < k; c++) {
+                        double ivl_sum = 0.0; int cc = carry; int prev = a;
+                        for (const int* it = lo; it != hi; ++it) {
+                            int ms = *it;
+                            if (ms > prev) ivl_sum += cc*(prefix_x[ms*k+c]-prefix_x[prev*k+c]);
+                            cc = 1-cc; ivl_sum += xp[ms*k+c]*cc; prev = ms+1;
+                        }
+                        if (b > prev) ivl_sum += cc*(prefix_x[b*k+c]-prefix_x[prev*k+c]);
+                        if (need_cum) my_cum[(j+1)*k+c] = my_cum[j*k+c]+ivl_sum;
+                        sample_out[c] += ivl_sum;
+                    }
+                }
+            }
+        }
+        {
+            const auto& tgts = instructions[i].targets;
+            const int nt = static_cast<int>(tgts.size());
+            for (int si = 0; si < nt; si++) {
+                int t = tgts[si];
+                if (t == i) continue;
+                bool dup = false;
+                for (int sj = 0; sj < si; sj++)
+                    if (tgts[sj] == t) { dup = true; break; }
+                if (!dup && --cum_ref[t] == 0) release_row(t);
+            }
+        }
+        if (cum_ref[i]==0) release_row(i);
+    }
+    return out;
+}
+
+
+std::vector<double> ThreadingInstructions::left_multiply_tree_batch(
+        const std::vector<double>& x_flat, int k) {
+    if (static_cast<int>(x_flat.size()) != num_samples * k)
+        throw std::runtime_error("Input must have length num_samples * k");
+    if (k == 1) return left_multiply_tree(x_flat);
+
+    prepare_tree_multiply();
+    const int n = num_samples, m = num_sites, ni = tree_n_intervals;
+    const double* xp = x_flat.data();
+
+    const size_t Wstride = static_cast<size_t>(ni) * k;
+    std::vector<double> W(static_cast<size_t>(n) * Wstride);
+    for (int i = 0; i < n; i++) {
+        const double* xi = &xp[i * k];
+        double* Wi = &W[i * Wstride];
+        for (int j = 0; j < ni; j++) {
+            double* d = &Wi[j*k];
+            for (int c = 0; c < k; c++) d[c] = xi[c];
+        }
+    }
+
+    std::vector<double> out(static_cast<size_t>(m) * k, 0.0);
+
+    for (int i = n-1; i >= 1; i--) {
+        const int* mm_data = instructions[i].mismatches.data();
+        const int n_mm = static_cast<int>(instructions[i].mismatches.size());
+        const int8_t* my_signs = &tree_mm_sign[tree_mm_offset[i]];
+        const double* Wi = &W[i * Wstride];
+        const int seg_off = tree_seg_offset[i];
+        int n_mapped_segs = ((i+1<n) ? tree_seg_offset[i+1]
+                              : static_cast<int>(tree_seg_first_ivl.size())-1) - seg_off;
+
+        for (int sk = 0; sk < n_mapped_segs; sk++) {
+            const int fi = tree_seg_first_ivl[seg_off+sk];
+            const int li = (sk+1<n_mapped_segs) ? tree_seg_first_ivl[seg_off+sk+1] : ni;
+            const int seg = tree_ivl_seg[static_cast<size_t>(i)*ni+fi];
+            const int target = instructions[i].targets[seg];
+            const int sa = tree_ivl_start[fi], sb = tree_ivl_end[li-1];
+
+            if (target != i) {
+                double* Wt = &W[static_cast<size_t>(target)*Wstride];
+                for (int j = fi; j < li; j++) {
+                    const double* s = &Wi[j*k]; double* d = &Wt[j*k];
+                    for (int c = 0; c < k; c++) d[c] += s[c];
+                }
+                const int* lo = std::lower_bound(mm_data, mm_data+n_mm, sa);
+                const int* hi = std::lower_bound(mm_data, mm_data+n_mm, sb);
+                const int* miv = tree_mm_ivl.data() + tree_mm_offset[i];
+                for (const int* it = lo; it != hi; ++it) {
+                    int kk = static_cast<int>(it-mm_data);
+                    double sv = my_signs[kk];
+                    const double* wi = &Wi[miv[kk]*k];
+                    double* od = &out[*it*k];
+                    for (int c = 0; c < k; c++) od[c] += wi[c]*sv;
+                }
+            } else {
+                for (int j = fi; j < li; j++) {
+                    int a = tree_ivl_start[j], b = tree_ivl_end[j];
+                    int carry = (j==0)?0:static_cast<int>(tree_carry[static_cast<size_t>(i)*ni+j-1]);
+                    const int* lo = std::lower_bound(mm_data, mm_data+n_mm, a);
+                    const int* hi_mm = std::lower_bound(mm_data, mm_data+n_mm, b);
+                    const double* wi = &Wi[j*k];
+                    int prev = a;
+                    for (const int* it = lo; it != hi_mm; ++it) {
+                        int ms = *it;
+                        if (carry && ms > prev)
+                            for (int s = prev; s < ms; s++) {
+                                double* od = &out[s*k];
+                                for (int c = 0; c < k; c++) od[c] += wi[c];
+                            }
+                        carry ^= 1;
+                        if (carry) { double* od = &out[ms*k];
+                            for (int c = 0; c < k; c++) od[c] += wi[c]; }
+                        prev = ms+1;
+                    }
+                    if (carry && b > prev)
+                        for (int s = prev; s < b; s++) {
+                            double* od = &out[s*k];
+                            for (int c = 0; c < k; c++) od[c] += wi[c];
+                        }
+                }
+            }
+        }
+    }
+
+    // Sample 0
+    { const double* W0 = &W[0];
+      const int* ref = tree_ref_genome.data();
+      for (int j = 0; j < ni; j++) {
+          const double* w0j = &W0[j*k];
+          for (int s = tree_ivl_start[j]; s < tree_ivl_end[j]; s++)
+              if (ref[s]) { double* od = &out[s*k];
+                  for (int c = 0; c < k; c++) od[c] += w0j[c]; }
+      }
+    }
+    return out;
 }

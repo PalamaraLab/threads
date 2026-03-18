@@ -2,13 +2,19 @@ import logging
 import multiprocessing
 import os
 import numpy as np
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    raise ImportError("pandas is required for imputation. Install it with: pip install 'threads-arg[impute]'")
 import sys
 
 from tqdm import tqdm
 from cyvcf2 import VCF
 from threads_arg import ThreadsFastLS, ImputationMatcher
-from scipy.sparse import csr_array, lil_matrix
+try:
+    from scipy.sparse import csr_array, vstack as sparse_vstack
+except ImportError:
+    raise ImportError("scipy is required for imputation. Install it with: pip install 'threads-arg[impute]'")
 from datetime import datetime
 from typing import Dict, Tuple, List, Union
 from dataclasses import dataclass
@@ -85,7 +91,9 @@ class WriterVCF:
         alt = alt[0]
         qual = "."
         filter = "PASS"
-        gt_strings = [f"{np.round(hap_1):.0f}|{np.round(hap_2):.0f}:{dosage:.3f}".rstrip("0").rstrip(".") for hap_1, hap_2, dosage in zip(haps1, haps2, dosages)]
+        gt1 = np.rint(haps1).astype(int)
+        gt2 = np.rint(haps2).astype(int)
+        gt_strings = [f"{g1}|{g2}:{dosage:.3f}".rstrip("0").rstrip(".") for g1, g2, dosage in zip(gt1, gt2, dosages)]
         f = self.file
         f.write(("\t".join([contig, pos, snp_id, ref, alt, qual, filter, f"{imp_str}AF={af:.4f}", "GT:DS", "\t".join(gt_strings)]) + "\n"))
 
@@ -324,13 +332,11 @@ class CachedPosteriorSnps:
         if snp_idx in self.posteriors_by_snp_idx:
             return self.posteriors_by_snp_idx[snp_idx]
 
-        # Rebuild snp data
-        col_len = len(self.posteriors)
-        row_len = self.posteriors[0].shape[1]
-        target_posteriors = np.empty(shape=(col_len, row_len), dtype=np.float64)
-        for i, p in enumerate(self.posteriors):
-            posteriors = p[[snp_idx],:].toarray()
-            target_posteriors[i] = posteriors / np.sum(posteriors)
+        # Batch extract row snp_idx from all sparse posteriors and convert once
+        rows = sparse_vstack([p[[snp_idx]] for p in self.posteriors])
+        target_posteriors = rows.toarray()
+        row_sums = target_posteriors.sum(axis=1, keepdims=True)
+        target_posteriors /= row_sums
 
         # Cache and clear out-of-date entries
         self.posteriors_by_snp_idx[snp_idx] = target_posteriors
@@ -475,8 +481,8 @@ class Impute:
             ref_matches = _reference_matching(self.panel_snps, self.target_snps, self.cm_pos_array)
 
         mutation_rate = 0.0001
-        cm_sizes = list(self.cm_pos_array[1:] - self.cm_pos_array[:-1])
-        cm_sizes = np.array(cm_sizes + [cm_sizes[-1]])
+        cm_sizes = np.diff(self.cm_pos_array)
+        cm_sizes = np.append(cm_sizes, cm_sizes[-1])
         Ne = 20_000
         recombination_rates = 1 - np.exp(-4 * Ne * 0.01 * cm_sizes / self.num_samples_panel)
 
@@ -492,9 +498,9 @@ class Impute:
             for i, h_target in tqdm(enumerate(target_transpose), total=len(target_transpose), mininterval=1):
                 with tt_impute:
                     # Imputation thread with divergence matching
-                    imputation_thread = bwt.impute(list(h_target), L)
+                    imputation_thread = bwt.impute(h_target.tolist(), L)
                     imputation_threads.append(imputation_thread)
-                    matched_samples_viterbi = set([match_id for seg in imputation_thread for match_id in seg.ids])
+                    matched_samples_viterbi = {match_id for seg in imputation_thread for match_id in seg.ids}
 
                     # All locally sampled matches
                     matched_samples_matcher = (ref_matches[self.num_samples_panel + i])
@@ -519,14 +525,19 @@ class Impute:
         Expand to a compressed n_snps x n_samples matrix
         """
         assert posterior.shape == (self.num_snps, len(matched_samples))
-        matrix = lil_matrix((self.num_snps, self.num_samples_panel), dtype=np.float64)
-        posterior[posterior <= 1 / self.num_samples_panel] = 0
-        for i, p in enumerate(posterior):
-            assert np.sum(p) > 0
-            q = p / np.sum(p)
-            for j in np.nonzero(q)[0]:
-                matrix[i, matched_samples[j]] = q[j]
-        return csr_array(matrix)
+        threshold = 1 / self.num_samples_panel
+        # Find entries above threshold directly (avoids mutating full matrix)
+        rows, cols_local = np.nonzero(posterior > threshold)
+        vals = posterior[rows, cols_local]
+        # Renormalize per-row using only the kept entries
+        row_sums = np.bincount(rows, weights=vals, minlength=self.num_snps)
+        assert np.all(row_sums > 0)
+        vals = vals / row_sums[rows]
+        cols_global = matched_samples[cols_local]
+        return csr_array(
+            (vals, (rows, cols_global)),
+            shape=(self.num_snps, self.num_samples_panel)
+        )
 
 
     def _init_step_snp(self):
@@ -579,7 +590,8 @@ class Impute:
 
             if self.mutation_container.is_mapped(record.id):
                 mutation_mapping = self.mutation_container.get_mapping(record.id)
-                carriers = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
+                carriers_arr = (1 - record.genotypes).nonzero()[0] if flipped else record.genotypes.nonzero()[0]
+                carriers = set(carriers_arr.tolist())
 
             active_positions = np.where(record.genotypes)[0]
             active_indexes = {pos: i for i, pos in enumerate(active_positions)}
@@ -608,7 +620,7 @@ class Impute:
                 record
             )
 
-        genotypes = np.array([np.sum(asp) for asp in active_site_posteriors])
+        genotypes = active_site_posteriors.sum(axis=1)
         if mutation_mapping:
             with self.tt_mutation_mapping:
                 deltas = np.array([compute_delta(asp, i) for i, asp in enumerate(active_site_posteriors)])
@@ -636,7 +648,7 @@ class Impute:
                 # imputed
                 imputed = False
                 var_idx = self.snp_id_indexes[record.id]
-                genotypes = np.array(self.target_snps[var_idx], dtype=float)
+                genotypes = self.target_snps[var_idx].astype(float)
             else:
                 # If this variant is not present on the genotyping array, then
                 # run the Threads imputation routine

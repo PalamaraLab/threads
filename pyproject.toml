@@ -16,16 +16,9 @@ authors = [
 requires-python = ">=3.9"
 
 dependencies = [
-    "click",
-    "xarray",
-    "h5py",
-    "pandas",
-    "numba",
     "numpy",
-    "tszip",
     "arg-needle-lib==1.2.1",
     "cyvcf2",
-    "ray",
     "pgenlib",
     "tqdm"
 ]
@@ -43,7 +36,24 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest"
+    "pytest",
+    "h5py"
+]
+convert = [
+    "tszip"
+]
+impute = [
+    "pandas",
+    "scipy"
+]
+normalize = [
+    "msprime"
+]
+all = [
+    "tszip",
+    "msprime",
+    "pandas",
+    "scipy"
 ]
 
 [project.scripts]

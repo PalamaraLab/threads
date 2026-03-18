@@ -83,7 +83,7 @@ double Demography::expected_branch_length(const int N) {
 
 std::ostream& operator<<(std::ostream& os, const Demography& d) {
   for (std::size_t i = 0; i < d.sizes.size(); i++) {
-    std::cout << d.times[i] << " " << d.sizes[i] << " " << d.std_times[i] << std::endl;
+    os << d.times[i] << " " << d.sizes[i] << " " << d.std_times[i] << "\n";
   }
   return os;
 }

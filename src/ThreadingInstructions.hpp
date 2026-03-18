@@ -89,6 +89,30 @@ public:
     std::vector<double> left_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
     std::vector<double> right_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
 
+    // Tree-propagation multiply: O(n * n_segments + total_mismatches) per call.
+    // One-time O(n * m) prepare step precomputes mismatch corrections using
+    // reference-counted genotype cache (peak memory ~O(m * tree_depth)).
+    // No genotype matrix retained after prepare.
+    void prepare_tree_multiply();
+    std::vector<double> right_multiply_tree(const std::vector<double>& x);
+    std::vector<double> left_multiply_tree(const std::vector<double>& x);
+
+    // Batch tree multiply: process k vectors in a single tree traversal.
+    // Input/output are row-major flat arrays: X[row * k + col].
+    // right_multiply_tree_batch: X is (num_sites, k), returns (num_samples, k)
+    // left_multiply_tree_batch:  X is (num_samples, k), returns (num_sites, k)
+    std::vector<double> right_multiply_tree_batch(const std::vector<double>& x_flat, int k);
+    std::vector<double> left_multiply_tree_batch(const std::vector<double>& x_flat, int k);
+
+    // Precompute and cache the dense genotype matrix (num_sites × num_samples, row-major).
+    // Subsequent left_multiply/right_multiply calls use the cached matrix.
+    void materialize_genotypes();
+
+    // Precompute and cache standardized matrices for normalized multiply.
+    // These store (g - mean) / std as doubles, so multiply becomes a pure dot product.
+    void materialize_normalized_haploid();
+    void materialize_normalized_diploid();
+
 public:
     int start = 0;
     int end = 0;
@@ -96,6 +120,51 @@ public:
     int num_sites = 0;
     std::vector<int> positions;
     std::vector<ThreadingInstruction> instructions;
+
+private:
+    // Cached dense genotype matrix: genotype_matrix[site * num_samples + sample]
+    std::vector<int> genotype_matrix;
+    bool genotypes_materialized = false;
+
+    // Cached diploid sum matrix: diploid_matrix[site * n_dip + i] = g[2i] + g[2i+1]
+    std::vector<int> diploid_matrix;
+    bool diploid_materialized = false;
+    void materialize_diploid();
+
+    // Cached standardized matrices for normalized multiply
+    // standardized_hap[site * num_samples + i] = (g[i] - mu) / std
+    std::vector<double> standardized_hap;
+    bool standardized_hap_ready = false;
+    // standardized_dip[site * n_dip + i] = ((g[2i]+g[2i+1]) - mu) / std
+    std::vector<double> standardized_dip;
+    bool standardized_dip_ready = false;
+
+    // Tree-propagation multiply cache
+    bool tree_ready = false;
+    int tree_n_intervals = 0;
+    std::vector<int> tree_ivl_start;   // first site index of each interval
+    std::vector<int> tree_ivl_end;     // one past last site index
+    std::vector<int> tree_ivl_seg;     // flat [sample * n_intervals + interval] -> segment
+    std::vector<int> tree_ref_genome;
+
+    // Precomputed mismatch correction signs: tree_mm_sign[offset + k] = +1 or -1
+    // for non-self mismatches, 0 for self-ref (unused). Per-sample offsets in tree_mm_offset.
+    std::vector<int8_t> tree_mm_sign;
+    std::vector<int> tree_mm_offset;   // tree_mm_offset[i] = start index for sample i
+
+    // Precomputed mismatch-to-interval mapping: tree_mm_ivl[offset + k] = interval index
+    // containing mismatch k for sample i. Eliminates binary search during multiply.
+    std::vector<int> tree_mm_ivl;
+
+    // Precomputed carry_geno at end of each interval for each sample.
+    // tree_carry[sample * n_intervals + interval] = genotype at last site of interval.
+    std::vector<int8_t> tree_carry;
+
+    // Per-sample segment-to-interval mapping for segment-level loop.
+    // tree_seg_first_ivl[sample * max_segs + seg] = first interval index of segment.
+    // Stored as flat vectors indexed by tree_seg_offset[sample] + seg.
+    std::vector<int> tree_seg_first_ivl;  // first interval of each segment
+    std::vector<int> tree_seg_offset;     // offset into tree_seg_first_ivl for each sample
 };
 
 #endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP

@@ -15,14 +15,11 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "AlleleAges.hpp"
+#include "GenotypeIterator.hpp"
 
-#include <numeric>
-#include <execution>
+#include <algorithm>
+#include <cmath>
 #include <vector>
-#include <unordered_map>
-#include <map>
-
-#include <boost/container/flat_set.hpp>
 
 AgeEstimator::AgeEstimator(const ThreadingInstructions& instructions) {
     num_samples = instructions.num_samples;
@@ -55,7 +52,12 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         } else {
             if (genotypes.at(i) == 1) {
                 int target = threading_iterators.at(i).current_target;
-                path_lengths[i] = path_lengths[target] + 1;
+                // Self-referencing targets don't extend carrier chains
+                if (static_cast<size_t>(target) != i) {
+                    path_lengths[i] = path_lengths[target] + 1;
+                } else {
+                    path_lengths[i] = 1;
+                }
             } else {
                 path_lengths[i] = 0;
             }
@@ -84,64 +86,94 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
         size_t start_tmp = path_start;
         while (start_tmp > 0) {
             int next_sample = threading_iterators.at(start_tmp).current_target;
+            // Skip self-referencing targets to avoid infinite loops
+            if (next_sample == static_cast<int>(start_tmp)) {
+                break;
+            }
             double this_tmrca = threading_iterators.at(start_tmp).current_tmrca;
             running_max = std::max(running_max, this_tmrca);
             tmrcas.at(next_sample) = running_max;
             start_tmp = next_sample;
-        }
-        if (start_tmp != 0) {
-            throw std::runtime_error("Invalid threading instruction traversal.");
         }
 
         for (int i = 0; i < num_samples; i++) {
             if (tmrcas.at(i) < 0) {
                 int target = threading_iterators.at(i).current_target;
                 double tmrca = threading_iterators.at(i).current_tmrca;
-                tmrcas.at(i) = std::max(tmrcas.at(target), tmrca);
-            }
-        }
-
-        // Create a sorted unique list of coalescence times as transform_reduce
-        // below must be done in order. For performance, boost's flat_set is
-        // faster than std::set or sorting a std::vector in this instance.
-        boost::container::flat_set<double> unique_tmrcas(tmrcas.begin(), tmrcas.end());
-
-        // For each sample, check its tmrca with path_start and
-        // update the score for each tmrca bin accordingly
-        std::map<double, int> scores;
-        for (double t : unique_tmrcas) {
-            scores[t] = std::transform_reduce(
-                tmrcas.begin(),
-                tmrcas.end(),
-                genotypes.begin(),
-                0,
-                std::plus<>(),
-                [t](double tmrca, int genotype) {
-                    bool is_carrier = genotype > 0;
-                    if (is_carrier && tmrca <= t) {
-                        return 1;
-                    }
-                    if (!is_carrier && tmrca > t) {
-                        return 1;
-                    }
-                    return 0;
+                if (target == i || target < 0 || tmrcas.at(target) < 0) {
+                    // Self-ref or unfilled target: use own tmrca
+                    tmrcas.at(i) = tmrca;
+                } else {
+                    tmrcas.at(i) = std::max(tmrcas.at(target), tmrca);
                 }
-            );
+            }
         }
 
-        std::vector<double> age_bin_boundaries;
-        for (auto const& imap: scores)
-            age_bin_boundaries.push_back(imap.first);
-        std::vector<double> age_bins;
+        // Sort samples by tmrca, then sweep to find the threshold that
+        // maximizes: carriers_at_or_below(t) + non_carriers_above(t).
+        struct TmrcaSample {
+            double tmrca;
+            int genotype;
+        };
+        std::vector<TmrcaSample> sorted_samples;
+        sorted_samples.reserve(num_samples);
+        int total_non_carriers = 0;
+        for (int i = 0; i < num_samples; i++) {
+            sorted_samples.push_back({tmrcas[i], genotypes[i]});
+            if (genotypes[i] == 0) total_non_carriers++;
+        }
+        // NaN-safe sort: put NaN values last
+        std::sort(sorted_samples.begin(), sorted_samples.end(),
+                  [](const TmrcaSample& a, const TmrcaSample& b) {
+                      if (std::isnan(a.tmrca)) return false;
+                      if (std::isnan(b.tmrca)) return true;
+                      return a.tmrca < b.tmrca;
+                  });
 
-        for (size_t k = 0; k < age_bin_boundaries.size(); k++) {
-            int score = scores.at(age_bin_boundaries.at(k));
-            if (score > max_score) {
-                max_score = score;
-                allele_age = (k == age_bin_boundaries.size() - 1)
-                    ? age_bin_boundaries.at(k) + 1
-                    : (age_bin_boundaries.at(k) + age_bin_boundaries.at(k + 1)) / 2.;
+        // Initial score: threshold below all tmrcas → 0 carriers correct,
+        // all non-carriers correct (they're all above threshold).
+        int score = total_non_carriers;
+        int best_score = score;
+        double best_boundary = sorted_samples.front().tmrca;
+        double next_boundary = sorted_samples.front().tmrca;
+
+        // Sweep through sorted samples in groups of equal tmrca
+        size_t i_sweep = 0;
+        size_t n_sorted = sorted_samples.size();
+        while (i_sweep < n_sorted) {
+            double current_t = sorted_samples[i_sweep].tmrca;
+            // Stop at NaN values (they are sorted to the end)
+            if (std::isnan(current_t)) break;
+            // Process all samples at this tmrca
+            int carriers_at_t = 0;
+            int non_carriers_at_t = 0;
+            size_t group_end = i_sweep;
+            while (group_end < n_sorted && sorted_samples[group_end].tmrca == current_t) {
+                if (sorted_samples[group_end].genotype > 0)
+                    carriers_at_t++;
+                else
+                    non_carriers_at_t++;
+                group_end++;
             }
+            // Moving threshold to include this group:
+            // carriers become correctly classified (+), non-carriers become incorrect (-)
+            score += carriers_at_t - non_carriers_at_t;
+
+            if (score > best_score) {
+                best_score = score;
+                best_boundary = current_t;
+                next_boundary = (group_end < n_sorted)
+                    ? sorted_samples[group_end].tmrca
+                    : current_t;
+            }
+            i_sweep = group_end;
+        }
+
+        if (best_score > max_score) {
+            max_score = best_score;
+            allele_age = (best_boundary == next_boundary)
+                ? best_boundary + 1
+                : (best_boundary + next_boundary) / 2.;
         }
     }
 
@@ -151,4 +183,13 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
 
 std::vector<double> AgeEstimator::get_inferred_ages() const {
     return estimated_ages;
+}
+
+std::vector<double> estimate_ages(const ThreadingInstructions& instructions) {
+    GenotypeIterator gt_it(instructions);
+    AgeEstimator estimator(instructions);
+    while (gt_it.has_next_genotype()) {
+        estimator.process_site(gt_it.next_genotype());
+    }
+    return estimator.get_inferred_ages();
 }

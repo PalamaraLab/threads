@@ -21,7 +21,8 @@
 #include "Matcher.hpp"
 #include "ThreadsFastLS.hpp"
 #include "ViterbiLowMem.hpp"
-#include <string>
+#include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -41,6 +42,8 @@ public:
                           const std::vector<double>& cm_positions);
   // 2b. process all sites for the hmms
   void process_site_viterbi(const std::vector<int>& genotype);
+  void process_all_sites_viterbi(const std::vector<std::vector<int>>& genotypes);
+  void process_all_sites_viterbi_flat(const int32_t* data, int n_sites, int n_haps);
   // 2c. prune branches at regular intervals (i.e. when there's a lot of them, figure this out soon)
   void prune();
   // 2d. traceback all the hmms to get viterbi paths
@@ -48,6 +51,8 @@ public:
 
   // 3a. add het sites
   void process_site_hets(const std::vector<int>& genotype);
+  void process_all_sites_hets(const std::vector<std::vector<int>>& genotypes);
+  void process_all_sites_hets_flat(const int32_t* data, int n_sites, int n_haps);
   // 3b. date all segments
   void date_segments();
 
@@ -63,9 +68,9 @@ public:
 public:
   // This object will only run the HMM for these ids
   std::vector<int> target_ids;
+  // Keep legacy map interface for pybind compatibility
   std::unordered_map<int, double> expected_branch_lengths;
   double mean_bp_size = 0.0;
-  std::unordered_map<int, int> segment_indices;
   std::unordered_map<int, ViterbiPath> paths;
   int num_samples = 0;
   int num_sites = 0;
@@ -79,11 +84,23 @@ public:
   bool sparse = false;
 
 private:
+  // Hot-path data: flat vectors parallel to target_ids (excluding id 0)
+  std::vector<int> active_target_ids;       // target_ids without 0
+  std::vector<double> branch_lengths_vec;   // parallel to active_target_ids
+  std::vector<double> log_target_ids_vec;   // precomputed log(target_id)
+  std::vector<int> segment_indices_vec;     // parallel to active_target_ids
+  std::vector<ViterbiState*> hmm_ptrs;      // parallel to active_target_ids
+  std::vector<ViterbiPath*> path_ptrs;      // parallel to active_target_ids
+
   Demography demography;
+
+  // Precomputed per-site HMM parameters
+  std::vector<double> k_per_site;  // 2 * 0.01 * cm_sizes[i]
+  std::vector<double> l_per_site;  // 2 * mu * bp_sizes[i]
 
   // 2. HMM quantites
   int hmm_sites_processed = 0;
-  std::unordered_map<int, ViterbiState> hmms;
+  std::vector<std::unique_ptr<ViterbiState>> hmm_vec; // owned, never moves
   int match_group_idx = 0;
   std::vector<MatchGroup> match_groups;
 
@@ -92,6 +109,10 @@ private:
   int het_sites_processed = 0;
   int n_hmm_samples = 100;
   int hmm_min_sites = 10;
+
+  // Internal: process one site from raw pointer (no copy)
+  void process_site_viterbi_raw(const int* genotype);
+  void process_site_hets_raw(const int* genotype);
 };
 
 #endif // THREADS_ARG_THREADS_LOW_MEM_HPP

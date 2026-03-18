@@ -16,7 +16,6 @@
 
 import os
 import numpy as np
-import pandas as pd
 import logging
 import pgenlib
 import re
@@ -32,10 +31,20 @@ def read_map_file(map_file, expected_chromosome=None) -> Tuple[np.ndarray, np.nd
     """
     Reading in map file for Li-Stephens using genetic maps in the SHAPEIT format
     """
-    maps = pd.read_table(map_file, sep=r"\s+")
-    cm_pos = maps.cM.values.astype(np.float64)
-    phys_pos = maps.pos.values.astype(np.float64)
-    chromosomes = np.unique(maps.chr.values.astype(str))
+    phys_list, cm_list, chr_list = [], [], []
+    with open(map_file) as f:
+        header = f.readline().strip().split()
+        pos_idx = header.index('pos')
+        chr_idx = header.index('chr')
+        cm_idx = header.index('cM')
+        for line in f:
+            fields = line.strip().split()
+            phys_list.append(float(fields[pos_idx]))
+            chr_list.append(str(fields[chr_idx]))
+            cm_list.append(float(fields[cm_idx]))
+    cm_pos = np.array(cm_list, dtype=np.float64)
+    phys_pos = np.array(phys_list, dtype=np.float64)
+    chromosomes = np.unique(chr_list)
 
     # Currently we only allow for processing one chromosome at a time
     if len(chromosomes) > 1:
@@ -60,9 +69,19 @@ def _read_pgen_physical_positions(pgen_file):
     bim  = pgen_file.rstrip("pgen") + "bim"
     physical_positions = None
     if os.path.isfile(bim):
-        physical_positions = np.array(pd.read_table(bim, sep="\\s+", header=None, comment='#')[3]).astype(np.float64)
+        pos = []
+        with open(bim) as f:
+            for line in f:
+                if line.startswith('#'): continue
+                pos.append(float(line.split()[3]))
+        physical_positions = np.array(pos, dtype=np.float64)
     elif os.path.isfile(pvar):
-        physical_positions = np.array(pd.read_table(pvar, sep="\\s+", header=None, comment='#')[1]).astype(np.float64)
+        pos = []
+        with open(pvar) as f:
+            for line in f:
+                if line.startswith('#'): continue
+                pos.append(float(line.split()[1]))
+        physical_positions = np.array(pos, dtype=np.float64)
     else:
         raise RuntimeError(f"Can't find {bim} or {pvar} for {pgen_file}")
 
@@ -112,6 +131,32 @@ def read_positions_and_ids(pgen):
     return positions, ids
 
 
+class VariantMetadata:
+    """Lightweight replacement for pandas DataFrame for variant metadata."""
+    __slots__ = ('_data', '_len')
+
+    def __init__(self, data):
+        self._data = data  # dict of numpy arrays
+        self._len = len(next(iter(data.values())))
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return self._data[key]
+        # Boolean mask
+        return VariantMetadata({k: v[key] for k, v in self._data.items()})
+
+    def __len__(self):
+        return self._len
+
+    @property
+    def columns(self):
+        return list(self._data.keys())
+
+    @property
+    def shape(self):
+        return (self._len,)
+
+
 def read_variant_metadata(pgen):
     """
     Attempt to read variant metadata in vcf style:
@@ -120,29 +165,59 @@ def read_variant_metadata(pgen):
     pvar = pgen.replace("pgen", "pvar")
     bim = pgen.replace("pgen", "bim")
     if os.path.isfile(bim):
-        bim_df = pd.read_table(bim, names=["CHROM", "ID", "CM", "POS", "ALT", "REF"])
-        out_df = bim_df[["CHROM", "POS", "ID", "REF", "ALT"]]
-        out_df["FILTER"] = bim_df["FILTER"] if "FILTER" in out_df.columns else "PASS"
-        out_df["QUAL"] = bim_df["QUAL"] if "QUAL" in out_df.columns else "."
-        return out_df
+        chrom, pos, vid, ref, alt = [], [], [], [], []
+        with open(bim) as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                fields = line.strip().split()
+                chrom.append(fields[0])
+                vid.append(fields[1])
+                pos.append(fields[3])
+                alt.append(fields[4])
+                ref.append(fields[5])
+        return VariantMetadata({
+            "CHROM": np.array(chrom), "POS": np.array(pos),
+            "ID": np.array(vid), "REF": np.array(ref), "ALT": np.array(alt),
+            "QUAL": np.full(len(pos), "."), "FILTER": np.full(len(pos), "PASS"),
+        })
     elif os.path.isfile(pvar):
+        # Parse header to find column indices
         header = None
-        with open(pvar, "r") as pvarfile:
-            for line in pvarfile:
+        header_line_count = 0
+        with open(pvar) as f:
+            for line in f:
                 if line.startswith("##"):
+                    header_line_count += 1
                     continue
                 if line.startswith("#CHROM"):
-                    header = line.strip().split()
+                    header = line.strip().lstrip('#').split()
+                    header_line_count += 1
                     break
-            if header is None:
-                raise RuntimeError(f"Invalid .pvar file {pvar}")
-        pvar_df = pd.read_table(pvar, comment="#", header=None, names=header, sep=r"\s+").rename({"#CHROM": "CHROM"}, axis=1)
+        if header is None:
+            raise RuntimeError(f"Invalid .pvar file {pvar}")
 
-        pd.options.mode.chained_assignment = None
-        out_df = pvar_df[["CHROM", "POS", "ID", "REF", "ALT"]]
-        out_df["FILTER"] = pvar_df["FILTER"].copy() if "FILTER" in out_df.columns else "PASS"
-        out_df["QUAL"] = pvar_df["QUAL"].copy() if "QUAL" in out_df.columns else "."
-        return out_df
+        col_idx = {name: i for i, name in enumerate(header)}
+        chrom, pos, vid, ref, alt, qual, filt = [], [], [], [], [], [], []
+        has_filter = "FILTER" in col_idx
+        has_qual = "QUAL" in col_idx
+        with open(pvar) as f:
+            for _ in range(header_line_count):
+                next(f)
+            for line in f:
+                fields = line.strip().split()
+                chrom.append(fields[col_idx["CHROM"]])
+                pos.append(fields[col_idx["POS"]])
+                vid.append(fields[col_idx["ID"]])
+                ref.append(fields[col_idx["REF"]])
+                alt.append(fields[col_idx["ALT"]])
+                filt.append(fields[col_idx["FILTER"]] if has_filter else "PASS")
+                qual.append(fields[col_idx["QUAL"]] if has_qual else ".")
+        return VariantMetadata({
+            "CHROM": np.array(chrom), "POS": np.array(pos),
+            "ID": np.array(vid), "REF": np.array(ref), "ALT": np.array(alt),
+            "QUAL": np.array(qual), "FILTER": np.array(filt),
+        })
     else:
         raise RuntimeError(f"Can't find {bim} or {pvar}")
 
@@ -169,22 +244,39 @@ def read_sample_names(pgen):
             return [l.split()[1] for l in famfile]
 
     elif os.path.isfile(psam):
-        sam_df = pd.read_table(psam, sep=r"\s+")
-        if "IID" in sam_df.columns:
-            return sam_df["IID"].astype(str).tolist()
-        elif "#IID" in sam_df.columns:
-            return sam_df["#IID"].astype(str).tolist()
-        else:
-            # If no header, default to famfile
-            with open(psam, "r") as famfile:
-                return [l.split()[1] for l in famfile]
+        with open(psam, "r") as f:
+            header_line = f.readline().strip()
+            header = header_line.split()
+            # Find the IID column
+            if "IID" in header:
+                iid_idx = header.index("IID")
+            elif "#IID" in header:
+                iid_idx = header.index("#IID")
+            else:
+                # No recognized header, treat as fam-like (second column)
+                f.seek(0)
+                return [l.split()[1] for l in f]
+            names = []
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                fields = line.strip().split()
+                if fields:
+                    names.append(fields[iid_idx])
+            return names
     else:
         raise RuntimeError(f"Can't find {fam} or {psam}")
 
 
 def parse_demography(demography):
-    d = pd.read_table(demography, sep="\\s+", header=None)
-    return list(d[0]), list(d[1])
+    times, sizes = [], []
+    with open(demography) as f:
+        for line in f:
+            fields = line.strip().split()
+            if len(fields) >= 2:
+                times.append(float(fields[0]))
+                sizes.append(float(fields[1]))
+    return times, sizes
 
 
 def split_list(list, n):
@@ -308,6 +400,30 @@ def iterate_pgen(pgen, callback, start_idx=None, end_idx=None, **kwargs):
             i += 1
     # Make sure we processed as many things as wanted to
     assert i == M
+
+
+def read_all_genotypes(pgen):
+    """Read all genotypes from a pgen file into a single (n_sites, n_haps) int32 array."""
+    reader = pgenlib.PgenReader(pgen.encode())
+    num_samples = reader.get_raw_sample_ct()
+    num_sites = reader.get_variant_ct()
+    n_haps = 2 * num_samples
+
+    alleles_out = np.empty((num_sites, n_haps), dtype=np.int32)
+    phasepresent_out = np.empty((num_sites, num_samples), dtype=np.uint8)
+
+    BATCH_SIZE = max(1, int(4e7 // n_haps))
+    for b_start in range(0, num_sites, BATCH_SIZE):
+        b_end = min(num_sites, b_start + BATCH_SIZE)
+        reader.read_alleles_and_phasepresent_range(
+            b_start, b_end,
+            alleles_out[b_start:b_end],
+            phasepresent_out[b_start:b_end])
+
+    if np.any(phasepresent_out == 0):
+        raise RuntimeError("Unphased variants are currently not supported.")
+
+    return alleles_out
 
 
 def default_process_count():

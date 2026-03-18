@@ -16,7 +16,6 @@
 
 import sys
 import time
-import tszip
 import logging
 import threads_arg
 import arg_needle_lib
@@ -90,19 +89,18 @@ def threads_convert(threads, argn, tsz, add_mutations=False):
     instructions = load_instructions(threads)
     try:
         logger.info("Attempting to convert to arg format...")
-        arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=0.0)
-    except:
-        # arg_needle_lib does not allow polytomies
-        logger.info(f"Conflicting branches (this is expected), retrying with noise=1e-5...")
-        try:
-            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-5)
-        except:# tskit.LibraryError:
-            logger.info(f"Conflicting branches, retrying with noise=1e-3...")
-            arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-3)
+        arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-5)
+    except RuntimeError:
+        logger.info(f"Conflicting branches, retrying with noise=1e-3...")
+        arg = threads_to_arg(instructions, add_mutations=add_mutations, noise=1e-3)
     if argn is not None:
         logger.info(f"Writing to {argn}")
         arg_needle_lib.serialize_arg(arg, argn)
     if tsz is not None:
+        try:
+            import tszip
+        except ImportError:
+            raise ImportError("tszip is required for .trees.tsz output. Install it with: pip install 'threads-arg[convert]'")
         logger.info(f"Converting to tree sequence and writing to {tsz}")
         tszip.compress(arg_needle_lib.arg_to_tskit(arg), tsz)
     logger.info(f"Done, in {time.time() - start_time} seconds")
