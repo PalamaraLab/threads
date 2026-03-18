@@ -157,8 +157,7 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads):
     if actual_num_threads == 1:
         return_strings, n_attempted, n_parsimoniously_mapped, n_relate_mapped = _map_region(argn, input, region, maf)
     else:
-        import ray
-        os.environ["RAY_DEDUP_LOGS"] = "0"
+        from multiprocessing import Pool
 
         logger.info("Parsing VCF")
         vcf = VCF(input)
@@ -169,12 +168,8 @@ def threads_map_mutations_to_arg(argn, out, maf, input, region, num_threads):
         # split into subregions
         split_positions = split_list(positions, actual_num_threads)
         subregions = [f"{contig}:{pos[0]}-{pos[-1]}" for pos in split_positions]
-        ray.init()
-        map_region_remote = ray.remote(_map_region)
-        results = ray.get([map_region_remote.remote(
-            argn, input, subregion, maf
-        ) for subregion in subregions])
-        ray.shutdown()
+        with Pool(actual_num_threads) as pool:
+            results = pool.starmap(_map_region, [(argn, input, subregion, maf) for subregion in subregions])
         return_strings = []
         n_attempted, n_parsimoniously_mapped, n_relate_mapped = 0, 0, 0
         for rets, natt, npars, nrel in results:

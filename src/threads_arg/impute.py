@@ -2,13 +2,19 @@ import logging
 import multiprocessing
 import os
 import numpy as np
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    raise ImportError("pandas is required for imputation. Install it with: pip install 'threads-arg[impute]'")
 import sys
 
 from tqdm import tqdm
 from cyvcf2 import VCF
 from threads_arg import ThreadsFastLS, ImputationMatcher
-from scipy.sparse import csr_array, vstack as sparse_vstack
+try:
+    from scipy.sparse import csr_array, vstack as sparse_vstack
+except ImportError:
+    raise ImportError("scipy is required for imputation. Install it with: pip install 'threads-arg[impute]'")
 from datetime import datetime
 from typing import Dict, Tuple, List, Union
 from dataclasses import dataclass
