@@ -37,4 +37,8 @@ public:
     std::vector<double> estimated_ages;
 };
 
+// Bulk function: creates GenotypeIterator + AgeEstimator internally,
+// processes all sites in C++, returns estimated ages.
+std::vector<double> estimate_ages(const ThreadingInstructions& instructions);
+
 #endif // THREADS_ARG_ALLELE_AGES_HPP

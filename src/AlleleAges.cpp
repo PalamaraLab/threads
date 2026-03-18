@@ -15,6 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "AlleleAges.hpp"
+#include "GenotypeIterator.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -182,4 +183,13 @@ void AgeEstimator::process_site(const std::vector<int>& genotypes) {
 
 std::vector<double> AgeEstimator::get_inferred_ages() const {
     return estimated_ages;
+}
+
+std::vector<double> estimate_ages(const ThreadingInstructions& instructions) {
+    GenotypeIterator gt_it(instructions);
+    AgeEstimator estimator(instructions);
+    while (gt_it.has_next_genotype()) {
+        estimator.process_site(gt_it.next_genotype());
+    }
+    return estimator.get_inferred_ages();
 }

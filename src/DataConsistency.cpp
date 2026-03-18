@@ -15,6 +15,8 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "DataConsistency.hpp"
+#include "GenotypeIterator.hpp"
+#include <algorithm>
 #include <limits>
 #include <iostream>
 #include <vector>
@@ -236,3 +238,16 @@ ThreadingInstructions ConsistencyWrapper::get_consistent_instructions() {
 
     return ThreadingInstructions(output_instructions, physical_positions);
 }
+
+ThreadingInstructions run_consistency(ThreadingInstructions& instructions, const std::vector<double>& allele_ages) {
+    GenotypeIterator gt_it(instructions);
+    ConsistencyWrapper cw(instructions, allele_ages);
+    while (gt_it.has_next_genotype()) {
+        auto g = gt_it.next_genotype();
+        // next_genotype returns const ref; process_site takes non-const ref
+        std::vector<int> genotypes(g.begin(), g.end());
+        cw.process_site(genotypes);
+    }
+    return cw.get_consistent_instructions();
+}
+

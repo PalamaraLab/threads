@@ -20,6 +20,8 @@
 #include "AlleleAges.hpp"
 #include "GenotypeIterator.hpp"
 #include "VCFWriter.hpp"
+#include "ForwardBackward.hpp"
+#include "ThreadsIO.hpp"
 #include "pybind_utils.hpp"
 
 #include <pybind11/numpy.h>
@@ -212,10 +214,14 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("process_site", &ConsistencyWrapper::process_site)
       .def("get_consistent_instructions", &ConsistencyWrapper::get_consistent_instructions);
 
+  m.def("run_consistency", &run_consistency, py::arg("instructions"), py::arg("allele_ages"));
+
   py::class_<AgeEstimator>(m, "AgeEstimator")
       .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))
       .def("process_site", &AgeEstimator::process_site)
       .def("get_inferred_ages", &AgeEstimator::get_inferred_ages);
+
+  m.def("estimate_ages", &estimate_ages, py::arg("instructions"));
 
   py::class_<GenotypeIterator>(m, "GenotypeIterator")
       .def(py::init<const ThreadingInstructions&>(), "initialize", py::arg("instructions"))
@@ -233,4 +239,62 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("set_filter", &VCFWriter::set_filter)
       .def("set_sample_names", &VCFWriter::set_sample_names)
       .def("write_vcf", &VCFWriter::write_vcf);
+
+  // Forward-backward Li-Stephens algorithm (replaces numba JIT'd fwbw)
+  m.def("forwards_ls_hap", [](
+      py::array_t<double, py::array::c_style | py::array::forcecast> H,
+      py::array_t<double, py::array::c_style | py::array::forcecast> s,
+      py::array_t<double, py::array::c_style | py::array::forcecast> e,
+      py::array_t<double, py::array::c_style | py::array::forcecast> r) {
+    auto H_buf = H.request();
+    auto s_buf = s.request();
+    int m_sites = H_buf.shape[0];
+    int n_refs = H_buf.shape[1];
+
+    auto [F_vec, c_vec] = forwards_ls_hap(
+        n_refs, m_sites,
+        static_cast<const double*>(H_buf.ptr),
+        static_cast<const double*>(s_buf.ptr),
+        static_cast<const double*>(e.request().ptr),
+        static_cast<const double*>(r.request().ptr));
+
+    py::array_t<double> F({m_sites, n_refs});
+    std::memcpy(F.mutable_data(), F_vec.data(), F_vec.size() * sizeof(double));
+    py::array_t<double> c(m_sites);
+    std::memcpy(c.mutable_data(), c_vec.data(), c_vec.size() * sizeof(double));
+    return py::make_tuple(F, c);
+  });
+
+  m.def("backwards_ls_hap", [](
+      py::array_t<double, py::array::c_style | py::array::forcecast> H,
+      py::array_t<double, py::array::c_style | py::array::forcecast> s,
+      py::array_t<double, py::array::c_style | py::array::forcecast> e,
+      py::array_t<double, py::array::c_style | py::array::forcecast> c,
+      py::array_t<double, py::array::c_style | py::array::forcecast> r) {
+    auto H_buf = H.request();
+    int m_sites = H_buf.shape[0];
+    int n_refs = H_buf.shape[1];
+
+    auto B_vec = backwards_ls_hap(
+        n_refs, m_sites,
+        static_cast<const double*>(H_buf.ptr),
+        static_cast<const double*>(s.request().ptr),
+        static_cast<const double*>(e.request().ptr),
+        static_cast<const double*>(c.request().ptr),
+        static_cast<const double*>(r.request().ptr));
+
+    py::array_t<double> B({m_sites, n_refs});
+    std::memcpy(B.mutable_data(), B_vec.data(), B_vec.size() * sizeof(double));
+    return B;
+  });
+
+  // .threads file I/O (replaces h5py)
+  m.def("serialize_threads", &serialize_threads,
+        py::arg("filename"), py::arg("instructions"),
+        py::arg("metadata_cols") = std::vector<std::vector<std::string>>(),
+        py::arg("allele_ages") = std::vector<double>(),
+        py::arg("sample_names") = std::vector<std::string>());
+  m.def("deserialize_threads", &deserialize_threads, py::arg("filename"));
+  m.def("read_threads_metadata", &read_threads_metadata, py::arg("filename"));
+  m.def("read_threads_sample_names", &read_threads_sample_names, py::arg("filename"));
 }

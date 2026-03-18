@@ -15,10 +15,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
-import pandas as pd
 import math
 import numpy as np
-import pandas
 from threads_arg import ThreadingInstructions
 import msprime
 
@@ -42,12 +40,17 @@ class Normalizer:
         Read the input demography file into an msprime.Demography object.
         The input demography is assumed to be haploid.
         """
-        df = pd.read_table(demography_file, header=None)
-        df.columns  = ['GEN', 'NE']
+        times, sizes = [], []
+        with open(demography_file) as f:
+            for line in f:
+                fields = line.strip().split()
+                if len(fields) >= 2:
+                    times.append(float(fields[0]))
+                    sizes.append(float(fields[1]))
         demography = msprime.Demography()
         # NOTE: these initial sizes get overwritten anyways
         demography.add_population(name="A", initial_size=1e4)
-        for t, ne in zip(df["GEN"], df["NE"]):
+        for t, ne in zip(times, sizes):
             # Divide by 2 because msprime wants diploids but demography is haploid
             demography.add_population_parameters_change(t, initial_size=ne / 2, population="A")
         return demography

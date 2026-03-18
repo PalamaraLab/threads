@@ -28,8 +28,7 @@ from threads_arg import (
     Matcher,
     ViterbiPath,
     ThreadingInstructions,
-    ConsistencyWrapper,
-    GenotypeIterator
+    run_consistency,
 )
 from .utils import (
     make_recombination_from_map_and_pgen,
@@ -334,26 +333,20 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
             assert len(allele_age_estimates) == len(instructions.positions)
         else:
             logger.info(f"Reading allele ages from {allele_ages}")
-            allele_age_estimates = []
             _, ids = read_positions_and_ids(pgen)
-            import pandas as pd
-            age_table = pd.read_table(allele_ages, header=None, names=["SNP", "POS", "AGE"])
-            age_table = age_table[age_table["SNP"].astype(str).isin(ids)]
-            allele_age_estimates = age_table["AGE"].values
-            try:
-                assert age_table.shape[0] == len(instructions.positions) == len(allele_age_estimates)
-            except AssertionError:
+            id_set = set(str(x) for x in ids)
+            allele_age_estimates = []
+            with open(allele_ages) as f:
+                for line in f:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and str(fields[0]) in id_set:
+                        allele_age_estimates.append(float(fields[2]))
+            if len(allele_age_estimates) != len(instructions.positions):
                 raise RuntimeError(f"Allele age estimates do not match markers in the region requested, expected {len(instructions.positions)} age estimates.")
 
         # Start the consistifying
         logger.info("Post-processing threading instructions to fit to data")
-        gt_it = GenotypeIterator(instructions)
-        cw = ConsistencyWrapper(instructions, allele_age_estimates)
-        while gt_it.has_next_genotype():
-            g = np.array(gt_it.next_genotype())
-            cw.process_site(g)
-
-        consistent_instructions = cw.get_consistent_instructions()
+        consistent_instructions = run_consistency(instructions, allele_age_estimates)
         logger.info(f"Writing to {out}")
         from .serialization import serialize_instructions
         serialize_instructions(consistent_instructions,
