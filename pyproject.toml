@@ -39,9 +39,6 @@ dev = [
     "pytest",
     "h5py"
 ]
-parallel = [
-    "ray"
-]
 convert = [
     "tszip"
 ]
@@ -53,7 +50,6 @@ normalize = [
     "msprime"
 ]
 all = [
-    "ray",
     "tszip",
     "msprime",
     "pandas",

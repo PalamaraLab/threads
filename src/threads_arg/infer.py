@@ -276,23 +276,21 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
             paths.append(ViterbiPath(sample_id, ss, mi, ht, hs))
 
     elif actual_num_threads > 1:
-        # Released build multi-threaded: Ray process parallelism
-        os.environ["RAY_DEDUP_LOGS"] = "0"
-        import ray
+        # Released build multi-threaded: multiprocessing process parallelism
+        from multiprocessing import Pool
         sample_batches = split_list(list(range(num_haps)), actual_num_threads)
         match_cm_positions = matcher.cm_positions()
 
         del all_genotypes
         gc.collect()
-        partial_viterbi_remote = ray.remote(partial_viterbi)
-        ray.init()
-        results = ray.get([partial_viterbi_remote.remote(
-            pgen, mode, num_haps, physical_positions, genetic_positions,
-            demography, mutation_rate, sample_batch,
-            matcher.serializable_matches(sample_batch), match_cm_positions,
-            max_sample_batch_size, actual_num_threads, thread_id)
-            for thread_id, sample_batch in enumerate(sample_batches)])
-        ray.shutdown()
+        args_list = [
+            (pgen, mode, num_haps, physical_positions, genetic_positions,
+             demography, mutation_rate, sample_batch,
+             matcher.serializable_matches(sample_batch), match_cm_positions,
+             max_sample_batch_size, actual_num_threads, thread_id)
+            for thread_id, sample_batch in enumerate(sample_batches)]
+        with Pool(actual_num_threads) as pool:
+            results = pool.starmap(partial_viterbi, args_list)
         for sample_batch, result_tuple in zip(sample_batches, results):
             for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_tuple):
                 paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))

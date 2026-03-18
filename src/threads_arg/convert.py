@@ -97,7 +97,10 @@ def threads_convert(threads, argn, tsz, add_mutations=False):
         logger.info(f"Writing to {argn}")
         arg_needle_lib.serialize_arg(arg, argn)
     if tsz is not None:
-        import tszip
+        try:
+            import tszip
+        except ImportError:
+            raise ImportError("tszip is required for .trees.tsz output. Install it with: pip install 'threads-arg[convert]'")
         logger.info(f"Converting to tree sequence and writing to {tsz}")
         tszip.compress(arg_needle_lib.arg_to_tskit(arg), tsz)
     logger.info(f"Done, in {time.time() - start_time} seconds")

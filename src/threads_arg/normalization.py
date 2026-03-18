@@ -18,7 +18,10 @@ import logging
 import math
 import numpy as np
 from threads_arg import ThreadingInstructions
-import msprime
+try:
+    import msprime
+except ImportError:
+    raise ImportError("msprime is required for normalization. Install it with: pip install 'threads-arg[normalize]'")
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
