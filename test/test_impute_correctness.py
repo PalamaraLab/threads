@@ -101,39 +101,35 @@ class TestSetEmissionProbabilities:
 class TestForwardBackward:
     def test_forward_scaling_factors_positive(self, small_panel, small_query,
                                                recomb_rates, mutation_rate):
-        m, n = small_panel.shape
         e = set_emission_probabilities(small_panel, small_query, mutation_rate)
-        F, c = forwards_ls_hap(n, m, small_panel, small_query, e, recomb_rates)
+        F, c = forwards_ls_hap(small_panel.astype(np.float64), small_query.ravel().astype(np.float64), e, recomb_rates)
         assert np.all(c > 0)
 
     def test_forward_values_non_negative(self, small_panel, small_query,
                                           recomb_rates, mutation_rate):
-        m, n = small_panel.shape
         e = set_emission_probabilities(small_panel, small_query, mutation_rate)
-        F, c = forwards_ls_hap(n, m, small_panel, small_query, e, recomb_rates)
+        F, c = forwards_ls_hap(small_panel.astype(np.float64), small_query.ravel().astype(np.float64), e, recomb_rates)
         assert np.all(F >= 0)
 
     def test_forward_normalized_rows_sum_to_one(self, small_panel, small_query,
                                                   recomb_rates, mutation_rate):
-        m, n = small_panel.shape
         e = set_emission_probabilities(small_panel, small_query, mutation_rate)
-        F, c = forwards_ls_hap(n, m, small_panel, small_query, e, recomb_rates)
+        F, c = forwards_ls_hap(small_panel.astype(np.float64), small_query.ravel().astype(np.float64), e, recomb_rates)
         np.testing.assert_allclose(F.sum(axis=1), 1.0, atol=1e-10)
 
     def test_backward_last_row_all_ones(self, small_panel, small_query,
                                          recomb_rates, mutation_rate):
         m, n = small_panel.shape
         e = set_emission_probabilities(small_panel, small_query, mutation_rate)
-        F, c = forwards_ls_hap(n, m, small_panel, small_query, e, recomb_rates)
-        B = backwards_ls_hap(n, m, small_panel, small_query, e, c, recomb_rates)
+        F, c = forwards_ls_hap(small_panel.astype(np.float64), small_query.ravel().astype(np.float64), e, recomb_rates)
+        B = backwards_ls_hap(small_panel.astype(np.float64), small_query.ravel().astype(np.float64), e, c, recomb_rates)
         np.testing.assert_array_equal(B[-1], np.ones(n))
 
     def test_backward_values_non_negative(self, small_panel, small_query,
                                            recomb_rates, mutation_rate):
-        m, n = small_panel.shape
         e = set_emission_probabilities(small_panel, small_query, mutation_rate)
-        F, c = forwards_ls_hap(n, m, small_panel, small_query, e, recomb_rates)
-        B = backwards_ls_hap(n, m, small_panel, small_query, e, c, recomb_rates)
+        F, c = forwards_ls_hap(small_panel.astype(np.float64), small_query.ravel().astype(np.float64), e, recomb_rates)
+        B = backwards_ls_hap(small_panel.astype(np.float64), small_query.ravel().astype(np.float64), e, c, recomb_rates)
         assert np.all(B >= 0)
 
     def test_posterior_shape(self, small_panel, small_query, recomb_rates, mutation_rate):

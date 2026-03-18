@@ -1,118 +1,13 @@
 # Code adapted from an implementation of the Li-Stephens algorithm
 # available at: https://github.com/astheeggeggs/lshmm
-import numba
 import numpy as np
 import logging
-import os
+
+from threads_arg import forwards_ls_hap, backwards_ls_hap
 
 logger = logging.getLogger(__name__)
 
-_DISABLE_NUMBA = os.environ.get("LSHMM_DISABLE_NUMBA", "0")
-
-try:
-    ENABLE_NUMBA = {"0": True, "1": False}[_DISABLE_NUMBA]
-except KeyError as e:
-    raise KeyError(
-        "Environment variable 'LSHMM_DISABLE_NUMBA' must be '0' or '1'"
-    ) from e
-
-if not ENABLE_NUMBA:
-    logger.warning(
-        "Numba globally disabled, performance will be drastically reduced."
-    )
-
-
-DEFAULT_NUMBA_ARGS = {
-    "nopython": True,
-    "cache": True,
-}
-
-
-def numba_njit(func, **kwargs):
-    if ENABLE_NUMBA:
-        return numba.jit(func, **{**DEFAULT_NUMBA_ARGS, **kwargs})
-    else:
-        return func
-
 MISSING = -9
-
-@numba_njit
-def forwards_ls_hap(n, m, H, s, e, r, norm=True):
-    """Matrix based haploid LS forward algorithm using numpy vectorisation."""
-    # Initialise
-    F = np.zeros((m, n))
-    r_n = r / n
-
-    if norm:
-        c = np.zeros(m)
-        for i in range(n):
-            F[0, i] = (
-                1 / n * e[0, np.int64(np.equal(H[0, i], s[0, 0]) or s[0, 0] == MISSING)]
-            )
-            c[0] += F[0, i]
-
-        for i in range(n):
-            F[0, i] *= 1 / c[0]
-
-        # Forwards pass
-        for l in range(1, m):
-            for i in range(n):
-                F[l, i] = F[l - 1, i] * (1 - r[l]) + r_n[l]
-                F[l, i] *= e[
-                    l, np.int64(np.equal(H[l, i], s[0, l]) or s[0, l] == MISSING)
-                ]
-                c[l] += F[l, i]
-
-            for i in range(n):
-                F[l, i] *= 1 / c[l]
-        # Log-likelihood: ll = np.sum(np.log10(c))
-    else:
-        c = np.ones(m)
-        for i in range(n):
-            F[0, i] = (
-                1 / n * e[0, np.int64(np.equal(H[0, i], s[0, 0]) or s[0, 0] == MISSING)]
-            )
-
-        # Forwards pass
-        for l in range(1, m):
-            for i in range(n):
-                F[l, i] = F[l - 1, i] * (1 - r[l]) + np.sum(F[l - 1, :]) * r_n[l]
-                F[l, i] *= e[
-                    l, np.int64(np.equal(H[l, i], s[0, l]) or s[0, l] == MISSING)
-                ]
-        # Log-likelihood: ll = np.log10(np.sum(F[m - 1, :]))
-    return F, c
-
-@numba_njit
-def backwards_ls_hap(n, m, H, s, e, c, r):
-    """Matrix based haploid LS backward algorithm using numpy vectorisation."""
-    # Initialise
-    B = np.zeros((m, n))
-    for i in range(n):
-        B[m - 1, i] = 1
-    r_n = r / n
-
-    # Backwards pass
-    for l in range(m - 2, -1, -1):
-        tmp_B = np.zeros(n)
-        tmp_B_sum = 0
-        for i in range(n):
-            tmp_B[i] = (
-                e[
-                    l + 1,
-                    np.int64(
-                        np.equal(H[l + 1, i], s[0, l + 1]) or s[0, l + 1] == MISSING
-                    ),
-                ]
-                * B[l + 1, i]
-            )
-            tmp_B_sum += tmp_B[i]
-        for i in range(n):
-            B[l, i] = r_n[l + 1] * tmp_B_sum
-            B[l, i] += (1 - r[l + 1]) * tmp_B[i]
-            B[l, i] *= 1 / c[l + 1]
-
-    return B
 
 
 def checks(reference_panel, query, mutation_rate, recombination_rates):
@@ -180,13 +75,20 @@ def fwbw(reference_panel,
     # Get emissions
     emissions = set_emission_probabilities(reference_panel, query, mutation_rate)
 
-    # Run forwards
+    # Run forwards (C++)
     forward_array, fwd_norm_factor = forwards_ls_hap(
-        n, m, reference_panel, query, emissions, recombination_rates, norm=True)
+        reference_panel.astype(np.float64),
+        query.ravel().astype(np.float64),
+        emissions,
+        recombination_rates)
 
-    # Run backwards
+    # Run backwards (C++)
     backward_array = backwards_ls_hap(
-        n, m, reference_panel, query, emissions, fwd_norm_factor, recombination_rates)
+        reference_panel.astype(np.float64),
+        query.ravel().astype(np.float64),
+        emissions,
+        fwd_norm_factor,
+        recombination_rates)
 
     # Return posterior
     return forward_array * backward_array

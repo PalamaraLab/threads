@@ -18,6 +18,10 @@
 find_package(Boost REQUIRED)
 message(STATUS "Found Boost ${Boost_VERSION}")
 
+# Find HDF5 C library (for .threads file I/O)
+find_package(HDF5 REQUIRED COMPONENTS C)
+message(STATUS "Found HDF5 ${HDF5_VERSION}")
+
 # Optional OpenMP for parallel Viterbi across targets
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
@@ -42,6 +46,8 @@ set(threads_arg_src
     AlleleAges.cpp
     GenotypeIterator.cpp
     VCFWriter.cpp
+    ForwardBackward.cpp
+    ThreadsIO.cpp
 )
 
 set(threads_arg_hdr
@@ -60,6 +66,8 @@ set(threads_arg_hdr
     AlleleAges.hpp
     GenotypeIterator.hpp
     VCFWriter.hpp
+    ForwardBackward.hpp
+    ThreadsIO.hpp
 )
 
 add_library(threads_arg STATIC
@@ -81,6 +89,8 @@ target_link_libraries(threads_arg
         Boost::headers
         project_warnings
         $<$<BOOL:${OpenMP_CXX_FOUND}>:OpenMP::OpenMP_CXX>
+    PUBLIC
+        HDF5::HDF5
 )
 
 # Native-architecture tuning + LTO for hot numeric kernels

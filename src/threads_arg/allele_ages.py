@@ -18,7 +18,7 @@ import logging
 import multiprocessing
 from tqdm import tqdm
 
-from threads_arg import AgeEstimator, GenotypeIterator
+from threads_arg import estimate_ages as _estimate_ages_cpp
 from .serialization import load_instructions
 from .utils import timer_block, default_process_count, split_list
 
@@ -26,11 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _batch_worker(instructions):
-    gt_it = GenotypeIterator(instructions)
-    age_estimator = AgeEstimator(instructions)
-    while gt_it.has_next_genotype():
-        age_estimator.process_site(gt_it.next_genotype())
-    return age_estimator.get_inferred_ages()
+    return _estimate_ages_cpp(instructions)
 
 def estimate_ages(instructions, num_batches, num_threads):
     # Make sure we don't use more CPUs than requested

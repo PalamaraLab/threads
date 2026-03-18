@@ -81,4 +81,8 @@ public:
     std::vector<InstructionConverter> instruction_converters;
 };
 
+// Bulk function: creates GenotypeIterator + ConsistencyWrapper internally,
+// processes all sites in C++, returns consistent instructions.
+ThreadingInstructions run_consistency(ThreadingInstructions& instructions, const std::vector<double>& allele_ages);
+
 #endif // THREADS_ARG_DATA_CONSISTENCY_HPP

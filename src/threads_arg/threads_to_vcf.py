@@ -6,7 +6,7 @@ def threads_to_vcf(threads, samples=None, variants=None):
     if samples is None:
         try:
             sample_names = load_sample_names(threads)
-        except KeyError:
+        except (KeyError, RuntimeError):
             raise RuntimeError("Unable to load sample information from threading instructions. This may because the input was inferred using an older version of Threads or without the --save_metadata flag. Please provide files with variant information (in .bim/.pvar format) and sample IDs in a file with one sample per line.")
     else:
         with open(samples, "r") as samplefile:
@@ -15,7 +15,7 @@ def threads_to_vcf(threads, samples=None, variants=None):
     if variants is None:
         try:
             variant_metadata = load_metadata(threads)
-        except KeyError:
+        except (KeyError, RuntimeError):
             raise RuntimeError("Unable to load sample information from threading instructions. This may because the input was inferred using an older version of Threads or without the --save_metadata flag. Please provide files with variant information (in .bim/.pvar format) and sample IDs in a file with one sample per line.")
     else:
         assert variants.endswith(".bim") or variants.endswith(".pvar")
