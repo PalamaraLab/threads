@@ -248,62 +248,41 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
     # From here we parallelise if we can
     actual_num_threads = min(default_process_count(), num_threads)
+    num_haps = 2 * num_samples
     logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
     paths = []
     if actual_num_threads > 1:
-        # Warning: this creates big copies, these matches are the main source of memory usage
-        sample_batches = split_list(list(range(2 * num_samples)), actual_num_threads)
+        num_batches = 3 * actual_num_threads
+        from multiprocessing import Pool
+
+        # Warning: this creates big copies, these matches are the main source of memory usagefrom multiprocessing import Pool
+        sample_batches = split_list(list(range(num_haps)), num_batches)
         match_cm_positions = matcher.cm_positions()
 
-        del alleles_out
-        del phased_out
         gc.collect()
-        partial_viterbi_remote = ray.remote(partial_viterbi)
-        ray.init()
-        # Parallelised threading instructions
-        results = ray.get([partial_viterbi_remote.remote(
-            pgen,
-            mode,
-            2 * num_samples,
-            physical_positions,
-            genetic_positions,
-            demography,
-            mutation_rate,
-            sample_batch,
-            matcher.serializable_matches(sample_batch),
-            match_cm_positions,
-            max_sample_batch_size,
-            actual_num_threads,
-            thread_id) for thread_id, sample_batch in enumerate(sample_batches)])
-        ray.shutdown()
-        # Combine results from each thread
+        args_list = [
+            (pgen, mode, num_haps, physical_positions, genetic_positions,
+             demography, mutation_rate, sample_batch,
+             matcher.serializable_matches(sample_batch), match_cm_positions,
+             max_sample_batch_size, actual_num_threads, thread_id)
+            for thread_id, sample_batch in enumerate(sample_batches)]
+        with Pool(actual_num_threads) as pool:
+            results = pool.starmap(partial_viterbi, args_list)
         for sample_batch, result_tuple in zip(sample_batches, results):
             for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_tuple):
                 paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
     else:
-        sample_batch = list(range(2 * num_samples))
+        # Released build single-threaded
+        sample_batch = list(range(num_haps))
         s_match_group = matcher.serializable_matches(sample_batch)
         match_cm_positions = matcher.cm_positions()
         matcher.clear()
         del matcher
         gc.collect()
-        thread_id = 1
-        # Single-threaded threading instructions
         results = partial_viterbi(
-            pgen,
-            mode,
-            2 * num_samples,
-            physical_positions,
-            genetic_positions,
-            demography,
-            mutation_rate,
-            sample_batch,
-            s_match_group,
-            match_cm_positions,
-            max_sample_batch_size,
-            actual_num_threads,
-            thread_id)
-
+            pgen, mode, num_haps, physical_positions, genetic_positions,
+            demography, mutation_rate, sample_batch, s_match_group,
+            match_cm_positions, max_sample_batch_size, actual_num_threads, 1)
         for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *results):
             paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
 
@@ -329,12 +308,13 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
             logger.info(f"Reading allele ages from {allele_ages}")
             allele_age_estimates = []
             _, ids = read_positions_and_ids(pgen)
-            age_table = pd.read_table(allele_ages, header=None, names=["SNP", "POS", "AGE"])
-            age_table = age_table[age_table["SNP"].astype(str).isin(ids)]
-            allele_age_estimates = age_table["AGE"].values
-            try:
-                assert age_table.shape[0] == len(instructions.positions) == len(allele_age_estimates)
-            except AssertionError:
+            id_set = set(str(x) for x in ids)
+            with open(allele_ages) as f:
+                for line in f:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and str(fields[0]) in id_set:
+                        allele_age_estimates.append(float(fields[2]))
+            if len(allele_age_estimates) != len(instructions.positions):
                 raise RuntimeError(f"Allele age estimates do not match markers in the region requested, expected {len(instructions.positions)} age estimates.")
 
         # Start the consistifying

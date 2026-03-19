@@ -159,9 +159,12 @@ def load_instructions(threads):
 
 
 def load_metadata(threads):
+    from .utils import VariantMetadata
     f = h5py.File(threads, "r")
-    import pandas as pd
-    return pd.DataFrame(f["variant_metadata"][:], columns=["CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER"])
+    # import pandas as pd
+    data = f["variant_metadata"][:]
+    columns=["CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER"]
+    return VariantMetadata({col: np.array(data[:, i]) for i, col in enumerate(columns)})
 
 
 def load_sample_names(threads):

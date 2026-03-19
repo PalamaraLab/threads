@@ -17,7 +17,6 @@ requires-python = ">=3.9"
 
 dependencies = [
     "click",
-    "xarray",
     "h5py",
     "pandas",
     "numba",
@@ -25,7 +24,6 @@ dependencies = [
     "tszip",
     "arg-needle-lib==1.2.1",
     "cyvcf2",
-    "ray",
     "pgenlib",
     "tqdm"
 ]
