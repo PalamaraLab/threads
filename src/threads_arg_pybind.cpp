@@ -166,6 +166,22 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("all_targets", &ThreadingInstructions::all_targets)
       .def("all_mismatches", &ThreadingInstructions::all_mismatches)
       .def("sub_range", &ThreadingInstructions::sub_range)
+      .def("add_variants", [](const ThreadingInstructions& self,
+              const std::vector<int>& new_positions,
+              py::array_t<int, py::array::c_style | py::array::forcecast> geno_arr) {
+          auto buf = geno_arr.request();
+          if (buf.ndim != 2)
+              throw std::runtime_error("new_genotypes must be 2D (n_new_sites × num_samples)");
+          int n_new = static_cast<int>(buf.shape[0]);
+          int n_samp = static_cast<int>(buf.shape[1]);
+          if (n_samp != self.num_samples)
+              throw std::runtime_error("new_genotypes columns must equal num_samples");
+          if (n_new != static_cast<int>(new_positions.size()))
+              throw std::runtime_error("new_positions length must match new_genotypes rows");
+          const int* ptr = static_cast<const int*>(buf.ptr);
+          std::vector<int> geno_flat(ptr, ptr + static_cast<size_t>(n_new) * n_samp);
+          return self.add_variants(new_positions, geno_flat, n_new);
+      }, py::arg("new_positions"), py::arg("new_genotypes"))
       .def(py::pickle(
            &threading_instructions_get_state,
            &threading_instructions_set_state))
@@ -177,6 +193,7 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid)
       .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid)
       .def("simplify_for_multiply", &ThreadingInstructions::simplify_for_multiply)
+      .def("coarsen", &ThreadingInstructions::coarsen, py::arg("min_sites"))
       .def("prepare_rle_multiply", &ThreadingInstructions::prepare_rle_multiply)
       .def("right_multiply_rle", &ThreadingInstructions::right_multiply_rle, py::arg("x"))
       .def("left_multiply_rle", &ThreadingInstructions::left_multiply_rle, py::arg("x"))

@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <numeric>
 #include <iostream>
 #include <limits>
 #include <set>
@@ -270,6 +271,133 @@ ThreadingInstructions ThreadingInstructions::sub_range(const int range_start, co
     };
 }
 
+ThreadingInstructions ThreadingInstructions::add_variants(
+        const std::vector<int>& new_positions_unsorted,
+        const std::vector<int>& new_genotypes_flat,
+        int n_new) const {
+    const int n_old = num_sites;
+    const int n_samp = num_samples;
+
+    // Sort new positions by value, keeping a permutation for genotype reorder
+    std::vector<int> order(n_new);
+    std::iota(order.begin(), order.end(), 0);
+    std::vector<int> new_pos(n_new);
+    for (int i = 0; i < n_new; i++) new_pos[i] = new_positions_unsorted[i];
+    std::sort(order.begin(), order.end(),
+              [&](int a, int b) { return new_pos[a] < new_pos[b]; });
+    {
+        std::vector<int> sorted_pos(n_new);
+        for (int i = 0; i < n_new; i++) sorted_pos[i] = new_pos[order[i]];
+        new_pos = std::move(sorted_pos);
+    }
+
+    // Merge old and new positions; record index mappings
+    std::vector<int> merged_positions;
+    merged_positions.reserve(n_old + n_new);
+    std::vector<int> old_to_merged(n_old);
+    std::vector<int> new_to_merged(n_new);
+
+    int oi = 0, ni = 0;
+    while (oi < n_old && ni < n_new) {
+        if (positions[oi] <= new_pos[ni]) {
+            old_to_merged[oi] = static_cast<int>(merged_positions.size());
+            merged_positions.push_back(positions[oi]);
+            oi++;
+        } else {
+            new_to_merged[ni] = static_cast<int>(merged_positions.size());
+            merged_positions.push_back(new_pos[ni]);
+            ni++;
+        }
+    }
+    while (oi < n_old) {
+        old_to_merged[oi] = static_cast<int>(merged_positions.size());
+        merged_positions.push_back(positions[oi]);
+        oi++;
+    }
+    while (ni < n_new) {
+        new_to_merged[ni] = static_cast<int>(merged_positions.size());
+        merged_positions.push_back(new_pos[ni]);
+        ni++;
+    }
+
+    // Site-major processing: for each new site, compute all samples' genotypes.
+    // Memory: O(n_samp) for the current site's genotypes + O(n_samp) for segment
+    // cursors. Total working memory: O(n_samp) regardless of n_new.
+    //
+    // Each sample maintains a segment cursor that advances monotonically since
+    // new sites are sorted. Cost per site per sample: O(1) amortized.
+    std::vector<std::vector<int>> per_sample_new_mm(n_samp);
+    std::vector<int8_t> site_geno(n_samp);     // genotypes at current site
+    std::vector<int> seg_cursor(n_samp, 0);     // per-sample segment cursor
+
+    for (int j = 0; j < n_new; j++) {
+        const int pos = new_pos[j];
+        const size_t src_row = static_cast<size_t>(order[j]) * n_samp;
+
+        for (int s = 0; s < n_samp; s++) {
+            int8_t my_geno = static_cast<int8_t>(new_genotypes_flat[src_row + s]);
+
+            if (s == 0) {
+                site_geno[0] = my_geno;
+                if (my_geno == 1) {
+                    per_sample_new_mm[0].push_back(new_to_merged[j]);
+                }
+            } else {
+                const auto& seg_starts = instructions[s].starts;
+                const auto& seg_targets = instructions[s].targets;
+                const int n_segs = static_cast<int>(seg_starts.size());
+
+                // Advance cursor (amortized O(1) across all sites)
+                int& cur = seg_cursor[s];
+                while (cur + 1 < n_segs && seg_starts[cur + 1] <= pos) {
+                    cur++;
+                }
+
+                int target_geno = site_geno[seg_targets[cur]];
+                site_geno[s] = my_geno;
+
+                if (my_geno != target_geno) {
+                    per_sample_new_mm[s].push_back(new_to_merged[j]);
+                }
+            }
+        }
+    }
+
+    // Build final instructions: merge old (remapped) and new mismatch lists
+    std::vector<ThreadingInstruction> new_instructions;
+    new_instructions.reserve(n_samp);
+
+    for (int s = 0; s < n_samp; s++) {
+        const auto& inst = instructions[s];
+
+        // Remap old mismatches to merged indices (preserves sorted order)
+        std::vector<int> old_remapped;
+        old_remapped.reserve(inst.mismatches.size());
+        for (int m : inst.mismatches) {
+            old_remapped.push_back(old_to_merged[m]);
+        }
+
+        // Merge two sorted sequences
+        const auto& nm = per_sample_new_mm[s];
+        std::vector<int> merged_mm(old_remapped.size() + nm.size());
+        std::merge(old_remapped.begin(), old_remapped.end(),
+                   nm.begin(), nm.end(),
+                   merged_mm.begin());
+
+        new_instructions.emplace_back(
+            std::vector<int>(inst.starts),
+            std::vector<double>(inst.tmrcas),
+            std::vector<int>(inst.targets),
+            std::move(merged_mm)
+        );
+    }
+
+    ThreadingInstructions result(std::move(new_instructions), std::move(merged_positions));
+    result.start = start;
+    result.end = end;
+    return result;
+}
+
 ThreadingInstructions ThreadingInstructions::simplify_for_multiply() const {
     std::vector<ThreadingInstruction> simplified;
     simplified.reserve(num_samples);
@@ -304,6 +432,125 @@ ThreadingInstructions ThreadingInstructions::simplify_for_multiply() const {
     }
 
     ThreadingInstructions result(std::move(simplified), std::vector<int>(positions));
+    result.start = start;
+    result.end = end;
+    return result;
+}
+
+ThreadingInstructions ThreadingInstructions::coarsen(int min_sites) const {
+    // For each sample, merge segments that cover fewer than min_sites variant
+    // sites into their predecessor. Mismatches are recomputed for altered
+    // segments by comparing the sample's true genotype against the new target.
+
+    // Precompute reference genome (sample 0 mismatches)
+    std::vector<int8_t> ref_genome(num_sites, 0);
+    for (int idx : instructions[0].mismatches) {
+        if (idx >= 0 && idx < num_sites) ref_genome[idx] = 1;
+    }
+
+    // Build full genotype matrix once (needed to recompute mismatches after
+    // target changes). Use the same tree-propagation as GenotypeIterator.
+    // geno[sample * num_sites + site]
+    std::vector<int8_t> geno(static_cast<size_t>(num_samples) * num_sites);
+
+    // Sample 0
+    for (int s = 0; s < num_sites; s++) {
+        geno[s] = ref_genome[s];
+    }
+
+    // Samples 1..n-1
+    for (int i = 1; i < num_samples; i++) {
+        const auto& inst = instructions[i];
+        int seg = 0;
+        int mm_idx = 0;
+        const int n_segs = static_cast<int>(inst.starts.size());
+        const int n_mm = static_cast<int>(inst.mismatches.size());
+        const size_t row = static_cast<size_t>(i) * num_sites;
+
+        for (int s = 0; s < num_sites; s++) {
+            // Advance segment
+            while (seg + 1 < n_segs && inst.starts[seg + 1] <= positions[s]) {
+                seg++;
+            }
+            int target = inst.targets[seg];
+            int tgt_g = geno[static_cast<size_t>(target) * num_sites + s];
+            bool is_mm = (mm_idx < n_mm && inst.mismatches[mm_idx] == s);
+            if (is_mm) mm_idx++;
+            geno[row + s] = static_cast<int8_t>(is_mm ? (1 - tgt_g) : tgt_g);
+        }
+    }
+
+    // Now coarsen each sample's segments
+    std::vector<ThreadingInstruction> new_instructions;
+    new_instructions.reserve(num_samples);
+
+    for (int i = 0; i < num_samples; i++) {
+        const auto& inst = instructions[i];
+        const int n_segs = static_cast<int>(inst.starts.size());
+
+        if (i == 0 || n_segs <= 1) {
+            // Sample 0 or single-segment: keep as-is
+            new_instructions.emplace_back(
+                std::vector<int>(inst.starts),
+                std::vector<double>(inst.tmrcas),
+                std::vector<int>(inst.targets),
+                std::vector<int>(inst.mismatches));
+            continue;
+        }
+
+        // Compute site count per segment
+        std::vector<int> seg_site_count(n_segs, 0);
+        {
+            int seg = 0;
+            for (int s = 0; s < num_sites; s++) {
+                while (seg + 1 < n_segs && inst.starts[seg + 1] <= positions[s]) {
+                    seg++;
+                }
+                seg_site_count[seg]++;
+            }
+        }
+
+        // Merge short segments into predecessor
+        std::vector<int> new_starts, new_targets;
+        std::vector<double> new_tmrcas;
+        new_starts.push_back(inst.starts[0]);
+        new_targets.push_back(inst.targets[0]);
+        new_tmrcas.push_back(0.0);
+
+        for (int k = 1; k < n_segs; k++) {
+            if (seg_site_count[k] < min_sites) {
+                // Absorb into previous segment (skip this boundary)
+                continue;
+            }
+            new_starts.push_back(inst.starts[k]);
+            new_targets.push_back(inst.targets[k]);
+            new_tmrcas.push_back(0.0);
+        }
+
+        // Recompute mismatches with the new target assignments
+        std::vector<int> new_mm;
+        const size_t row = static_cast<size_t>(i) * num_sites;
+        int seg = 0;
+        const int new_n_segs = static_cast<int>(new_starts.size());
+
+        for (int s = 0; s < num_sites; s++) {
+            while (seg + 1 < new_n_segs && new_starts[seg + 1] <= positions[s]) {
+                seg++;
+            }
+            int target = new_targets[seg];
+            int tgt_g = geno[static_cast<size_t>(target) * num_sites + s];
+            int my_g = geno[row + s];
+            if (my_g != tgt_g) {
+                new_mm.push_back(s);
+            }
+        }
+
+        new_instructions.emplace_back(
+            std::move(new_starts), std::move(new_tmrcas),
+            std::move(new_targets), std::move(new_mm));
+    }
+
+    ThreadingInstructions result(std::move(new_instructions), std::vector<int>(positions));
     result.start = start;
     result.end = end;
     return result;

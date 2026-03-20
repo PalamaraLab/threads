@@ -85,11 +85,25 @@ public:
 
     ThreadingInstructions sub_range(const int range_start, const int range_end) const;
 
+    // Add variants to an existing ThreadingInstructions.  Segments (starts,
+    // targets, tmrcas) are unchanged — only positions and mismatches are updated.
+    // new_positions: genomic coordinates of new variants (need not be sorted).
+    // new_genotypes: row-major (n_new × num_samples), values 0 or 1.
+    ThreadingInstructions add_variants(const std::vector<int>& new_positions,
+                                       const std::vector<int>& new_genotypes,
+                                       int n_new) const;
+
     // Simplify for multiply: strip tmrcas (set to 0) and merge consecutive
     // segments that share the same target. Returns a new ThreadingInstructions
     // with fewer segments. The genotype matrix is identical — only genealogical
     // information is discarded. Useful for multiply-only workloads.
     ThreadingInstructions simplify_for_multiply() const;
+
+    // Aggressively coarsen by merging short segments into neighbors.
+    // A segment covering fewer than min_sites variant sites is absorbed into
+    // the previous segment (its target is replaced by the neighbor's target).
+    // This is lossy — it changes some genotypes — but reduces tree_n_intervals.
+    ThreadingInstructions coarsen(int min_sites) const;
 
     // Common operations
     std::vector<double> left_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
