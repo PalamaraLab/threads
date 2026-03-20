@@ -53,7 +53,7 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("process_all_sites_viterbi", &ThreadsLowMem::process_all_sites_viterbi)
       .def("process_all_sites_viterbi_numpy", [](ThreadsLowMem& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
         auto buf = arr.request();
-        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites x n_haps)");
         int n_sites = static_cast<int>(buf.shape[0]);
         int n_haps = static_cast<int>(buf.shape[1]);
         self.process_all_sites_viterbi_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);
@@ -62,7 +62,7 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("process_all_sites_hets", &ThreadsLowMem::process_all_sites_hets)
       .def("process_all_sites_hets_numpy", [](ThreadsLowMem& self, py::array_t<int32_t, py::array::c_style | py::array::forcecast> arr) {
         auto buf = arr.request();
-        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites × n_haps)");
+        if (buf.ndim != 2) throw std::runtime_error("Expected 2D array (n_sites x n_haps)");
         int n_sites = static_cast<int>(buf.shape[0]);
         int n_haps = static_cast<int>(buf.shape[1]);
         self.process_all_sites_hets_flat(static_cast<const int32_t*>(buf.ptr), n_sites, n_haps);

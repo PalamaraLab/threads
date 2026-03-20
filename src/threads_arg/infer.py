@@ -70,7 +70,8 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     )
     local_logger = logging.getLogger(__name__)
 
-    reader = pgenlib.PgenReader(pgen.encode())
+    num_pgen_samples = (1 + max(sample_batch)) // 2
+    pgen_sample_subset = np.array(range(num_pgen_samples), dtype=np.uint32)
     ne_times, ne = parse_demography(demography)
 
     sparse = None
@@ -79,7 +80,7 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     elif mode == "wgs":
         sparse = False
     else:
-        raise RuntimeError
+        raise ValueError(f"Invalid mode {mode}")
 
     # Batching here saves a small amount of memory
     num_samples = len(sample_batch)
@@ -104,51 +105,14 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
         else:
             TLM.initialize_viterbi([[s[k] for k in sample_index_subset] for s in s_match_group], match_cm_positions)
 
-        M = reader.get_variant_ct()
-        BATCH_SIZE = int(4e7 // num_samples_hap)
-        n_batches = int(np.ceil(M / BATCH_SIZE))
-
-        # Initialize pruning parameters
-        a_counter   = 0
-        prune_threshold = 10 * num_samples_hap
-        prune_count = 0
-        last_prune  = 0
-
         # Iterate across the genotypes and run Li-Stephens inference
-        for b in range(n_batches):
-            # Read genotypes and check for phase
-            b_start = b * BATCH_SIZE
-            b_end = min(M, (b+1) * BATCH_SIZE)
-            g_size = b_end - b_start
-            alleles_out = np.empty((g_size, num_samples_hap), dtype=np.int32)
-            phased_out = np.empty((g_size, num_samples_hap // 2), dtype=np.uint8)
-            if (phased_out == 0).any():
-                unphased_sites, unphased_samples = (1 - phased_out).nonzero()
-                ALLELE_UNPHASED_HET = -7
-                alleles_out[unphased_sites, 2 * unphased_samples] = ALLELE_UNPHASED_HET
-                alleles_out[unphased_sites, 2 * unphased_samples + 1] = ALLELE_UNPHASED_HET
-            reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phased_out)
-
-            # For each variant in chunk, pass the genotypes through Threads-LS
-            for g in alleles_out:
-                TLM.process_site_viterbi(g)
-
-                # Regularly prune the number of open branches and reset the pruning threshold
-                if a_counter % 10 == 0:
-                    n_branches = TLM.count_branches()
-                    if n_branches > prune_threshold:
-                        if a_counter - last_prune <= 30:
-                            prune_threshold *= 2
-                        TLM.prune()
-                        prune_count += 1
-                        last_prune = a_counter
-                a_counter += 1
+        iterate_pgen(pgen, TLM.process_all_sites_viterbi_numpy, sample_subset=pgen_sample_subset)
 
         # Construct paths
         TLM.traceback()
 
         # Add heterozygous sites to each path segment
-        iterate_pgen(pgen, lambda _, g: TLM.process_site_hets(g))
+        iterate_pgen(pgen, TLM.process_all_sites_hets_numpy, sample_subset=pgen_sample_subset)
 
         # Add coalescence time to each segment
         TLM.date_segments()
@@ -220,11 +184,9 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
     logger.info("Finding singletons")
     # Get singleton filter for the matching step
-    alleles_out = None
-    phased_out = None
-    ac_mask = []
-    iterate_pgen(pgen, lambda i, g: ac_mask.append(1 < g.sum() < 2 * num_samples))
-    ac_mask = np.array(ac_mask, dtype=bool)
+    mask_batches = []
+    iterate_pgen(pgen, lambda G: mask_batches.append(((1 < G.sum(axis=1)) & (G.sum(axis=1) < 2 * num_samples - 1)).tolist())) #lambda i, g: ac_mask.append(1 < g.sum() < 2 * num_samples))
+    ac_mask = np.array([m for batch in mask_batches for m in batch], dtype=bool)
     assert ac_mask.shape == genetic_positions.shape
 
     logger.info("Running PBWT matching")
@@ -238,9 +200,9 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     MIN_MATCHES = 4
     neighborhood_size = 4
     matcher = Matcher(2 * num_samples, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
-    def matcher_callback(i, g, mask, matcher):
-        if mask[i]:
-            matcher.process_site(g)
+    def matcher_callback(G, matcher):
+        matcher.process_all_sites_numpy(G)
+    
     iterate_pgen(pgen, matcher_callback, mask=ac_mask, matcher=matcher)
 
     # Add top matches from adjacent sites to each match-chunk
@@ -252,8 +214,8 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
     paths = []
     if actual_num_threads > 1:
-        num_batches = 3 * actual_num_threads
         from multiprocessing import Pool
+        num_batches = 2 * actual_num_threads
 
         # Warning: this creates big copies, these matches are the main source of memory usagefrom multiprocessing import Pool
         sample_batches = split_list(list(range(num_haps)), num_batches)

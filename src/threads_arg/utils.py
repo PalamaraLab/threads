@@ -368,14 +368,18 @@ class TimerTotal:
         return f"Total time for {self.desc}: {total:.3f}s"
 
 
-def iterate_pgen(pgen, callback, start_idx=None, end_idx=None, **kwargs):
+def iterate_pgen(pgen, callback, sample_subset=None, start_idx=None, end_idx=None, mask=None, **kwargs):
     """
     Wrapper to iterate over each site in a .pgen with a callback,
     batching to reduce memory usage and read time
     """
     # Initialize read batching
-    reader = pgenlib.PgenReader(pgen.encode())
-    num_samples = reader.get_raw_sample_ct()
+    if sample_subset is None:
+        reader = pgenlib.PgenReader(pgen.encode())
+        num_samples = reader.get_raw_sample_ct()
+    else:
+        reader = pgenlib.PgenReader(pgen.encode(), sample_subset=sample_subset)
+        num_samples = len(sample_subset)
     num_sites = reader.get_variant_ct()
     if start_idx is None:
         start_idx = 0
@@ -385,10 +389,6 @@ def iterate_pgen(pgen, callback, start_idx=None, end_idx=None, **kwargs):
 
     BATCH_SIZE = int(4e7 // num_samples)
     n_batches = int(np.ceil(M / BATCH_SIZE))
-    # Get singleton filter for the matching step
-    alleles_out = None
-    phased_out = None
-    i = 0
     for b in range(n_batches):
         b_start = b * BATCH_SIZE + start_idx
         b_end = min(end_idx, (b+1) * BATCH_SIZE)
@@ -398,11 +398,9 @@ def iterate_pgen(pgen, callback, start_idx=None, end_idx=None, **kwargs):
         reader.read_alleles_and_phasepresent_range(b_start, b_end, alleles_out, phasepresent_out)
         if np.any(phasepresent_out == 0):
             raise RuntimeError("Unphased variants are currently not supported.")
-        for g in alleles_out:
-            callback(i, g, **kwargs)
-            i += 1
-    # Make sure we processed as many things as wanted to
-    assert i == M
+        if mask is not None:
+            alleles_out = alleles_out[mask[b_start:b_end]]
+        callback(alleles_out, **kwargs)
 
 
 def default_process_count():
