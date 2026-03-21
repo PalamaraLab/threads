@@ -70,8 +70,8 @@ def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_pos
     )
     local_logger = logging.getLogger(__name__)
 
-    num_pgen_samples = (1 + max(sample_batch)) // 2
-    pgen_sample_subset = np.array(range(num_pgen_samples), dtype=np.uint32)
+    # num_pgen_samples = num_samples_hap // 2 #(1 + max(sample_batch)) // 2
+    pgen_sample_subset = None #np.array(range(num_pgen_samples), dtype=np.uint32)
     ne_times, ne = parse_demography(demography)
 
     sparse = None
@@ -207,6 +207,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
 
     # Add top matches from adjacent sites to each match-chunk
     matcher.propagate_adjacent_matches()
+    logger.info("Finished PBWT matching")
 
     # From here we parallelise if we can
     actual_num_threads = min(default_process_count(), num_threads)
