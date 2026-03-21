@@ -37,6 +37,7 @@ from .utils import (
     parse_demography,
     iterate_pgen,
     read_all_genotypes,
+    pgen_chunk_iterator,
     read_positions_and_ids,
     parse_region_string,
     default_process_count,
@@ -210,72 +211,110 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
     assert num_sites == len(physical_positions)
     logger.info(f"Will build an ARG on {2 * num_samples} haplotypes using {num_sites} sites")
     if max_sample_batch_size is None:
-        max_sample_batch_size = 2 * num_samples
+        max_sample_batch_size = min(2 * num_samples, 2000)
 
     # Check for batch numpy API (optimized build)
     HAS_NUMPY_API = hasattr(Matcher, 'process_all_sites_numpy')
 
-    # Read all genotypes into memory once
-    logger.info("Reading genotypes")
-    all_genotypes = read_all_genotypes(pgen)
-    num_haps = all_genotypes.shape[1]
-
-    logger.info("Finding singletons")
-    ac = all_genotypes.sum(axis=1)
-    ac_mask = (ac > 1) & (ac < num_haps)
-    assert ac_mask.shape == genetic_positions.shape
-
-    logger.info("Running PBWT matching")
-    MIN_MATCHES = 4
-    neighborhood_size = 4
-    matcher = Matcher(num_haps, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
     if HAS_NUMPY_API:
-        matcher.process_all_sites_numpy(all_genotypes[ac_mask])
-    else:
-        for g in all_genotypes[ac_mask]:
-            matcher.process_site(g)
+        # Streaming path: never load full genotype matrix into memory.
+        # Pass 1: compute allele counts for singleton mask
+        logger.info("Computing allele counts")
+        reader = pgenlib.PgenReader(pgen.encode())
+        num_haps = 2 * reader.get_raw_sample_ct()
+        num_sites = reader.get_variant_ct()
+        ac = np.empty(num_sites, dtype=np.int32)
+        site_idx = 0
+        for chunk in pgen_chunk_iterator(pgen):
+            n = chunk.shape[0]
+            ac[site_idx:site_idx + n] = chunk.sum(axis=1)
+            site_idx += n
+        ac_mask = (ac > 1) & (ac < num_haps)
+        assert ac_mask.shape == genetic_positions.shape
 
-    # Add top matches from adjacent sites to each match-chunk
-    matcher.propagate_adjacent_matches()
+        # Pass 2: PBWT matching (stream non-singleton sites)
+        logger.info("Running PBWT matching")
+        MIN_MATCHES = 4
+        neighborhood_size = 4
+        matcher = Matcher(num_haps, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
+        site_idx = 0
+        for chunk in pgen_chunk_iterator(pgen):
+            n = chunk.shape[0]
+            mask_slice = ac_mask[site_idx:site_idx + n]
+            if mask_slice.any():
+                matcher.process_all_sites_numpy(chunk[mask_slice])
+            site_idx += n
+        matcher.propagate_adjacent_matches()
 
-    ne_times, ne = parse_demography(demography)
-    sparse = mode == "array"
+        ne_times, ne = parse_demography(demography)
+        sparse = mode == "array"
+        actual_num_threads = min(default_process_count(), num_threads)
+        logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
+        paths = []
 
-    # From here we parallelise: OpenMP (batch API) or Ray (per-site fallback)
-    actual_num_threads = min(default_process_count(), num_threads)
-    logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
-    paths = []
-
-    if HAS_NUMPY_API:
-        # Optimized path: single process, OpenMP parallelism across targets in C++
+        # Pass 3+: HMM inference, sub-batched by target to control memory
         sample_batch = list(range(num_haps))
-        s_match_group = matcher.serializable_matches(sample_batch)
         match_cm_positions = matcher.cm_positions()
+        num_subsets = int(np.ceil(len(sample_batch) / max_sample_batch_size))
+        sample_subsets = split_list(sample_batch, num_subsets)
+
+        for sub_idx, subset in enumerate(sample_subsets):
+            logger.info(f"HMM batch {sub_idx + 1}/{num_subsets} ({len(subset)} haplotypes)")
+
+            s_match_sub = matcher.serializable_matches(subset)
+            TLM = ThreadsLowMem(subset, physical_positions, genetic_positions, ne, ne_times, mutation_rate, sparse)
+            TLM.initialize_viterbi(s_match_sub, match_cm_positions)
+            del s_match_sub
+            gc.collect()
+
+            # Viterbi: stream genotypes from pgen
+            for chunk in pgen_chunk_iterator(pgen):
+                TLM.process_all_sites_viterbi_numpy(chunk)
+            TLM.prune()
+            TLM.traceback()
+
+            # Hets: stream genotypes from pgen again
+            for chunk in pgen_chunk_iterator(pgen):
+                TLM.process_all_sites_hets_numpy(chunk)
+            TLM.date_segments()
+
+            seg_starts, match_ids, heights, hetsites = TLM.serialize_paths()
+            for sample_id, ss, mi, ht, hs in zip(subset, seg_starts, match_ids, heights, hetsites):
+                paths.append(ViterbiPath(sample_id, ss, mi, ht, hs))
+
+            del TLM
+            gc.collect()
+
         matcher.clear()
         del matcher
         gc.collect()
 
-        TLM = ThreadsLowMem(sample_batch, physical_positions, genetic_positions, ne, ne_times, mutation_rate, sparse)
-        TLM.initialize_viterbi(s_match_group, match_cm_positions)
-        del s_match_group
-        gc.collect()
+    else:
+        # Released build: load all genotypes (original path)
+        logger.info("Reading genotypes")
+        all_genotypes = read_all_genotypes(pgen)
+        num_haps = all_genotypes.shape[1]
 
-        logger.info("Running Viterbi (batch + OpenMP)")
-        TLM.process_all_sites_viterbi_numpy(all_genotypes)
-        TLM.prune()
-        TLM.traceback()
+        logger.info("Finding singletons")
+        ac = all_genotypes.sum(axis=1)
+        ac_mask = (ac > 1) & (ac < num_haps)
+        assert ac_mask.shape == genetic_positions.shape
 
-        logger.info("Computing hets (batch + OpenMP)")
-        TLM.process_all_sites_hets_numpy(all_genotypes)
+        logger.info("Running PBWT matching")
+        MIN_MATCHES = 4
+        neighborhood_size = 4
+        matcher = Matcher(num_haps, genetic_positions[ac_mask], query_interval, match_group_interval, neighborhood_size, MIN_MATCHES)
+        for g in all_genotypes[ac_mask]:
+            matcher.process_site(g)
+        matcher.propagate_adjacent_matches()
 
-        logger.info("Dating segments")
-        TLM.date_segments()
+        ne_times, ne = parse_demography(demography)
+        sparse = mode == "array"
+        actual_num_threads = min(default_process_count(), num_threads)
+        logger.info(f"Requested {num_threads} threads, found {actual_num_threads}.")
+        paths = []
 
-        seg_starts, match_ids, heights, hetsites = TLM.serialize_paths()
-        for sample_id, ss, mi, ht, hs in zip(sample_batch, seg_starts, match_ids, heights, hetsites):
-            paths.append(ViterbiPath(sample_id, ss, mi, ht, hs))
-
-    elif actual_num_threads > 1:
+    if not HAS_NUMPY_API and actual_num_threads > 1:
         # Released build multi-threaded: multiprocessing process parallelism
         from multiprocessing import Pool
         sample_batches = split_list(list(range(num_haps)), actual_num_threads)
@@ -294,7 +333,7 @@ def threads_infer(pgen, map, recombination_rate, demography, mutation_rate, fit_
         for sample_batch, result_tuple in zip(sample_batches, results):
             for sample_id, seg_starts, match_ids, heights, hetsites in zip(sample_batch, *result_tuple):
                 paths.append(ViterbiPath(sample_id, seg_starts, match_ids, heights, hetsites))
-    else:
+    elif not HAS_NUMPY_API:
         # Released build single-threaded
         sample_batch = list(range(num_haps))
         s_match_group = matcher.serializable_matches(sample_batch)
