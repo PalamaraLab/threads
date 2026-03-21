@@ -426,6 +426,36 @@ def read_all_genotypes(pgen):
     return alleles_out
 
 
+def pgen_chunk_iterator(pgen, chunk_size=None):
+    """Yield (n_sites_chunk, n_haps) int32 arrays from a pgen file.
+
+    Each chunk is a contiguous block of sites read from disk. The chunks
+    are yielded in order and together cover all sites exactly once. The
+    buffer is reused across yields for efficiency, so callers must not
+    hold references to previous chunks.
+    """
+    reader = pgenlib.PgenReader(pgen.encode())
+    num_samples = reader.get_raw_sample_ct()
+    num_sites = reader.get_variant_ct()
+    n_haps = 2 * num_samples
+
+    if chunk_size is None:
+        chunk_size = max(1, int(4e7 // n_haps))
+
+    alleles_buf = np.empty((chunk_size, n_haps), dtype=np.int32)
+    phase_buf = np.empty((chunk_size, num_samples), dtype=np.uint8)
+
+    for b_start in range(0, num_sites, chunk_size):
+        b_end = min(num_sites, b_start + chunk_size)
+        g_size = b_end - b_start
+        out = alleles_buf[:g_size]
+        phase_out = phase_buf[:g_size]
+        reader.read_alleles_and_phasepresent_range(b_start, b_end, out, phase_out)
+        if np.any(phase_out == 0):
+            raise RuntimeError("Unphased variants are currently not supported.")
+        yield out
+
+
 def default_process_count():
     """
     Get the number of CPUs available for multi-processing work
