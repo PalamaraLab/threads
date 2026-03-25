@@ -186,37 +186,58 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            &threading_instructions_get_state,
            &threading_instructions_set_state))
       .def("left_multiply", &ThreadingInstructions::left_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false,
-           py::call_guard<py::gil_scoped_release>())
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G^T x (dense). x has length num_samples (or num_samples/2 if diploid). Returns vector of length num_sites.")
       .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false,
-           py::call_guard<py::gil_scoped_release>())
-      .def("materialize_genotypes", &ThreadingInstructions::materialize_genotypes)
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G x (dense). x has length num_sites. Returns vector of length num_samples (or num_samples/2 if diploid).")
+      .def("materialize_genotypes", &ThreadingInstructions::materialize_genotypes,
+           "Cache the dense genotype matrix in memory. Called automatically by multiply methods.")
       .def("genotype_matrix_numpy", [](ThreadingInstructions& self) {
         const auto& gmat = self.get_genotype_matrix();
         int m = self.num_sites;
         int n = self.num_samples;
-        py::array_t<int> out({m, n});
-        std::memcpy(out.mutable_data(), gmat.data(),
-                    static_cast<size_t>(m) * n * sizeof(int));
+        py::array_t<int8_t> out({m, n});
+        auto* dst = out.mutable_data();
+        const int* src = gmat.data();
+        size_t total = static_cast<size_t>(m) * n;
+        for (size_t i = 0; i < total; i++) dst[i] = static_cast<int8_t>(src[i]);
         return out;
-      })
-      .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid)
-      .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid)
-      .def("simplify_for_multiply", &ThreadingInstructions::simplify_for_multiply)
-      .def("coarsen", &ThreadingInstructions::coarsen, py::arg("min_sites"))
-      .def("prepare_rle_multiply", &ThreadingInstructions::prepare_rle_multiply)
-      .def("right_multiply_rle", &ThreadingInstructions::right_multiply_rle, py::arg("x"))
-      .def("left_multiply_rle", &ThreadingInstructions::left_multiply_rle, py::arg("x"))
-      .def("right_multiply_rle_batch", &ThreadingInstructions::right_multiply_rle_batch, py::arg("x_flat"), py::arg("k"))
-      .def("left_multiply_rle_batch", &ThreadingInstructions::left_multiply_rle_batch, py::arg("x_flat"), py::arg("k"))
-      .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply)
+      }, "Return genotype matrix as (n_sites, n_samples) int8 numpy array.")
+      .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid,
+           "Cache the mean-centered, variance-normalized haploid genotype matrix.")
+      .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid,
+           "Cache the mean-centered, variance-normalized diploid dosage matrix.")
+      .def("simplify_for_multiply", &ThreadingInstructions::simplify_for_multiply,
+           "Strip TMRCAs and merge consecutive segments with the same target. Reduces multiply cost without changing genotypes.")
+      .def("coarsen", &ThreadingInstructions::coarsen, py::arg("min_sites"),
+           "Merge segments shorter than min_sites (lossy). Reduces tree count for faster tree multiply at the cost of genotype accuracy.")
+      .def("prepare_rle_multiply", &ThreadingInstructions::prepare_rle_multiply,
+           "Precompute run-length encoding of 1-runs per sample. Equivalent to sparse matrix representation. "
+           "O(m + total_1_runs) per multiply; prefer tree multiply for large m.")
+      .def("right_multiply_rle", &ThreadingInstructions::right_multiply_rle, py::arg("x"),
+           "Compute G x via RLE. x has length num_sites. Returns vector of length num_samples.")
+      .def("left_multiply_rle", &ThreadingInstructions::left_multiply_rle, py::arg("x"),
+           "Compute G^T x via RLE. x has length num_samples. Returns vector of length num_sites.")
+      .def("right_multiply_rle_batch", &ThreadingInstructions::right_multiply_rle_batch, py::arg("x_flat"), py::arg("k"),
+           "Compute G X via RLE for k vectors. x_flat has length num_sites*k (column-major). Returns flat array of length num_samples*k.")
+      .def("left_multiply_rle_batch", &ThreadingInstructions::left_multiply_rle_batch, py::arg("x_flat"), py::arg("k"),
+           "Compute G^T X via RLE for k vectors. x_flat has length num_samples*k. Returns flat array of length num_sites*k.")
+      .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply,
+           "Precompute interval-tree structure for tree multiply. "
+           "O(n*n_intervals + mismatches) per multiply; preferred over RLE for large m.")
       .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"),
-           py::call_guard<py::gil_scoped_release>())
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G x via tree shuttle. x has length num_sites. Returns vector of length num_samples.")
       .def("left_multiply_tree", &ThreadingInstructions::left_multiply_tree, py::arg("x"),
-           py::call_guard<py::gil_scoped_release>())
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G^T x via tree shuttle. x has length num_samples. Returns vector of length num_sites.")
       .def("right_multiply_tree_batch", &ThreadingInstructions::right_multiply_tree_batch, py::arg("x_flat"), py::arg("k"),
-           py::call_guard<py::gil_scoped_release>())
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G X via tree shuttle for k vectors. x_flat has length num_sites*k. Returns flat array of length num_samples*k.")
       .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"),
-           py::call_guard<py::gil_scoped_release>())
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G^T X via tree shuttle for k vectors. x_flat has length num_samples*k. Returns flat array of length num_sites*k.")
       .def("right_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
               py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
         auto buf = arr.request();
@@ -228,7 +249,8 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
         py::array_t<double> out(static_cast<size_t>(result.size()));
         std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
         return out;
-      }, py::arg("x_flat"), py::arg("k"))
+      }, py::arg("x_flat"), py::arg("k"),
+           "Compute G X via tree shuttle for k vectors. Accepts numpy array. Returns numpy array of length num_samples*k.")
       .def("left_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
               py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
         auto buf = arr.request();
@@ -240,34 +262,44 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
         py::array_t<double> out(static_cast<size_t>(result.size()));
         std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
         return out;
-      }, py::arg("x_flat"), py::arg("k"))
+      }, py::arg("x_flat"), py::arg("k"),
+           "Compute G^T X via tree shuttle for k vectors. Accepts numpy array. Returns numpy array of length num_sites*k.")
       .def("right_multiply_tree_range", &ThreadingInstructions::right_multiply_tree_range,
            py::arg("x"), py::arg("site_start"), py::arg("site_end"),
-           py::call_guard<py::gil_scoped_release>())
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G[site_start:site_end, :] x via tree shuttle. Returns vector of length num_samples.")
       .def("left_multiply_tree_range", &ThreadingInstructions::left_multiply_tree_range,
            py::arg("x"), py::arg("site_start"), py::arg("site_end"),
-           py::call_guard<py::gil_scoped_release>())
+           py::call_guard<py::gil_scoped_release>(),
+           "Compute G[site_start:site_end, :]^T x via tree shuttle. Returns vector of length (site_end - site_start).")
       .def("visit_clades", [](const ThreadingInstructions& self, py::function callback) {
         self.visit_clades([&](const std::vector<int>& descendants, double height,
                               int start_bp, int end_bp) {
           py::gil_scoped_acquire acquire;
           callback(descendants, height, start_bp, end_bp);
         });
-      }, py::arg("callback"))
+      }, py::arg("callback"),
+           "Traverse all clades in the implicit ARG. Calls callback(descendants, height, start_bp, end_bp) for each clade.")
       .def("visit_branches", [](const ThreadingInstructions& self, py::function callback) {
         self.visit_branches([&](const std::vector<int>& descendants, double child_height,
                                 double parent_height, int start_bp, int end_bp) {
           py::gil_scoped_acquire acquire;
           callback(descendants, child_height, parent_height, start_bp, end_bp);
         });
-      }, py::arg("callback"))
-      .def("total_volume", &ThreadingInstructions::total_volume)
-      .def("allele_frequency_spectrum", &ThreadingInstructions::allele_frequency_spectrum)
+      }, py::arg("callback"),
+           "Traverse all branches in the implicit ARG. Calls callback(descendants, child_height, parent_height, start_bp, end_bp).")
+      .def("total_volume", &ThreadingInstructions::total_volume,
+           "Total branch volume (sum of branch_length * span over all branches). Uses lightweight union-find (no member lists).")
+      .def("allele_frequency_spectrum", &ThreadingInstructions::allele_frequency_spectrum,
+           "Branch-length AFS: afs[k] = total volume of branches with k descendants. Returns list of length num_samples+1. "
+           "Uses count-only union-find; ~50-70x faster than arg-needle-lib's bitset_volume_map.")
       .def("association_diploid", [](const ThreadingInstructions& self,
               const std::vector<double>& phenotypes, double p_threshold) {
         auto r = self.association_diploid(phenotypes, p_threshold);
         return py::make_tuple(r.position, r.chi2, r.pvalue, r.n_descendants);
-      }, py::arg("phenotypes"), py::arg("p_threshold") = 5e-8)
+      }, py::arg("phenotypes"), py::arg("p_threshold") = 5e-8,
+           "Clade-based association testing. Tests each clade's diploid dosage against phenotypes via chi-square. "
+           "Returns (positions, chi2_stats, p_values, n_descendants) for clades passing p_threshold.")
       .def("generate_mutations", [](const ThreadingInstructions& self,
               double mutation_rate, int seed) {
         auto r = self.generate_mutations(mutation_rate, seed);
@@ -278,7 +310,9 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
         py::array_t<int> genotypes({m, n});
         std::memcpy(genotypes.mutable_data(), r.genotypes.data(), m * n * sizeof(int));
         return py::make_tuple(positions, genotypes);
-      }, py::arg("mutation_rate"), py::arg("seed") = 42);
+      }, py::arg("mutation_rate"), py::arg("seed") = 42,
+           "Poisson-sample mutations on branches proportional to volume. "
+           "Returns (positions_array, genotypes_matrix) where genotypes is (n_mutations, num_samples) int32.");
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,

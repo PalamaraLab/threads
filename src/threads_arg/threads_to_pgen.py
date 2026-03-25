@@ -49,7 +49,7 @@ def threads_to_pgen(threads, out, samples=None, variants=None):
             f"{n_sites} sites in instructions.")
 
     # Write pgen
-    geno = instructions.genotype_matrix_numpy()  # (n_sites, n_haps) int32
+    geno = instructions.genotype_matrix_numpy()  # (n_sites, n_haps) int8
     with pgenlib.PgenWriter(
             filename=(out + ".pgen").encode(),
             sample_ct=n_dip,
