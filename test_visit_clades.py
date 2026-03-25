@@ -122,8 +122,8 @@ def test_association(instructions):
     rng = np.random.default_rng(123)
 
     # Generate mutations and pick a common causal variant
-    pos_list, geno_flat, n_mut = instructions.generate_mutations(1e-8, seed=99)
-    geno = np.array(geno_flat).reshape(n_mut, n)
+    pos_list, geno = instructions.generate_mutations(1e-8, seed=99)
+    n_mut = len(pos_list)
     dosage = geno[:, 0::2] + geno[:, 1::2]
     maf = dosage.sum(axis=1) / (2 * n_dip)
     maf = np.minimum(maf, 1 - maf)
@@ -175,8 +175,8 @@ def test_mutation_generation(instructions, arg):
     print(f"Test 3: Mutation generation ({n} haplotypes)")
 
     mu = 1e-8
-    pos_list, geno_flat, n_mut = instructions.generate_mutations(mu, seed=42)
-    geno = np.array(geno_flat).reshape(n_mut, n)
+    pos_list, geno = instructions.generate_mutations(mu, seed=42)
+    n_mut = len(pos_list)
     print(f"  Generated {n_mut} mutations")
 
     ac = geno.sum(axis=1)

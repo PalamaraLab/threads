@@ -262,7 +262,13 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("generate_mutations", [](const ThreadingInstructions& self,
               double mutation_rate, int seed) {
         auto r = self.generate_mutations(mutation_rate, seed);
-        return py::make_tuple(r.positions, r.genotypes, r.n_mutations);
+        int n = self.num_samples;
+        int m = r.n_mutations;
+        py::array_t<int> positions(m);
+        std::memcpy(positions.mutable_data(), r.positions.data(), m * sizeof(int));
+        py::array_t<int> genotypes({m, n});
+        std::memcpy(genotypes.mutable_data(), r.genotypes.data(), m * n * sizeof(int));
+        return py::make_tuple(positions, genotypes);
       }, py::arg("mutation_rate"), py::arg("seed") = 42);
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
