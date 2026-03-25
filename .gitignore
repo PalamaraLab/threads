@@ -1,3 +1,6 @@
+# PDFs (compile locally from .tex)
+*.pdf
+
 # Prerequisites
 *.d
 

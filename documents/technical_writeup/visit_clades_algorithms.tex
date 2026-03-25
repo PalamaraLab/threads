@@ -478,20 +478,24 @@ ranges accordingly.  Useful for block-wise algorithms like SCOPE.
 \centering
 \begin{tabular}{l c c c}
 \toprule
-Method & Prepare & Per-call & Memory \\
+Method & Prepare & Per-call & Peak memory \\
 \midrule
 Dense        & $O(nm)$  & $O(nm)$ & $O(nm)$ \\
-Tree shuttle & $O(nm)$  & $O(n \cdot n_i + M)$ & $O(m \cdot d)$ peak \\
-RLE          & $O(nm)$  & $O(m + R)$ & $O(R)$ \\
+Tree shuttle & $O(n(S + M))$  & $O(n \cdot n_i + M)$ & $O(m \cdot d)$ \\
+RLE          & $O(n(S + M))$  & $O(m + R)$ & $O(m \cdot d + R)$ \\
 \bottomrule
 \end{tabular}
-\caption{Complexity comparison.  $n_i$: number of global intervals; $M$:
-total mismatches; $R$: total 1-runs; $d$: threading tree depth.  Tree
-shuttle replaces the $O(m)$ prefix-sum sweep of RLE with $O(n \cdot n_i)$
-tree propagation, where $n_i \ll m$ typically.  RLE's per-call work is
-embarrassingly parallel; tree shuttle has sequential dependencies in the
-cumulative-sum propagation for right multiply and in Pass~1 of left
-multiply.}
+\caption{Complexity comparison.  $S$: total segments; $M$: total
+mismatches; $n_i$: number of global intervals; $R$: total 1-runs; $d$:
+threading tree depth.  Preparation for tree shuttle and RLE visits each
+sample once, copying from the cached target genotype ($O(S)$ segment
+boundaries) and flipping at mismatches ($O(M)$).  The reference-counted
+cache limits peak memory to $O(m \cdot d)$ rather than $O(nm)$, since at
+most $d$ genotype buffers are alive simultaneously.  This makes preparation
+practical at biobank scale: for 500K haplotypes with tree depth $d \approx
+30$, the cache requires $\sim$30 genotype buffers rather than 500K.  Tree
+shuttle's per-call cost replaces the $O(m)$ prefix-sum sweep of RLE with
+$O(n \cdot n_i)$ tree propagation, where $n_i \ll m$ typically.}
 \label{tab:complexity}
 \end{table}
 
