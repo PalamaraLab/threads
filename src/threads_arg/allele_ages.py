@@ -29,6 +29,16 @@ def _batch_worker(instructions):
     return _estimate_ages_cpp(instructions)
 
 def estimate_ages(instructions, num_batches, num_threads):
+    """Estimate allele ages from threading instructions using parallel batches.
+
+    Args:
+        instructions: ThreadingInstructions object.
+        num_batches: Number of genomic sub-ranges to split into (0 = auto).
+        num_threads: Maximum number of worker processes.
+
+    Returns:
+        List of allele age estimates, one per site.
+    """
     # Make sure we don't use more CPUs than requested
     if not num_threads:
         num_threads = 1
@@ -62,6 +72,7 @@ def estimate_ages(instructions, num_batches, num_threads):
     return allele_age_estimates
 
 def estimate_allele_ages(threads, out, num_threads):
+    """CLI entry point: estimate allele ages and write to a TSV file."""
     logging.info("Starting allele age estimation with the following parameters:")
     logging.info(f"threads:     {threads}")
     logging.info(f"out:         {out}")

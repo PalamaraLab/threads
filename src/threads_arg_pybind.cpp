@@ -161,11 +161,16 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def_readonly("num_samples", &ThreadingInstructions::num_samples)
       .def_readonly("start", &ThreadingInstructions::start)
       .def_readonly("end", &ThreadingInstructions::end)
-      .def("all_starts", &ThreadingInstructions::all_starts)
-      .def("all_tmrcas", &ThreadingInstructions::all_tmrcas)
-      .def("all_targets", &ThreadingInstructions::all_targets)
-      .def("all_mismatches", &ThreadingInstructions::all_mismatches)
-      .def("sub_range", &ThreadingInstructions::sub_range)
+      .def("all_starts", &ThreadingInstructions::all_starts,
+           "Return all segment start positions (bp) as a flat list, concatenated across samples.")
+      .def("all_tmrcas", &ThreadingInstructions::all_tmrcas,
+           "Return all segment TMRCAs (generations) as a flat list, concatenated across samples.")
+      .def("all_targets", &ThreadingInstructions::all_targets,
+           "Return all segment target sample indices as a flat list, concatenated across samples.")
+      .def("all_mismatches", &ThreadingInstructions::all_mismatches,
+           "Return all mismatch site indices as a flat list, concatenated across samples.")
+      .def("sub_range", &ThreadingInstructions::sub_range,
+           "Return a new ThreadingInstructions restricted to sites in [start_bp, end_bp].")
       .def("add_variants", [](const ThreadingInstructions& self,
               const std::vector<int>& new_positions,
               py::array_t<int, py::array::c_style | py::array::forcecast> geno_arr) {

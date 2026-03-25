@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 def partial_viterbi(pgen, mode, num_samples_hap, physical_positions, genetic_positions, demography, mu, sample_batch, s_match_group, match_cm_positions, max_sample_batch_size, num_threads, thread_id):
-    """Parallelized ARG inference sub-routine"""
+    """Parallelized ARG inference sub-routine: thread a batch of samples against a shared panel."""
     start_time = time.time()
     # Force logging to go straight to stdout, instead of into ray tmp files
     logging.shutdown()

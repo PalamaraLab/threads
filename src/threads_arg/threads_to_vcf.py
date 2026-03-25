@@ -3,6 +3,13 @@ from .utils import read_variant_metadata
 from threads_arg import VCFWriter
 
 def threads_to_vcf(threads, samples=None, variants=None):
+    """Write threading instructions to stdout in VCF format.
+
+    Args:
+        threads: Path to .threads file.
+        samples: Optional path to file with one sample ID per line.
+        variants: Optional path to .bim or .pvar with variant metadata.
+    """
     if samples is None:
         try:
             sample_names = load_sample_names(threads)
@@ -21,7 +28,7 @@ def threads_to_vcf(threads, samples=None, variants=None):
         assert variants.endswith(".bim") or variants.endswith(".pvar")
         if variants.endswith(".bim"):
             variant_metadata = read_variant_metadata(variants[:-4] + ".pgen")
-        if variants.endswith(".pvar"):
+        elif variants.endswith(".pvar"):
             variant_metadata = read_variant_metadata(variants[:-5] + ".pgen")
 
     instructions = load_instructions(threads)

@@ -107,6 +107,7 @@ def make_recombination_from_map_and_pgen(map_file, pgen_file, expected_chrom):
     return cm_out, physical_positions
 
 def read_positions_and_ids(pgen):
+    """Read variant positions and IDs from the .bim or .pvar companion of a .pgen file."""
     pvar = pgen.replace("pgen", "pvar")
     bim = pgen.replace("pgen", "bim")
 
@@ -234,6 +235,7 @@ def make_constant_recombination_from_pgen(pgen_file, rho):
     return cm_out, physical_positions
 
 def read_sample_names(pgen):
+    """Read sample names from the .fam or .psam companion of a .pgen file."""
     """
     Read the sample names corresponding to the input pgen
     """
@@ -269,6 +271,7 @@ def read_sample_names(pgen):
 
 
 def parse_demography(demography):
+    """Parse a two-column demography file (time, Ne) into lists."""
     times, sizes = [], []
     with open(demography) as f:
         for line in f:
@@ -279,13 +282,13 @@ def parse_demography(demography):
     return times, sizes
 
 
-def split_list(list, n):
-    """Yield n number of sequential chunks from l."""
+def split_list(items, n):
+    """Split items into n roughly equal sequential chunks."""
     sublists = []
-    d, r = divmod(len(list), n)
+    d, r = divmod(len(items), n)
     for i in range(n):
         si = (d+1)*(i if i < r else r) + d*(0 if i < r else i - r)
-        sublists.append(list[si:si+(d+1 if i < r else d)])
+        sublists.append(items[si:si+(d+1 if i < r else d)])
     return sublists
 
 

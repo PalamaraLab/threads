@@ -25,6 +25,15 @@ from threads_arg import (
 
 
 def serialize_instructions(instructions, out, variant_metadata=None, allele_ages=None, sample_names=None):
+    """Serialize ThreadingInstructions to a .threads file.
+
+    Args:
+        instructions: ThreadingInstructions object.
+        out: Output file path (without extension).
+        variant_metadata: Optional VariantMetadata with CHROM/POS/ID/REF/ALT/QUAL/FILTER.
+        allele_ages: Optional list of allele age estimates per site.
+        sample_names: Optional list of sample names (one per diploid individual).
+    """
     positions = instructions.positions
 
     metadata_cols = []
@@ -46,10 +55,12 @@ def serialize_instructions(instructions, out, variant_metadata=None, allele_ages
 
 
 def load_instructions(threads):
+    """Load ThreadingInstructions from a .threads file."""
     return _deserialize_threads(threads)
 
 
 def load_metadata(threads):
+    """Load variant metadata (CHROM, POS, ID, REF, ALT, QUAL, FILTER) from a .threads file."""
     from .utils import VariantMetadata
     cols = _read_threads_metadata(threads)
     columns = ["CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER"]
@@ -57,4 +68,5 @@ def load_metadata(threads):
 
 
 def load_sample_names(threads):
+    """Load sample names from a .threads file."""
     return _read_threads_sample_names(threads)
