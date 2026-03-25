@@ -1192,17 +1192,32 @@ void ThreadingInstructions::prepare_tree_multiply() {
     tree_seg_first_ivl.push_back(0);
 
     // ── Phase 3: Precompute mismatch signs and carry values ─────────────
-    // Uses temporary reference-counted genotype cache.
-    // Peak memory: O(m * max_active_targets) instead of O(n * m).
+    // Lazy chain tracing: compute genotype at specific sites by tracing
+    // the threading chain to sample 0 (XOR parity of mismatches along
+    // the path). Cost: O(M_total * d) where d = tree depth.
+    // No genotype buffer materialized, no O(n*m) work.
 
-    // Count references: how many future samples use each target
-    std::vector<int> ref_count(n, 0);
-    for (int i = 1; i < n; i++) {
-        std::set<int> seen;
-        for (int t : instructions[i].targets) {
-            if (t != i && seen.insert(t).second) ref_count[t]++;
+    // Helper: compute genotype of sample at a specific site by tracing
+    // the threading chain to sample 0.
+    // Cost: O(d * log(S_max)) where d = chain depth, S_max = max segments.
+    auto genotype_at_site = [&](int sample, int site) -> int {
+        int parity = 0;
+        int cur = sample;
+        while (cur > 0) {
+            const auto& instr = instructions[cur];
+            // Find segment containing this site
+            int seg = static_cast<int>(
+                std::upper_bound(instr.starts.begin(), instr.starts.end(),
+                                 positions[site]) - instr.starts.begin()) - 1;
+            // Check if site is a mismatch (mismatches are sorted site indices)
+            if (std::binary_search(instr.mismatches.begin(),
+                                   instr.mismatches.end(), site)) {
+                parity ^= 1;
+            }
+            cur = instr.targets[seg];
         }
-    }
+        return tree_ref_genome[site] ^ parity;
+    };
 
     // Allocate mismatch sign storage
     tree_mm_offset.resize(n);
@@ -1217,88 +1232,50 @@ void ThreadingInstructions::prepare_tree_multiply() {
     // Allocate carry storage
     tree_carry.assign(static_cast<size_t>(n) * ni, 0);
 
-    // Reference-counted genotype cache
-    std::unordered_map<int, std::vector<uint8_t>> geno_cache;
-    std::vector<uint8_t> geno_buf(m, 0);
+    // Sample 0: carry values from ref_genome
+    for (int j = 0; j < ni; j++) {
+        tree_carry[j] = static_cast<int8_t>(tree_ref_genome[tree_ivl_end[j] - 1]);
+    }
 
-    for (int i = 0; i < n; i++) {
+    // Samples 1..n-1: compute mismatch signs via chain tracing,
+    // carry values only for self-ref intervals
+    for (int i = 1; i < n; i++) {
         const int* mm_data = instructions[i].mismatches.data();
         const int n_mm = static_cast<int>(instructions[i].mismatches.size());
 
-        if (i == 0) {
-            // Sample 0: genotype = ref_genome
-            for (int s = 0; s < m; s++) geno_buf[s] = static_cast<uint8_t>(tree_ref_genome[s]);
-        } else {
-            // Build genotype from target + mismatches
-            int carry = 0;
-            for (int j = 0; j < ni; j++) {
-                const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
-                const int target = instructions[i].targets[seg];
-                const int a = tree_ivl_start[j];
-                const int b = tree_ivl_end[j];
-
-                if (target != i) {
-                    const auto& tgt = geno_cache.at(target);
-                    std::memcpy(&geno_buf[a], &tgt[a], b - a);
-                    // Flip at mismatches
-                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
-                    const int* hi = std::lower_bound(mm_data, mm_data + n_mm, b);
-                    for (const int* it = lo; it != hi; ++it) {
-                        geno_buf[*it] ^= 1;
-                    }
-                    carry = geno_buf[b - 1];
-                } else {
-                    // Self-ref: carry forward, flip at mismatches
-                    const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
-                    const int* hi = std::lower_bound(mm_data, mm_data + n_mm, b);
-                    const int* it = lo;
-                    for (int s = a; s < b; s++) {
-                        if (it != hi && *it == s) {
-                            carry ^= 1;
-                            ++it;
-                        }
-                        geno_buf[s] = static_cast<uint8_t>(carry);
-                    }
-                }
+        // Compute mismatch correction signs and interval mapping
+        for (int k = 0; k < n_mm; k++) {
+            const int s = mm_data[k];
+            auto ivl_it = std::upper_bound(tree_ivl_start.begin(), tree_ivl_start.end(), s);
+            const int j = static_cast<int>(ivl_it - tree_ivl_start.begin()) - 1;
+            tree_mm_ivl[tree_mm_offset[i] + k] = j;
+            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
+            const int target = instructions[i].targets[seg];
+            if (target != i) {
+                // Lazy: trace chain from target to sample 0
+                const int g_target = genotype_at_site(target, s);
+                tree_mm_sign[tree_mm_offset[i] + k] = static_cast<int8_t>(1 - 2 * g_target);
             }
-
-            // Compute mismatch correction signs and interval mapping
-            for (int k = 0; k < n_mm; k++) {
-                const int s = mm_data[k];
-                // Find interval containing site s (precompute for multiply)
-                auto ivl_it = std::upper_bound(tree_ivl_start.begin(), tree_ivl_start.end(), s);
-                const int j = static_cast<int>(ivl_it - tree_ivl_start.begin()) - 1;
-                tree_mm_ivl[tree_mm_offset[i] + k] = j;
-                const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
-                const int target = instructions[i].targets[seg];
-                if (target != i) {
-                    const int g_target = geno_cache.at(target)[s];
-                    tree_mm_sign[tree_mm_offset[i] + k] = static_cast<int8_t>(1 - 2 * g_target);
-                }
-                // Self-ref mismatches: leave as 0 (not used)
-            }
+            // Self-ref mismatches: leave as 0 (not used)
         }
 
-        // Store carry at end of each interval
-        for (int j = 0; j < ni; j++) {
-            tree_carry[static_cast<size_t>(i) * ni + j] = static_cast<int8_t>(geno_buf[tree_ivl_end[j] - 1]);
-        }
-
-        // Cache genotype if still referenced
-        if (ref_count[i] > 0) {
-            geno_cache[i] = geno_buf;
-        }
-
-        // Decrement references and free unreferenced caches
-        if (i > 0) {
-            std::set<int> seen;
-            for (int t : instructions[i].targets) {
-                if (t != i && seen.insert(t).second) {
-                    if (--ref_count[t] == 0) {
-                        geno_cache.erase(t);
-                    }
+        // Carry values: only needed at intervals adjacent to self-ref segments.
+        // The multiply reads tree_carry[i*ni + j-1] when entering a self-ref
+        // interval j, so we need the carry at the end of interval j-1 regardless
+        // of whether j-1 was self-ref or non-self.
+        {
+            bool has_self_ref = false;
+            for (int seg = 0; seg < static_cast<int>(instructions[i].targets.size()); seg++) {
+                if (instructions[i].targets[seg] == i) { has_self_ref = true; break; }
+            }
+            if (has_self_ref) {
+                // Rare case: compute carry for all intervals of this sample
+                for (int j = 0; j < ni; j++) {
+                    tree_carry[static_cast<size_t>(i) * ni + j] =
+                        static_cast<int8_t>(genotype_at_site(i, tree_ivl_end[j] - 1));
                 }
             }
+            // Common case (no self-ref): carry is never read, leave as 0
         }
     }
 

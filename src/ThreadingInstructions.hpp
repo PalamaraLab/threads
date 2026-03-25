@@ -111,9 +111,9 @@ public:
     std::vector<double> right_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
 
     // Tree-propagation multiply: O(n * n_segments + total_mismatches) per call.
-    // One-time O(n * m) prepare step precomputes mismatch corrections using
-    // reference-counted genotype cache (peak memory ~O(m * tree_depth)).
-    // No genotype matrix retained after prepare.
+    // Prepare precomputes mismatch corrections via lazy chain tracing
+    // (O(M_total * d) where d = tree depth), avoiding O(n*m) genotype
+    // materialization. Peak memory O(n * n_intervals), no genotype cache.
     void prepare_tree_multiply();
     std::vector<double> right_multiply_tree(const std::vector<double>& x);
     std::vector<double> left_multiply_tree(const std::vector<double>& x);
