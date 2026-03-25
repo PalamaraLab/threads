@@ -374,12 +374,9 @@ def iterate_pgen(pgen, callback, sample_subset=None, start_idx=None, end_idx=Non
     batching to reduce memory usage and read time
     """
     # Initialize read batching
-    if sample_subset is None:
-        reader = pgenlib.PgenReader(pgen.encode())
-        num_samples = reader.get_raw_sample_ct()
-    else:
-        reader = pgenlib.PgenReader(pgen.encode(), sample_subset=sample_subset)
-        num_samples = len(sample_subset)
+    reader = pgenlib.PgenReader(pgen.encode(), sample_subset=sample_subset)
+    num_samples = reader.get_raw_sample_ct() if sample_subset is None else len(sample_subset)
+
     num_sites = reader.get_variant_ct()
     if start_idx is None:
         start_idx = 0

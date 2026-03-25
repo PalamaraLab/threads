@@ -32,6 +32,11 @@ ThreadsLowMem::ThreadsLowMem(const std::vector<int> _target_ids,
       physical_positions(_physical_positions), genetic_positions(_genetic_positions),
       sparse(_sparse), demography(Demography(ne, ne_times)) {
   num_samples = static_cast<int>(target_ids.size());
+  for (const int t : target_ids) {
+    if (t > max_sample_id) {
+      max_sample_id = t;
+    }
+  }
   if (physical_positions.size() != genetic_positions.size()) {
     throw std::runtime_error("Map lengths don't match.");
   }
@@ -179,6 +184,10 @@ void ThreadsLowMem::process_all_sites_viterbi(const std::vector<std::vector<int>
 
 void ThreadsLowMem::process_all_sites_viterbi_flat(const int32_t* data, int n_sites, int n_haps) {
   static_assert(sizeof(int) == sizeof(int32_t), "int and int32_t must be the same size");
+  if (n_haps <= max_sample_id) {
+    throw std::runtime_error(
+        "Genotype matrix should have at least " + std::to_string(max_sample_id) + " rows\n");
+  }
   const int prune_interval = 500;
   for (int s = 0; s < n_sites; s++) {
     const int* row = reinterpret_cast<const int*>(data + static_cast<std::size_t>(s) * n_haps);

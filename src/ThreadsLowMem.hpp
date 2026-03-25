@@ -73,6 +73,7 @@ public:
   double mean_bp_size = 0.0;
   std::unordered_map<int, ViterbiPath> paths;
   int num_samples = 0;
+  int max_sample_id = -1;
   int num_sites = 0;
   double mutation_rate = 0.0;
   std::vector<double> physical_positions;
