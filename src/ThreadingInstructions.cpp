@@ -18,9 +18,12 @@
 #include "GenotypeIterator.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <numeric>
+#include <random>
 #include <iostream>
 #include <limits>
 #include <set>
@@ -2207,4 +2210,573 @@ std::vector<double> ThreadingInstructions::left_multiply_tree_range(
       }
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// ARG traversal: visit_clades / visit_branches
+// ---------------------------------------------------------------------------
+//
+// Reconstructs the implicit coalescent tree from threading instructions at each
+// interval (contiguous region where no segment boundary changes the tree) and
+// enumerates clades/branches via union-find.
+
+namespace {
+
+struct SimpleUF {
+    std::vector<int> par;
+    std::vector<int> rnk;
+    std::vector<std::vector<int>> members;
+    std::vector<double> height;  // height of each root's subtree
+
+    explicit SimpleUF(int n) : par(n), rnk(n, 0), members(n), height(n, 0.0) {
+        for (int i = 0; i < n; i++) {
+            par[i] = i;
+            members[i] = {i};
+        }
+    }
+
+    int find(int x) {
+        while (par[x] != par[par[x]]) par[x] = par[par[x]];
+        while (par[x] != x) x = par[x];
+        return x;
+    }
+
+    // Merge sets containing a and b.  Returns root of merged set.
+    int unite(int a, int b) {
+        int ra = find(a), rb = find(b);
+        if (ra == rb) return ra;
+        if (rnk[ra] < rnk[rb]) std::swap(ra, rb);
+        par[rb] = ra;
+        if (rnk[ra] == rnk[rb]) rnk[ra]++;
+        members[ra].insert(members[ra].end(), members[rb].begin(), members[rb].end());
+        members[rb].clear();
+        return ra;
+    }
+
+    void reset(int n) {
+        for (int i = 0; i < n; i++) {
+            par[i] = i;
+            rnk[i] = 0;
+            members[i].clear();
+            members[i].push_back(i);
+            height[i] = 0.0;
+        }
+    }
+};
+
+struct Edge {
+    int child;
+    int parent;
+    double height;
+};
+
+// Find segment index for a sample at a given bp position via binary search.
+// instructions[i].starts contains bp positions.
+inline int segment_at_bp(const ThreadingInstruction& instr, int bp) {
+    if (instr.num_segments == 0) return -1;
+    auto it = std::upper_bound(instr.starts.begin(), instr.starts.end(), bp);
+    return static_cast<int>(it - instr.starts.begin()) - 1;
+}
+
+} // anonymous namespace
+
+
+void ThreadingInstructions::visit_clades(
+    std::function<void(const std::vector<int>&, double, int, int)> callback) const
+{
+    const int n = num_samples;
+    if (n == 0 || num_sites == 0) return;
+
+    // Collect all segment boundary bp positions across all samples
+    std::set<int> boundary_set;
+    boundary_set.insert(start);
+    for (int i = 0; i < n; i++) {
+        for (int s : instructions[i].starts) {
+            if (s > start && s < end)
+                boundary_set.insert(s);
+        }
+    }
+    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+
+    // Emit leaf clades once, spanning the full range
+    for (int i = 0; i < n; i++) {
+        callback({i}, 0.0, start, end);
+    }
+
+    SimpleUF uf(n);
+    std::vector<Edge> edges;
+    edges.reserve(n);
+
+    // Track previous interval's (target, tmrca) to skip re-processing identical trees
+    std::vector<int> prev_target(n, -2);
+    std::vector<double> prev_tmrca(n, -1.0);
+    std::vector<int> cur_target(n);
+    std::vector<double> cur_tmrca(n);
+
+    // Pending clades from the current identical-tree run
+    struct PendingClade { std::vector<int> desc; double height; int start_bp; };
+    std::vector<PendingClade> pending;
+
+    auto flush_pending = [&](int end_bp) {
+        for (auto& pc : pending)
+            callback(pc.desc, pc.height, pc.start_bp, end_bp);
+        pending.clear();
+    };
+
+    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
+        int bp_pos = boundaries[b];
+        int bp_next = (b + 1 < static_cast<int>(boundaries.size()))
+                        ? boundaries[b + 1] : end;
+
+        // Determine (target, tmrca) for each sample at this bp position
+        cur_target[0] = -1;
+        cur_tmrca[0] = 0.0;
+        for (int i = 1; i < n; i++) {
+            int seg = segment_at_bp(instructions[i], bp_pos);
+            if (seg < 0) { cur_target[i] = 0; cur_tmrca[i] = 0.0; continue; }
+            cur_target[i] = instructions[i].targets[seg];
+            cur_tmrca[i] = instructions[i].tmrcas[seg];
+        }
+
+        // Check if tree topology changed from previous interval
+        bool same = (b > 0);
+        if (same) {
+            for (int i = 1; i < n; i++) {
+                if (cur_target[i] != prev_target[i] || cur_tmrca[i] != prev_tmrca[i]) {
+                    same = false;
+                    break;
+                }
+            }
+        }
+
+        if (same) continue;
+
+        // Tree changed — flush previous run's clades
+        if (!pending.empty()) flush_pending(bp_pos);
+
+        // Save current state
+        std::swap(prev_target, cur_target);
+        std::swap(prev_tmrca, cur_tmrca);
+
+        // Build edges from this interval's threading state
+        edges.clear();
+        for (int i = 1; i < n; i++) {
+            if (prev_target[i] >= 0) {
+                edges.push_back({i, prev_target[i], prev_tmrca[i]});
+            }
+        }
+        std::sort(edges.begin(), edges.end(),
+                  [](const Edge& a, const Edge& b) { return a.height < b.height; });
+
+        // Union-find: build tree bottom-up, emit clades
+        uf.reset(n);
+        for (const auto& e : edges) {
+            int rc = uf.find(e.child);
+            int rp = uf.find(e.parent);
+            if (rc != rp) {
+                int root = uf.unite(rc, rp);
+                uf.height[root] = e.height;
+                auto& m = uf.members[root];
+                std::sort(m.begin(), m.end());
+                pending.push_back({m, e.height, bp_pos});
+            }
+        }
+    }
+
+    // Flush final run
+    flush_pending(end);
+}
+
+
+void ThreadingInstructions::visit_branches(
+    std::function<void(const std::vector<int>&, double, double, int, int)> callback) const
+{
+    const int n = num_samples;
+    if (n == 0 || num_sites == 0) return;
+
+    // Collect all segment boundary bp positions
+    std::set<int> boundary_set;
+    boundary_set.insert(start);
+    for (int i = 0; i < n; i++) {
+        for (int s : instructions[i].starts) {
+            if (s > start && s < end)
+                boundary_set.insert(s);
+        }
+    }
+    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+
+    SimpleUF uf(n);
+    std::vector<Edge> edges;
+    edges.reserve(n);
+
+    std::vector<int> prev_target(n, -2);
+    std::vector<double> prev_tmrca(n, -1.0);
+    std::vector<int> cur_target(n);
+    std::vector<double> cur_tmrca(n);
+
+    struct PendingBranch { std::vector<int> desc; double child_h; double parent_h; int start_bp; };
+    std::vector<PendingBranch> pending;
+
+    auto flush_pending = [&](int end_bp) {
+        for (auto& pb : pending)
+            callback(pb.desc, pb.child_h, pb.parent_h, pb.start_bp, end_bp);
+        pending.clear();
+    };
+
+    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
+        int bp_pos = boundaries[b];
+
+        cur_target[0] = -1;
+        cur_tmrca[0] = 0.0;
+        for (int i = 1; i < n; i++) {
+            int seg = segment_at_bp(instructions[i], bp_pos);
+            if (seg < 0) { cur_target[i] = 0; cur_tmrca[i] = 0.0; continue; }
+            cur_target[i] = instructions[i].targets[seg];
+            cur_tmrca[i] = instructions[i].tmrcas[seg];
+        }
+
+        bool same = (b > 0);
+        if (same) {
+            for (int i = 1; i < n; i++) {
+                if (cur_target[i] != prev_target[i] || cur_tmrca[i] != prev_tmrca[i]) {
+                    same = false;
+                    break;
+                }
+            }
+        }
+
+        if (same) continue;
+
+        if (!pending.empty()) flush_pending(bp_pos);
+
+        std::swap(prev_target, cur_target);
+        std::swap(prev_tmrca, cur_tmrca);
+
+        edges.clear();
+        for (int i = 1; i < n; i++) {
+            if (prev_target[i] >= 0)
+                edges.push_back({i, prev_target[i], prev_tmrca[i]});
+        }
+        std::sort(edges.begin(), edges.end(),
+                  [](const Edge& a, const Edge& b) { return a.height < b.height; });
+
+        uf.reset(n);
+        for (const auto& e : edges) {
+            int rc = uf.find(e.child);
+            int rp = uf.find(e.parent);
+            if (rc != rp) {
+                if (uf.height[rc] < e.height) {
+                    auto desc_c = uf.members[rc];
+                    std::sort(desc_c.begin(), desc_c.end());
+                    pending.push_back({desc_c, uf.height[rc], e.height, bp_pos});
+                }
+
+                if (uf.height[rp] < e.height) {
+                    auto desc_p = uf.members[rp];
+                    std::sort(desc_p.begin(), desc_p.end());
+                    pending.push_back({desc_p, uf.height[rp], e.height, bp_pos});
+                }
+
+                int root = uf.unite(rc, rp);
+                uf.height[root] = e.height;
+            }
+        }
+    }
+
+    flush_pending(end);
+}
+
+
+double ThreadingInstructions::total_volume() const {
+    const int n = num_samples;
+    if (n == 0 || num_sites == 0) return 0.0;
+
+    // Collect segment boundary bp positions
+    std::set<int> boundary_set;
+    boundary_set.insert(start);
+    for (int i = 0; i < n; i++) {
+        for (int s : instructions[i].starts) {
+            if (s > start && s < end)
+                boundary_set.insert(s);
+        }
+    }
+    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+
+    // Lightweight union-find: only tracks component heights, no member lists
+    std::vector<int> parent_uf(n);
+    std::vector<int> rank_uf(n, 0);
+    std::vector<double> comp_height(n, 0.0);
+
+    auto find = [&](int x) {
+        while (parent_uf[x] != x) { parent_uf[x] = parent_uf[parent_uf[x]]; x = parent_uf[x]; }
+        return x;
+    };
+    auto unite = [&](int a, int b) -> int {
+        if (rank_uf[a] < rank_uf[b]) std::swap(a, b);
+        parent_uf[b] = a;
+        if (rank_uf[a] == rank_uf[b]) rank_uf[a]++;
+        return a;
+    };
+
+    struct LightEdge { int child; int parent; double height; };
+    std::vector<LightEdge> edges;
+    edges.reserve(n);
+
+    std::vector<int> prev_target(n, -2);
+    std::vector<double> prev_tmrca(n, -1.0);
+
+    double vol = 0.0;
+    double prev_vol = 0.0;
+
+    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
+        int bp_pos = boundaries[b];
+        int bp_next = (b + 1 < static_cast<int>(boundaries.size()))
+                        ? boundaries[b + 1] : end;
+        double span = static_cast<double>(bp_next - bp_pos);
+
+        // Check if topology changed
+        bool same = (b > 0);
+        edges.clear();
+        for (int i = 1; i < n; i++) {
+            int seg = segment_at_bp(instructions[i], bp_pos);
+            int tgt = (seg < 0) ? 0 : instructions[i].targets[seg];
+            double tmr = (seg < 0) ? 0.0 : instructions[i].tmrcas[seg];
+            if (same && (tgt != prev_target[i] || tmr != prev_tmrca[i]))
+                same = false;
+            prev_target[i] = tgt;
+            prev_tmrca[i] = tmr;
+            if (tgt >= 0)
+                edges.push_back({i, tgt, tmr});
+        }
+
+        if (same) {
+            vol += prev_vol * span;
+            continue;
+        }
+
+        // Build tree, sum branch lengths
+        for (int i = 0; i < n; i++) { parent_uf[i] = i; rank_uf[i] = 0; comp_height[i] = 0.0; }
+        std::sort(edges.begin(), edges.end(),
+                  [](const LightEdge& a, const LightEdge& b) { return a.height < b.height; });
+
+        double interval_vol = 0.0;
+        for (const auto& e : edges) {
+            int rc = find(e.child);
+            int rp = find(e.parent);
+            if (rc != rp) {
+                interval_vol += (e.height - comp_height[rc]) + (e.height - comp_height[rp]);
+                int root = unite(rc, rp);
+                comp_height[root] = e.height;
+            }
+        }
+        prev_vol = interval_vol;
+        vol += interval_vol * span;
+    }
+    return vol;
+}
+
+
+std::vector<double> ThreadingInstructions::allele_frequency_spectrum() const {
+    const int n = num_samples;
+    if (n == 0 || num_sites == 0) return std::vector<double>(n + 1, 0.0);
+
+    std::set<int> boundary_set;
+    boundary_set.insert(start);
+    for (int i = 0; i < n; i++)
+        for (int s : instructions[i].starts)
+            if (s > start && s < end)
+                boundary_set.insert(s);
+    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+
+    // Union-find with component heights and sizes (no member lists)
+    std::vector<int> uf_parent(n), uf_rank(n, 0), uf_size(n, 1);
+    std::vector<double> uf_height(n, 0.0);
+
+    auto find = [&](int x) {
+        while (uf_parent[x] != x) { uf_parent[x] = uf_parent[uf_parent[x]]; x = uf_parent[x]; }
+        return x;
+    };
+    auto unite = [&](int a, int b) -> int {
+        if (uf_rank[a] < uf_rank[b]) std::swap(a, b);
+        uf_parent[b] = a;
+        uf_size[a] += uf_size[b];
+        if (uf_rank[a] == uf_rank[b]) uf_rank[a]++;
+        return a;
+    };
+
+    struct LightEdge { int child; int parent; double height; };
+    std::vector<LightEdge> edges;
+    edges.reserve(n);
+
+    std::vector<int> prev_target(n, -2);
+    std::vector<double> prev_tmrca(n, -1.0);
+
+    std::vector<double> afs(n + 1, 0.0);
+    // Cache per-interval AFS contribution (volume per bin, unscaled by span)
+    std::vector<double> prev_afs_contrib(n + 1, 0.0);
+
+    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
+        int bp_pos = boundaries[b];
+        int bp_next = (b + 1 < static_cast<int>(boundaries.size()))
+                        ? boundaries[b + 1] : end;
+        double span = static_cast<double>(bp_next - bp_pos);
+
+        bool same = (b > 0);
+        edges.clear();
+        for (int i = 1; i < n; i++) {
+            int seg = segment_at_bp(instructions[i], bp_pos);
+            int tgt = (seg < 0) ? 0 : instructions[i].targets[seg];
+            double tmr = (seg < 0) ? 0.0 : instructions[i].tmrcas[seg];
+            if (same && (tgt != prev_target[i] || tmr != prev_tmrca[i]))
+                same = false;
+            prev_target[i] = tgt;
+            prev_tmrca[i] = tmr;
+            if (tgt >= 0)
+                edges.push_back({i, tgt, tmr});
+        }
+
+        if (same) {
+            for (int k = 0; k <= n; k++)
+                afs[k] += prev_afs_contrib[k] * span;
+            continue;
+        }
+
+        for (int i = 0; i < n; i++) { uf_parent[i] = i; uf_rank[i] = 0; uf_size[i] = 1; uf_height[i] = 0.0; }
+        std::sort(edges.begin(), edges.end(),
+                  [](const LightEdge& a, const LightEdge& b) { return a.height < b.height; });
+
+        std::fill(prev_afs_contrib.begin(), prev_afs_contrib.end(), 0.0);
+        for (const auto& e : edges) {
+            int rc = find(e.child);
+            int rp = find(e.parent);
+            if (rc != rp) {
+                int sc = uf_size[rc], sp = uf_size[rp];
+                double hc = uf_height[rc], hp = uf_height[rp];
+                if (hc < e.height) prev_afs_contrib[sc] += e.height - hc;
+                if (hp < e.height) prev_afs_contrib[sp] += e.height - hp;
+                int root = unite(rc, rp);
+                uf_height[root] = e.height;
+            }
+        }
+        for (int k = 0; k <= n; k++)
+            afs[k] += prev_afs_contrib[k] * span;
+    }
+    return afs;
+}
+
+
+ThreadingInstructions::AssociationResult
+ThreadingInstructions::association_diploid(const std::vector<double>& phenotypes,
+                                            double p_threshold) const
+{
+    const int n = num_samples;
+    const int n_dip = n / 2;
+    AssociationResult result;
+    if (n == 0 || num_sites == 0 || static_cast<int>(phenotypes.size()) != n_dip)
+        return result;
+
+    // Precompute phenotype stats
+    double y_sum = 0.0, y_sum2 = 0.0;
+    for (int i = 0; i < n_dip; i++) { y_sum += phenotypes[i]; y_sum2 += phenotypes[i] * phenotypes[i]; }
+    double y_mean = y_sum / n_dip;
+    double y_var = y_sum2 / n_dip - y_mean * y_mean;
+    if (y_var <= 0.0) return result;
+
+    // chi2 threshold from p-value (1 dof): chi2 = qchisq(1-p).
+    // Use Abramowitz & Stegun approximation for the inverse normal, then square it.
+    // For p = 5e-8, chi2 ~ 29.72
+    double log_p = std::log(p_threshold);
+    // Wilson-Hilferty approximation for chi2 inverse CDF (1 dof):
+    // z = -sqrt(-2 * log(p/2))  (one-sided normal quantile)
+    double z = -std::sqrt(-2.0 * std::log(p_threshold * 0.5));
+    // Refine: Rational approximation for upper-tail normal quantile
+    double t = std::sqrt(-2.0 * std::log(p_threshold * 0.5));
+    z = t - (2.515517 + 0.802853 * t + 0.010328 * t * t) /
+            (1.0 + 1.432788 * t + 0.189269 * t * t + 0.001308 * t * t * t);
+    double chi2_thresh = z * z;
+
+    // Diploid phenotype sums indexed by haploid sample: pheno_val[hap] = phenotypes[hap/2]
+    std::vector<double> pheno_dip(n_dip);
+    for (int i = 0; i < n_dip; i++) pheno_dip[i] = phenotypes[i];
+
+    // Use visit_clades to test each clade
+    visit_clades([&](const std::vector<int>& descendants, double height, int start_bp, int end_bp) {
+        int nd = static_cast<int>(descendants.size());
+        if (nd < 2 || nd >= n - 1) return; // skip trivial clades
+
+        // Sum phenotype over diploid individuals with at least one haploid in clade
+        // For diploid: dosage = count of haploids in clade per individual
+        // Simple approach: sum dosage * phenotype
+        double dosage_sum = 0.0;
+        double dosage_sum2 = 0.0;
+        int dosage_count = 0;
+        // Mark which diploid individuals have haploids in this clade
+        // Use dosage: for each diploid i, dosage = #{hap in clade : hap/2 == i}
+        std::vector<int> dosage(n_dip, 0);
+        for (int h : descendants) dosage[h / 2]++;
+
+        double gsum = 0.0, g2sum = 0.0, gy_sum = 0.0;
+        for (int i = 0; i < n_dip; i++) {
+            double g = dosage[i];
+            gsum += g;
+            g2sum += g * g;
+            gy_sum += g * pheno_dip[i];
+        }
+        double g_mean = gsum / n_dip;
+        double g_var = g2sum / n_dip - g_mean * g_mean;
+        if (g_var <= 0.0) return;
+
+        // Pearson correlation -> chi2 with 1 dof
+        double cov = gy_sum / n_dip - g_mean * y_mean;
+        double r2 = (cov * cov) / (g_var * y_var);
+        double chi2 = r2 * n_dip;
+
+        if (chi2 >= chi2_thresh) {
+            // p-value: survival function of chi2(1) = 2 * Phi(-sqrt(chi2))
+            // Use erfc for numerical stability
+            double pval = std::erfc(std::sqrt(chi2 * 0.5));
+            int midpoint = (start_bp + end_bp) / 2;
+            result.position.push_back(midpoint);
+            result.chi2.push_back(chi2);
+            result.pvalue.push_back(pval);
+            result.n_descendants.push_back(nd);
+        }
+    });
+
+    return result;
+}
+
+
+ThreadingInstructions::MutationResult
+ThreadingInstructions::generate_mutations(double mutation_rate, int seed) const
+{
+    MutationResult result;
+    result.n_mutations = 0;
+    const int n = num_samples;
+    if (n == 0 || num_sites == 0) return result;
+
+    std::mt19937 rng(seed);
+
+    visit_branches([&](const std::vector<int>& descendants, double child_h, double parent_h,
+                        int start_bp, int end_bp) {
+        double branch_length = parent_h - child_h;
+        double span = static_cast<double>(end_bp - start_bp);
+        double expected = mutation_rate * branch_length * span;
+        std::poisson_distribution<int> pois(expected);
+        int n_mut = pois(rng);
+
+        std::uniform_real_distribution<double> pos_dist(start_bp, end_bp);
+        for (int m = 0; m < n_mut; m++) {
+            int pos = static_cast<int>(pos_dist(rng));
+            result.positions.push_back(pos);
+            // Build genotype row: 1 for descendants, 0 otherwise
+            int offset = result.n_mutations * n;
+            result.genotypes.resize(offset + n, 0);
+            for (int d : descendants)
+                result.genotypes[offset + d] = 1;
+            result.n_mutations++;
+        }
+    });
+
+    return result;
 }

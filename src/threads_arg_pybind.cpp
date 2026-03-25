@@ -237,7 +237,33 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            py::call_guard<py::gil_scoped_release>())
       .def("left_multiply_tree_range", &ThreadingInstructions::left_multiply_tree_range,
            py::arg("x"), py::arg("site_start"), py::arg("site_end"),
-           py::call_guard<py::gil_scoped_release>());
+           py::call_guard<py::gil_scoped_release>())
+      .def("visit_clades", [](const ThreadingInstructions& self, py::function callback) {
+        self.visit_clades([&](const std::vector<int>& descendants, double height,
+                              int start_bp, int end_bp) {
+          py::gil_scoped_acquire acquire;
+          callback(descendants, height, start_bp, end_bp);
+        });
+      }, py::arg("callback"))
+      .def("visit_branches", [](const ThreadingInstructions& self, py::function callback) {
+        self.visit_branches([&](const std::vector<int>& descendants, double child_height,
+                                double parent_height, int start_bp, int end_bp) {
+          py::gil_scoped_acquire acquire;
+          callback(descendants, child_height, parent_height, start_bp, end_bp);
+        });
+      }, py::arg("callback"))
+      .def("total_volume", &ThreadingInstructions::total_volume)
+      .def("allele_frequency_spectrum", &ThreadingInstructions::allele_frequency_spectrum)
+      .def("association_diploid", [](const ThreadingInstructions& self,
+              const std::vector<double>& phenotypes, double p_threshold) {
+        auto r = self.association_diploid(phenotypes, p_threshold);
+        return py::make_tuple(r.position, r.chi2, r.pvalue, r.n_descendants);
+      }, py::arg("phenotypes"), py::arg("p_threshold") = 5e-8)
+      .def("generate_mutations", [](const ThreadingInstructions& self,
+              double mutation_rate, int seed) {
+        auto r = self.generate_mutations(mutation_rate, seed);
+        return py::make_tuple(r.positions, r.genotypes, r.n_mutations);
+      }, py::arg("mutation_rate"), py::arg("seed") = 42);
 
   py::class_<ConsistencyWrapper>(m, "ConsistencyWrapper")
       .def(py::init<const std::vector<std::vector<int>>&, const std::vector<std::vector<double>>&, const std::vector<std::vector<int>>&,

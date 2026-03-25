@@ -19,6 +19,7 @@
 
 #include "ViterbiLowMem.hpp"
 
+#include <functional>
 #include <limits>
 #include <sstream>
 #include <vector>
@@ -146,6 +147,55 @@ public:
     // left:  X is (num_samples, k), returns (num_sites, k)
     std::vector<double> right_multiply_rle_batch(const std::vector<double>& x_flat, int k);
     std::vector<double> left_multiply_rle_batch(const std::vector<double>& x_flat, int k);
+
+    // ARG traversals directly on threading instructions (no materialized ARG).
+    //
+    // visit_clades: enumerates all clades (internal nodes + leaves) in the
+    // implicit threading tree, interval by interval.
+    // callback(descendants, height, start_bp, end_bp)
+    //   descendants: sorted vector of leaf sample indices under this clade
+    //   height: coalescence height of the clade (0 for leaves)
+    //   start_bp, end_bp: physical position range
+    void visit_clades(std::function<void(const std::vector<int>&, double, int, int)> callback) const;
+
+    // visit_branches: enumerates all branches (edges between nodes).
+    // callback(descendants, child_height, parent_height, start_bp, end_bp)
+    //   descendants: sorted vector of leaf sample indices below this branch
+    //   child_height: height of the child node (0 for leaf branches)
+    //   parent_height: height of the parent node
+    void visit_branches(std::function<void(const std::vector<int>&, double, double, int, int)> callback) const;
+
+    // ARG summary statistics (optimized, no full descendant tracking).
+    //
+    // total_volume: sum of (parent_height - child_height) * (end_bp - start_bp).
+    double total_volume() const;
+    //
+    // allele_frequency_spectrum: afs[k] = total branch volume for branches
+    //   with exactly k descendants, for k in 0..num_samples.
+    std::vector<double> allele_frequency_spectrum() const;
+    //
+    // association_diploid: for each clade, compute chi-square association
+    //   statistic against a diploid phenotype vector. Returns (positions,
+    //   chi2_stats, p_values, n_descendants) for all clades with p < threshold.
+    //   phenotypes has length num_samples/2.
+    struct AssociationResult {
+        std::vector<int> position;         // midpoint bp
+        std::vector<double> chi2;          // chi-square statistic
+        std::vector<double> pvalue;        // p-value
+        std::vector<int> n_descendants;    // clade size (haploid)
+    };
+    AssociationResult association_diploid(const std::vector<double>& phenotypes,
+                                          double p_threshold = 5e-8) const;
+    //
+    // generate_mutations: Poisson-sample mutations on branches proportional to
+    //   branch volume. Returns (positions_bp, genotype_flat) where genotype_flat
+    //   is row-major (n_mutations × num_samples) with 0/1 values.
+    struct MutationResult {
+        std::vector<int> positions;
+        std::vector<int> genotypes;  // flat row-major, n_mutations * num_samples
+        int n_mutations;
+    };
+    MutationResult generate_mutations(double mutation_rate, int seed = 42) const;
 
     // Precompute and cache the dense genotype matrix (num_sites × num_samples, row-major).
     // Subsequent left_multiply/right_multiply calls use the cached matrix.
