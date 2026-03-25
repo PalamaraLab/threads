@@ -19,33 +19,17 @@ typically 10-100x smaller than m.
    method. Uses reference-counted genotype cache with O(m * tree_depth) peak
    memory.
 
-.. method:: ThreadingInstructions.right_multiply_tree(x)
+.. method:: ThreadingInstructions.right_multiply_tree(X)
 
-   Compute G @ x. x has length ``num_sites``. Returns list of length
-   ``num_samples``.
+   Compute G @ X. Accepts 1D array/list ``(num_sites,)`` or 2D array
+   ``(num_sites, k)``. Returns numpy array of matching shape:
+   ``(num_samples,)`` or ``(num_samples, k)``.
 
-.. method:: ThreadingInstructions.left_multiply_tree(x)
+.. method:: ThreadingInstructions.left_multiply_tree(X)
 
-   Compute G.T @ x. x has length ``num_samples``. Returns list of length
-   ``num_sites``.
-
-.. method:: ThreadingInstructions.right_multiply_tree_batch(x_flat, k)
-
-   Compute G @ X for k vectors. ``x_flat`` has length ``num_sites * k``.
-   Returns flat list of length ``num_samples * k``.
-
-.. method:: ThreadingInstructions.left_multiply_tree_batch(x_flat, k)
-
-   Compute G.T @ X for k vectors. ``x_flat`` has length ``num_samples * k``.
-   Returns flat list of length ``num_sites * k``.
-
-.. method:: ThreadingInstructions.right_multiply_tree_batch_numpy(x_flat, k)
-
-   Same as ``right_multiply_tree_batch`` but accepts and returns numpy arrays.
-
-.. method:: ThreadingInstructions.left_multiply_tree_batch_numpy(x_flat, k)
-
-   Same as ``left_multiply_tree_batch`` but accepts and returns numpy arrays.
+   Compute G.T @ X. Accepts 1D array/list ``(num_samples,)`` or 2D array
+   ``(num_samples, k)``. Returns numpy array of matching shape:
+   ``(num_sites,)`` or ``(num_sites, k)``.
 
 .. method:: ThreadingInstructions.right_multiply_tree_range(x, site_start, site_end)
 

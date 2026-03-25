@@ -231,44 +231,64 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply,
            "Precompute interval-tree structure for tree multiply. "
            "O(n*n_intervals + mismatches) per multiply; preferred over RLE for large m.")
-      .def("right_multiply_tree", &ThreadingInstructions::right_multiply_tree, py::arg("x"),
-           py::call_guard<py::gil_scoped_release>(),
-           "Compute G x via tree shuttle. x has length num_sites. Returns vector of length num_samples.")
-      .def("left_multiply_tree", &ThreadingInstructions::left_multiply_tree, py::arg("x"),
-           py::call_guard<py::gil_scoped_release>(),
-           "Compute G^T x via tree shuttle. x has length num_samples. Returns vector of length num_sites.")
-      .def("right_multiply_tree_batch", &ThreadingInstructions::right_multiply_tree_batch, py::arg("x_flat"), py::arg("k"),
-           py::call_guard<py::gil_scoped_release>(),
-           "Compute G X via tree shuttle for k vectors. x_flat has length num_sites*k. Returns flat array of length num_samples*k.")
-      .def("left_multiply_tree_batch", &ThreadingInstructions::left_multiply_tree_batch, py::arg("x_flat"), py::arg("k"),
-           py::call_guard<py::gil_scoped_release>(),
-           "Compute G^T X via tree shuttle for k vectors. x_flat has length num_samples*k. Returns flat array of length num_sites*k.")
-      .def("right_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
+      .def("right_multiply_tree", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
         auto buf = arr.request();
-        if (buf.ndim != 1 || static_cast<int>(buf.shape[0]) != self.num_sites * k)
-            throw std::runtime_error("Input must be 1D array of length num_sites * k");
-        std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
-        auto result = self.right_multiply_tree_batch(x_flat, k);
-        py::array_t<double> out(static_cast<size_t>(result.size()));
-        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-        return out;
-      }, py::arg("x_flat"), py::arg("k"),
-           "Compute G X via tree shuttle for k vectors. Accepts numpy array. Returns numpy array of length num_samples*k.")
-      .def("left_multiply_tree_batch_numpy", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr, int k) {
+        if (buf.ndim == 1) {
+            if (static_cast<int>(buf.shape[0]) != self.num_sites)
+                throw std::runtime_error("1D input must have length num_sites");
+            std::vector<double> x(static_cast<double*>(buf.ptr),
+                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
+            auto result = self.right_multiply_tree(x);
+            py::array_t<double> out(static_cast<size_t>(result.size()));
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else if (buf.ndim == 2) {
+            int m = static_cast<int>(buf.shape[0]);
+            int k = static_cast<int>(buf.shape[1]);
+            if (m != self.num_sites)
+                throw std::runtime_error("First dimension must be num_sites");
+            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                       static_cast<double*>(buf.ptr) + buf.size);
+            auto result = self.right_multiply_tree_batch(x_flat, k);
+            py::array_t<double> out({self.num_samples, k});
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else {
+            throw std::runtime_error("Input must be 1D (num_sites,) or 2D (num_sites, k)");
+        }
+      }, py::arg("X"),
+           "Compute G @ X via tree shuttle. X is (num_sites,) or (num_sites, k). "
+           "Returns (num_samples,) or (num_samples, k) numpy array.")
+      .def("left_multiply_tree", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
         auto buf = arr.request();
-        if (buf.ndim != 1 || static_cast<int>(buf.shape[0]) != self.num_samples * k)
-            throw std::runtime_error("Input must be 1D array of length num_samples * k");
-        std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
-        auto result = self.left_multiply_tree_batch(x_flat, k);
-        py::array_t<double> out(static_cast<size_t>(result.size()));
-        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-        return out;
-      }, py::arg("x_flat"), py::arg("k"),
-           "Compute G^T X via tree shuttle for k vectors. Accepts numpy array. Returns numpy array of length num_sites*k.")
+        if (buf.ndim == 1) {
+            if (static_cast<int>(buf.shape[0]) != self.num_samples)
+                throw std::runtime_error("1D input must have length num_samples");
+            std::vector<double> x(static_cast<double*>(buf.ptr),
+                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
+            auto result = self.left_multiply_tree(x);
+            py::array_t<double> out(static_cast<size_t>(result.size()));
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else if (buf.ndim == 2) {
+            int n = static_cast<int>(buf.shape[0]);
+            int k = static_cast<int>(buf.shape[1]);
+            if (n != self.num_samples)
+                throw std::runtime_error("First dimension must be num_samples");
+            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                       static_cast<double*>(buf.ptr) + buf.size);
+            auto result = self.left_multiply_tree_batch(x_flat, k);
+            py::array_t<double> out({self.num_sites, k});
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else {
+            throw std::runtime_error("Input must be 1D (num_samples,) or 2D (num_samples, k)");
+        }
+      }, py::arg("X"),
+           "Compute G.T @ X via tree shuttle. X is (num_samples,) or (num_samples, k). "
+           "Returns (num_sites,) or (num_sites, k) numpy array.")
       .def("right_multiply_tree_range", &ThreadingInstructions::right_multiply_tree_range,
            py::arg("x"), py::arg("site_start"), py::arg("site_end"),
            py::call_guard<py::gil_scoped_release>(),

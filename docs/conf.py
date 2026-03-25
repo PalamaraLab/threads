@@ -7,8 +7,8 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
 
 project = 'Threads'
-author = 'PalamaraLab'
-copyright = '2024-2025, PalamaraLab'
+author = 'Threads authors'
+copyright = '2024-2025, Threads authors'
 
 extensions = [
     'sphinx.ext.autodoc',

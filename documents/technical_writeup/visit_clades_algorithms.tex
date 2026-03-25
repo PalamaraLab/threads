@@ -1,0 +1,538 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\title{ARG Traversals and Tree-Shuttle Multiply\\from Threading Instructions}
+\author{Technical Note}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe algorithms for direct ARG traversal and genotype-matrix
+multiplication from \textsc{Threads} threading instructions.  The key
+contribution is a family of \emph{visit} algorithms that reconstruct local
+trees via union-find at segment boundaries, avoiding materialization of the
+full ARG or genotype matrix.  Three specializations---full member tracking,
+count-only, and height-only---yield efficient implementations of clade
+enumeration, allele frequency spectrum, total branch volume, association
+testing, and mutation generation.  We also describe the \emph{tree-shuttle}
+multiply algorithm, which propagates cumulative sums through the
+interval-tree structure of threading instructions for implicit
+genotype-matrix--vector products in $O(n \cdot n_\text{intervals} +
+n_\text{mismatches})$ time per call.
+\end{abstract}
+
+%% ========================================================================
+\section{Preliminaries}
+
+\subsection{Threading Instructions}
+
+The \textsc{Threads} software infers an Ancestral Recombination Graph (ARG)
+by threading each haplotype through a set of reference haplotypes.  For each
+of $n$ haplotype samples, the result is a sequence of \emph{segments}
+$\{(\text{start}_k, \text{target}_k, \text{tmrca}_k)\}$ and a list of
+\emph{mismatch} site indices.  In each segment, the sample copies the
+genotype of its target, except at mismatch sites where the allele is
+flipped.  The coalescence time $\text{tmrca}_k$ records the height at which
+the sample and its target share a most recent common ancestor in segment
+$k$.
+
+Samples are ordered $0, 1, \ldots, n{-}1$.  Sample~0 is the reference
+haplotype (no target; genotype determined entirely by mismatches from
+all-zero).  For $i > 0$, every segment's target is a sample with index $<
+i$, ensuring a well-defined dependency order.
+
+\subsection{Segment Boundaries and Local Trees}
+
+A \emph{boundary position} is any genomic position where at least one
+sample's segment changes.  Let $B = \{b_0, b_1, \ldots, b_{K-1}\}$ be the
+sorted set of all segment start positions across all samples.  Between
+consecutive boundaries $[b_j, b_{j+1})$, the coalescence relationships are
+constant: every sample has the same (target, tmrca) pair throughout the
+interval.  We call $[b_j, b_{j+1})$ an \emph{interval}.
+
+At each interval, the threading instructions define a forest of coalescent
+trees: sample $i$ coalesces with its target at height $\text{tmrca}_i$.
+Reconstructing these trees is the basis for all visit algorithms.
+
+%% ========================================================================
+\section{Union-Find Tree Reconstruction}
+
+All visit algorithms share a common structure: iterate over intervals,
+reconstruct the local tree via union-find, and invoke a callback for each
+clade or branch.  The key variation is the \emph{level of detail} tracked by
+the union-find:
+
+\begin{enumerate}
+\item \textbf{Full member tracking}: Each component stores a sorted list of
+all descendant leaf indices.  Required for \texttt{visit\_clades},
+\texttt{visit\_branches}, and \texttt{association\_diploid}.
+\item \textbf{Count-only}: Each component stores only its size (number of
+descendants).  Sufficient for \texttt{allele\_frequency\_spectrum}.
+\item \textbf{Height-only}: Each component stores only its coalescence
+height.  Sufficient for \texttt{total\_volume}.
+\end{enumerate}
+
+\subsection{Data Structures}
+
+For full member tracking, the union-find stores:
+\begin{itemize}
+\item $\texttt{par}[n]$: parent pointers with path compression
+\item $\texttt{rnk}[n]$: rank for union-by-rank
+\item $\texttt{members}[n]$: vector of descendant indices per root
+\item $\texttt{height}[n]$: coalescence height per root
+\end{itemize}
+
+For count-only and height-only variants, $\texttt{members}$ is replaced by
+$\texttt{size}[n]$ (integer count) or omitted entirely.
+
+\subsection{Identical-Tree Optimization}
+
+Consecutive intervals often share the same tree topology (same target and
+tmrca for every sample).  Rather than rebuilding the union-find redundantly,
+we detect this by comparing the current interval's (target, tmrca) vectors
+against the previous interval's.  When the topology is unchanged:
+
+\begin{itemize}
+\item \textbf{visit\_clades / visit\_branches}: Pending clade/branch records
+are extended to span the new interval rather than emitted and recreated.
+\item \textbf{total\_volume}: The per-interval volume contribution is
+reused: $\text{vol} \mathrel{+}= \text{prev\_vol} \times \text{span}$.
+\item \textbf{AFS}: The per-bin volume contribution is reused similarly.
+\end{itemize}
+
+This optimization is particularly effective in regions of low recombination,
+where many consecutive intervals share the same tree.
+
+%% ========================================================================
+\section{Visit Clades}
+
+\begin{algorithm}[h]
+\caption{\texttt{visit\_clades}: Enumerate all clades in the ARG}
+\begin{algorithmic}[1]
+\State Collect boundary positions $B$ from all samples' segment starts
+\State Emit leaf clades: for each $i \in [0, n)$, callback$(\{i\}, 0, \text{start}, \text{end})$
+\For{each interval $[b_j, b_{j+1})$}
+    \State Look up $(\text{target}_i, \text{tmrca}_i)$ for each sample $i$ via binary search on segment starts
+    \If{topology unchanged from previous interval}
+        \State \textbf{continue} \Comment{extend pending clades}
+    \EndIf
+    \State Flush pending clades with callback
+    \State Reset union-find: each sample is its own component
+    \State Collect edges: $E = \{(i, \text{target}_i, \text{tmrca}_i) : i \ge 1, \text{target}_i \ge 0\}$
+    \State Sort $E$ by tmrca (ascending)
+    \For{each edge $(c, p, h)$ in sorted $E$}
+        \State $r_c \gets \text{find}(c)$, $r_p \gets \text{find}(p)$
+        \If{$r_c \ne r_p$}
+            \State $\text{root} \gets \text{unite}(r_c, r_p)$
+            \State $\texttt{height}[\text{root}] \gets h$
+            \State $\texttt{members}[\text{root}] \gets \texttt{members}[r_c] \cup \texttt{members}[r_p]$
+            \State Add pending clade: $(\texttt{members}[\text{root}], h, b_j)$
+        \EndIf
+    \EndFor
+\EndFor
+\State Flush remaining pending clades
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Callback signature:}
+$\text{callback}(\texttt{descendants}, \texttt{height},
+\texttt{start\_bp}, \texttt{end\_bp})$, where \texttt{descendants} is the
+sorted list of leaf indices in the clade, \texttt{height} is the
+coalescence time, and the interval $[\texttt{start\_bp},
+\texttt{end\_bp})$ is the genomic span.
+
+\textbf{Complexity:}  $O(|B| \cdot n \log n)$ time ($n \log n$ per interval
+for sorting edges and union-find operations), $O(n)$ space for the
+union-find.
+
+%% ========================================================================
+\section{Visit Branches}
+
+\texttt{visit\_branches} follows the same structure as
+\texttt{visit\_clades} but emits \emph{branches} (edges between tree nodes)
+rather than clades.
+
+\begin{algorithm}[h]
+\caption{\texttt{visit\_branches}: Enumerate all branches in the ARG}
+\begin{algorithmic}[1]
+\State (Same boundary collection and topology detection as \texttt{visit\_clades})
+\For{each edge $(c, p, h)$ uniting components $r_c, r_p$}
+    \If{$\texttt{height}[r_c] < h$}
+        \State Pending branch: $(\texttt{members}[r_c], \texttt{height}[r_c], h, b_j)$
+    \EndIf
+    \If{$\texttt{height}[r_p] < h$}
+        \State Pending branch: $(\texttt{members}[r_p], \texttt{height}[r_p], h, b_j)$
+    \EndIf
+    \State $\text{root} \gets \text{unite}(r_c, r_p)$; $\texttt{height}[\text{root}] \gets h$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Callback signature:}
+$\text{callback}(\texttt{descendants}, \texttt{child\_height},
+\texttt{parent\_height}, \texttt{start\_bp}, \texttt{end\_bp})$.
+
+A branch represents a tree edge from a node at \texttt{child\_height} to a
+node at \texttt{parent\_height}, subtending the samples in
+\texttt{descendants}.  Each coalescence event produces up to two branches
+(one for each merging component whose height is below the coalescence
+time).
+
+%% ========================================================================
+\section{Total Volume}
+
+\texttt{total\_volume()} computes the total branch length of the ARG:
+\[
+V = \sum_{\text{branches}} (\text{parent\_height} - \text{child\_height})
+    \times (\text{end\_bp} - \text{start\_bp}).
+\]
+
+This uses a \emph{height-only} union-find that tracks only the coalescence
+height of each component, without member lists.
+
+\begin{algorithm}[h]
+\caption{\texttt{total\_volume}: Total ARG branch volume}
+\begin{algorithmic}[1]
+\State $V \gets 0$
+\For{each interval $[b_j, b_{j+1})$ with span $s = b_{j+1} - b_j$}
+    \If{topology unchanged}
+        \State $V \mathrel{+}= v_\text{prev} \times s$ \Comment{reuse cached contribution}
+        \State \textbf{continue}
+    \EndIf
+    \State Reset height-only UF; $v_\text{prev} \gets 0$
+    \State Sort edges by height
+    \For{each edge $(c, p, h)$}
+        \State $r_c \gets \text{find}(c)$, $r_p \gets \text{find}(p)$
+        \State $v_\text{prev} \mathrel{+}= (h - \texttt{height}[r_c]) + (h - \texttt{height}[r_p])$
+        \State Unite $r_c, r_p$; set $\texttt{height}[\text{root}] \gets h$
+    \EndFor
+    \State $V \mathrel{+}= v_\text{prev} \times s$
+\EndFor
+\State \Return $V$
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:} $O(|B| \cdot n \log n)$ time, $O(n)$ space.  The
+identical-tree optimization avoids rebuilding the union-find when the tree
+is unchanged, reducing the effective cost to $O(|B_\text{unique}| \cdot n
+\log n)$ where $|B_\text{unique}|$ is the number of \emph{distinct}
+topologies.
+
+%% ========================================================================
+\section{Allele Frequency Spectrum}
+
+The branch-length allele frequency spectrum (AFS) bins total branch volume
+by the number of descendants:
+\[
+\text{afs}[k] = \sum_{\substack{\text{branches with} \\ k \text{ descendants}}}
+    (\text{parent\_height} - \text{child\_height})
+    \times (\text{end\_bp} - \text{start\_bp}).
+\]
+
+This uses a \emph{count-only} union-find that tracks the size (descendant
+count) and height of each component, but not member lists.
+
+\begin{algorithm}[h]
+\caption{\texttt{allele\_frequency\_spectrum}: Branch-length AFS}
+\begin{algorithmic}[1]
+\State Initialize $\text{afs}[0 \ldots n] \gets 0$
+\For{each interval $[b_j, b_{j+1})$ with span $s$}
+    \If{topology unchanged}
+        \For{$k = 0$ to $n$}
+            \State $\text{afs}[k] \mathrel{+}= \text{afs\_prev}[k] \times s$
+        \EndFor
+        \State \textbf{continue}
+    \EndIf
+    \State Reset count-only UF: $\texttt{size}[i] \gets 1$, $\texttt{height}[i] \gets 0$
+    \State Clear $\text{afs\_prev}[0 \ldots n]$
+    \State Sort edges by height
+    \For{each edge $(c, p, h)$ uniting $r_c, r_p$}
+        \If{$\texttt{height}[r_c] < h$}
+            \State $\text{afs\_prev}[\texttt{size}[r_c]] \mathrel{+}= h - \texttt{height}[r_c]$
+        \EndIf
+        \If{$\texttt{height}[r_p] < h$}
+            \State $\text{afs\_prev}[\texttt{size}[r_p]] \mathrel{+}= h - \texttt{height}[r_p]$
+        \EndIf
+        \State $\text{root} \gets \text{unite}(r_c, r_p)$
+        \State $\texttt{size}[\text{root}] \gets \texttt{size}[r_c] + \texttt{size}[r_p]$
+        \State $\texttt{height}[\text{root}] \gets h$
+    \EndFor
+    \For{$k = 0$ to $n$}
+        \State $\text{afs}[k] \mathrel{+}= \text{afs\_prev}[k] \times s$
+    \EndFor
+\EndFor
+\State \Return $\text{afs}$
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:} $O(|B| \cdot n \log n)$ time, $O(n)$ space.
+
+\textbf{Comparison with arg-needle-lib:}  The existing \texttt{arg-needle-lib}
+implementation computes the AFS via \texttt{bitset\_volume\_map}, which
+maintains a bitset of size $n$ per tree node to track descendants.  This
+requires $O(n^2 / 64)$ space and $O(n^2 / 64)$ bitwise-OR operations per
+coalescence, totaling $O(|B| \cdot n^2)$.  The count-only union-find
+reduces this to $O(|B| \cdot n \log n)$---a 50--70$\times$ speedup in
+practice for $n \ge 1000$.
+
+%% ========================================================================
+\section{Association Testing}
+
+\texttt{association\_diploid} performs chi-square association testing of
+branch-defined clades against a diploid phenotype vector, without
+materializing the genotype matrix.
+
+\begin{algorithm}[h]
+\caption{\texttt{association\_diploid}: Clade-based association}
+\begin{algorithmic}[1]
+\State Precompute phenotype statistics: $\bar{y}$, $\text{Var}(y)$
+\State Compute $\chi^2$ threshold from $p$-value threshold
+\For{each clade $(\texttt{desc}, h, \text{start}, \text{end})$ via \texttt{visit\_clades}}
+    \If{$|\texttt{desc}| < 2$ or $|\texttt{desc}| \ge n - 1$}
+        \State \textbf{continue} \Comment{skip trivial clades}
+    \EndIf
+    \State Compute diploid dosage: $d_j = |\{h \in \texttt{desc} : \lfloor h/2 \rfloor = j\}|$ for each individual $j$
+    \State $\bar{d} = \sum d_j / n_\text{dip}$, \; $\text{Var}(d) = \sum d_j^2 / n_\text{dip} - \bar{d}^2$
+    \State $\text{Cov}(d, y) = \sum d_j \, y_j / n_\text{dip} - \bar{d}\,\bar{y}$
+    \State $r^2 = \text{Cov}(d, y)^2 / (\text{Var}(d) \cdot \text{Var}(y))$
+    \State $\chi^2 = r^2 \cdot n_\text{dip}$
+    \If{$\chi^2 \ge \chi^2_\text{thresh}$}
+        \State Compute $p$-value via $\text{erfc}(\sqrt{\chi^2 / 2})$
+        \State Emit $(\text{midpoint}, \chi^2, p, |\texttt{desc}|)$
+    \EndIf
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Dosage computation:}  For each haploid descendant $h$, the diploid
+individual is $\lfloor h/2 \rfloor$.  The dosage $d_j \in \{0, 1, 2\}$
+counts how many of an individual's two haplotypes are in the clade.
+
+\textbf{Complexity:}  $O(C \cdot n_\text{dip})$ where $C$ is the number of
+non-trivial clades.  The visit\_clades traversal dominates setup cost at
+$O(|B| \cdot n \log n)$.
+
+%% ========================================================================
+\section{Mutation Generation}
+
+\texttt{generate\_mutations} samples mutations on ARG branches
+proportionally to branch volume, producing a genotype matrix of
+derived alleles.
+
+\begin{algorithm}[h]
+\caption{\texttt{generate\_mutations}: Poisson mutation sampling}
+\begin{algorithmic}[1]
+\State Initialize RNG with seed
+\For{each branch $(\texttt{desc}, h_c, h_p, \text{start}, \text{end})$ via \texttt{visit\_branches}}
+    \State $\lambda = \mu \cdot (h_p - h_c) \cdot (\text{end} - \text{start})$
+    \State $k \sim \text{Poisson}(\lambda)$
+    \For{$j = 1$ to $k$}
+        \State $\text{pos} \sim \text{Uniform}(\text{start}, \text{end})$
+        \State Set genotype: 1 for samples in \texttt{desc}, 0 otherwise
+    \EndFor
+\EndFor
+\State \Return positions, genotypes (flat $n_\text{mut} \times n$ matrix)
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:}  $O(B_\text{branches} + n_\text{mut} \cdot n)$ where
+$B_\text{branches}$ is the cost of \texttt{visit\_branches} and
+$n_\text{mut}$ is the total number of sampled mutations.  The expected
+number of mutations is $\mu \cdot V$ where $V$ is the total volume.
+
+%% ========================================================================
+\section{Tree-Shuttle Multiply}
+
+The tree-shuttle multiply computes implicit genotype-matrix--vector products
+$\mathbf{G}^\top \mathbf{x}$ and $\mathbf{G}\mathbf{x}$ by propagating
+cumulative sums through the dependency structure of threading instructions,
+without materializing the genotype matrix.
+
+\subsection{Global Interval Decomposition}
+
+The preparation phase constructs a global set of $n_i$ intervals from all
+segment start positions.  Within each interval, every sample's segment
+assignment is constant.
+
+\begin{algorithm}[h]
+\caption{Tree-shuttle preparation: interval decomposition}
+\begin{algorithmic}[1]
+\State $\text{breaks} \gets \text{sorted unique segment starts across all samples}$
+\State $n_i \gets |\text{breaks}| - 1$ \Comment{number of global intervals}
+\For{$j = 0$ to $n_i - 1$}
+    \State $\texttt{ivl\_start}[j] \gets \text{breaks}[j]$; $\texttt{ivl\_end}[j] \gets \text{breaks}[j+1]$
+\EndFor
+\State \textbf{Map samples to intervals:}
+\For{each sample $i$, interval $j$}
+    \State $\texttt{ivl\_seg}[i \cdot n_i + j] \gets$ segment of sample $i$ active at interval $j$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Genotype Cache and Mismatch Precomputation}
+
+The preparation phase processes samples in order $0, 1, \ldots, n{-}1$,
+building each sample's genotype from its target's cached genotype plus
+mismatch flips.  A reference-counting scheme limits peak memory to $O(m
+\cdot d)$ where $d$ is the maximum number of simultaneously active targets
+(bounded by the threading tree depth).
+
+For each sample, the preparation computes:
+\begin{itemize}
+\item \textbf{Carry values} $\texttt{carry}[i \cdot n_i + j]$: the
+genotype of sample $i$ at the last site of interval $j$.  Used for
+self-referencing segments.
+\item \textbf{Mismatch signs} $\texttt{mm\_sign}[k] \in \{-1, +1\}$: for
+each non-self mismatch at site $s$ where the target's genotype is $g$, the
+sign is $1 - 2g$.  This encodes the correction needed during multiplication.
+\item \textbf{Mismatch-to-interval mapping} $\texttt{mm\_ivl}[k]$: the
+global interval containing each mismatch site.
+\end{itemize}
+
+\subsection{Right Multiply: $\mathbf{y} = \mathbf{G}^\top \mathbf{x}$}
+
+Given $\mathbf{x} \in \mathbb{R}^m$, compute $y_i = \sum_j G_{ji} \, x_j$
+for each sample $i$.
+
+\begin{algorithm}[h]
+\caption{Tree-shuttle right multiply}
+\begin{algorithmic}[1]
+\State Compute prefix sums: $P[s] = \sum_{j=0}^{s-1} x_j$
+\State Allocate cumulative-sum pool (reference-counted, one row per active target)
+\For{$i = 0$ to $n - 1$}
+    \If{$i = 0$}
+        \For{each interval $j$}
+            \State $\texttt{cum}[j{+}1] = \texttt{cum}[j] + \sum_{s \in [\texttt{ivl\_start}[j],\, \texttt{ivl\_end}[j])} x[s] \cdot \texttt{ref}[s]$
+        \EndFor
+        \State $y_0 = \texttt{cum}[n_i]$
+    \Else
+        \State $y_i \gets 0$
+        \For{each segment of sample $i$ spanning intervals $[j_a, j_b)$}
+            \If{target $\ne i$} \Comment{non-self segment}
+                \State $\text{base} = \texttt{tgt\_cum}[j_b] - \texttt{tgt\_cum}[j_a]$ \Comment{target's cumulative contribution}
+                \State $\text{corr} = \sum_{\text{mismatches } s} x[s] \cdot \texttt{mm\_sign}[s]$ \Comment{mismatch correction}
+                \State $y_i \mathrel{+}= \text{base} + \text{corr}$
+            \Else \Comment{self-referencing segment}
+                \State Expand via carry values and prefix sums
+            \EndIf
+        \EndFor
+    \EndIf
+    \State Release target cumulative rows when reference count reaches zero
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+The key insight is that for non-self segments, the sample's genotype within
+an interval differs from its target's genotype only at mismatch sites.
+Therefore, the cumulative sum for the sample equals the target's cumulative
+sum plus a sparse mismatch correction.  This avoids the $O(m)$ per-sample
+sweep of dense multiplication.
+
+\textbf{Self-referencing segments} ($\text{target} = i$) arise when a
+sample is its own reference in some genomic region.  These are handled via
+precomputed carry values: the genotype alternates between 0 and 1 at each
+mismatch, and the contribution is computed using prefix sums.
+
+\subsection{Left Multiply: $\mathbf{y} = \mathbf{G} \mathbf{x}$}
+
+Given $\mathbf{x} \in \mathbb{R}^n$, compute $y_j = \sum_i G_{ji} \,
+x_i$ for each site $j$.  This uses a two-pass approach:
+
+\textbf{Pass 1 (bottom-up weight propagation, sequential):}
+Initialize weight matrix $W[i, j] = x_i$ for all intervals $j$.  Then
+process samples $i = n{-}1$ down to 1: for each segment with
+$\text{target} \ne i$, accumulate $W[\text{target}, j] \mathrel{+}= W[i,
+j]$ across the segment's intervals.  This propagates weights up the
+threading tree.
+
+\textbf{Pass 2 (site-level accumulation, parallel):}
+For each sample $i$, expand the weights into per-site contributions using
+the mismatch structure and carry values, analogous to the right multiply.
+This pass is embarrassingly parallel across samples.
+
+\textbf{Complexity:} $O(n \cdot n_i + n_\text{mismatches})$ per call.
+Pass~1 requires $O(n \cdot n_i)$ storage for the weight matrix.  Pass~2 can
+use thread-local output buffers for parallelization.
+
+\subsection{Batch and Range Variants}
+
+\textbf{Batch multiply} ($k$ vectors simultaneously): The prefix sums,
+cumulative rows, and weight matrices are extended to width $k$.  Inner loops
+over $k$ elements auto-vectorize via SIMD.
+
+\textbf{Range multiply} (submatrix $\mathbf{G}[s_a{:}s_b, :]$): Restricts
+interval iteration to $[s_a, s_b)$ and adjusts prefix sums and mismatch
+ranges accordingly.  Useful for block-wise algorithms like SCOPE.
+
+\subsection{Complexity Comparison}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l c c c}
+\toprule
+Method & Prepare & Per-call & Memory \\
+\midrule
+Dense        & $O(nm)$  & $O(nm)$ & $O(nm)$ \\
+Tree shuttle & $O(nm)$  & $O(n \cdot n_i + M)$ & $O(m \cdot d)$ peak \\
+RLE          & $O(nm)$  & $O(m + R)$ & $O(R)$ \\
+\bottomrule
+\end{tabular}
+\caption{Complexity comparison.  $n_i$: number of global intervals; $M$:
+total mismatches; $R$: total 1-runs; $d$: threading tree depth.  Tree
+shuttle replaces the $O(m)$ prefix-sum sweep of RLE with $O(n \cdot n_i)$
+tree propagation, where $n_i \ll m$ typically.  RLE's per-call work is
+embarrassingly parallel; tree shuttle has sequential dependencies in the
+cumulative-sum propagation for right multiply and in Pass~1 of left
+multiply.}
+\label{tab:complexity}
+\end{table}
+
+In practice, $n_i$ is 10--100$\times$ smaller than $m$, so tree shuttle is
+preferred when the number of multiply calls is large relative to preparation
+cost.  RLE is preferred when parallelism is available and per-call latency
+matters.  See the companion note on RLE multiply for detailed benchmarks.
+
+%% ========================================================================
+\section{Implementation Notes}
+
+\subsection{Segment Lookup}
+
+Given a genomic position, the active segment for a sample is found via
+binary search on the sorted segment start positions.  This is $O(\log S_i)$
+per sample per interval, where $S_i$ is the number of segments for sample
+$i$.
+
+\subsection{Reference-Counted Genotype Cache}
+
+During tree-shuttle preparation and RLE preparation, genotypes are built
+sample-by-sample in threading order.  A reference count tracks how many
+future samples depend on each cached genotype.  When the count reaches
+zero, the cache entry is released.  This bounds peak memory to $O(m \cdot
+d)$ rather than $O(nm)$, where $d$ is the maximum depth of the threading
+dependency tree.
+
+\subsection{Pending Clade/Branch Deferral}
+
+In visit algorithms, clades and branches are not immediately emitted.
+Instead, they are stored in a pending list and emitted when the tree
+topology changes.  At emission time, the genomic span is set to
+$[\text{start\_bp}, b_\text{next})$, spanning all consecutive intervals
+with identical topology.  This reduces the number of callbacks and allows
+downstream consumers to process contiguous genomic ranges.
+
+\begin{thebibliography}{9}
+\bibitem{gunnarsson2025}
+B.~Gunnarsson, M.~Palacios, P.~P.~Palacios, and P.~F.~Palamara.
+\newblock Inferring genome-wide genealogies for large samples.
+\newblock \emph{In preparation}, 2025.
+\end{thebibliography}
+
+\end{document}
