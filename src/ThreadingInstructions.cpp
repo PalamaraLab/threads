@@ -1152,11 +1152,19 @@ void ThreadingInstructions::prepare_tree_multiply() {
         tree_ivl_end[j] = (j + 1 < ni) ? breaks[j + 1] : m;
     }
 
-    tree_ivl_seg.resize(static_cast<size_t>(n) * ni);
+    // ── Phase 2: Per-sample segment-to-interval mapping ─────────────────
+    // Build tree_seg_first_ivl and tree_seg_id directly without the
+    // O(n * n_intervals) tree_ivl_seg array.
+
+    tree_seg_offset.resize(n);
+    tree_seg_first_ivl.clear();
+    tree_seg_id.clear();
     for (int i = 0; i < n; i++) {
+        tree_seg_offset[i] = static_cast<int>(tree_seg_first_ivl.size());
         const auto& starts_i = instructions[i].starts;
         const int n_segs = static_cast<int>(starts_i.size());
         int seg = 0;
+        int prev_seg = -1;
         for (int j = 0; j < ni; j++) {
             const int site = tree_ivl_start[j];
             if (site == 0) {
@@ -1167,57 +1175,22 @@ void ThreadingInstructions::prepare_tree_multiply() {
                     seg++;
                 }
             }
-            tree_ivl_seg[static_cast<size_t>(i) * ni + j] = seg;
-        }
-    }
-
-    // ── Phase 2: Per-sample segment-to-interval mapping ─────────────────
-    // For each sample, record the first interval of each segment.
-    // This enables segment-level iteration in the multiply.
-
-    tree_seg_offset.resize(n);
-    tree_seg_first_ivl.clear();
-    for (int i = 0; i < n; i++) {
-        tree_seg_offset[i] = static_cast<int>(tree_seg_first_ivl.size());
-        int prev_seg = -1;
-        for (int j = 0; j < ni; j++) {
-            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
             if (seg != prev_seg) {
                 tree_seg_first_ivl.push_back(j);
+                tree_seg_id.push_back(seg);
                 prev_seg = seg;
             }
         }
     }
     // Sentinel for end-of-last-sample
     tree_seg_first_ivl.push_back(0);
+    tree_seg_id.push_back(0);
 
-    // ── Phase 3: Precompute mismatch signs and carry values ─────────────
+    // ── Phase 3: Precompute mismatch signs ─────────────────────────────
     // Lazy chain tracing: compute genotype at specific sites by tracing
     // the threading chain to sample 0 (XOR parity of mismatches along
     // the path). Cost: O(M_total * d) where d = tree depth.
-    // No genotype buffer materialized, no O(n*m) work.
-
-    // Helper: compute genotype of sample at a specific site by tracing
-    // the threading chain to sample 0.
-    // Cost: O(d * log(S_max)) where d = chain depth, S_max = max segments.
-    auto genotype_at_site = [&](int sample, int site) -> int {
-        int parity = 0;
-        int cur = sample;
-        while (cur > 0) {
-            const auto& instr = instructions[cur];
-            // Find segment containing this site
-            int seg = static_cast<int>(
-                std::upper_bound(instr.starts.begin(), instr.starts.end(),
-                                 positions[site]) - instr.starts.begin()) - 1;
-            // Check if site is a mismatch (mismatches are sorted site indices)
-            if (std::binary_search(instr.mismatches.begin(),
-                                   instr.mismatches.end(), site)) {
-                parity ^= 1;
-            }
-            cur = instr.targets[seg];
-        }
-        return tree_ref_genome[site] ^ parity;
-    };
+    // No genotype buffer, no tree_carry, no O(n*m) work.
 
     // Allocate mismatch sign storage
     tree_mm_offset.resize(n);
@@ -1229,57 +1202,48 @@ void ThreadingInstructions::prepare_tree_multiply() {
     tree_mm_sign.assign(total_mm, 0);
     tree_mm_ivl.resize(total_mm);
 
-    // Allocate carry storage
-    tree_carry.assign(static_cast<size_t>(n) * ni, 0);
-
-    // Sample 0: carry values from ref_genome
-    for (int j = 0; j < ni; j++) {
-        tree_carry[j] = static_cast<int8_t>(tree_ref_genome[tree_ivl_end[j] - 1]);
-    }
-
-    // Samples 1..n-1: compute mismatch signs via chain tracing,
-    // carry values only for self-ref intervals
+    // Samples 1..n-1: compute mismatch signs via chain tracing
     for (int i = 1; i < n; i++) {
         const int* mm_data = instructions[i].mismatches.data();
         const int n_mm = static_cast<int>(instructions[i].mismatches.size());
+        const auto& starts_i = instructions[i].starts;
+        const int n_segs_i = static_cast<int>(starts_i.size());
 
-        // Compute mismatch correction signs and interval mapping
         for (int k = 0; k < n_mm; k++) {
             const int s = mm_data[k];
             auto ivl_it = std::upper_bound(tree_ivl_start.begin(), tree_ivl_start.end(), s);
             const int j = static_cast<int>(ivl_it - tree_ivl_start.begin()) - 1;
             tree_mm_ivl[tree_mm_offset[i] + k] = j;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + j];
+            // Find segment via binary search on instructions
+            const int pos = positions[s];
+            int seg = static_cast<int>(
+                std::upper_bound(starts_i.begin(), starts_i.end(), pos) - starts_i.begin()) - 1;
             const int target = instructions[i].targets[seg];
             if (target != i) {
-                // Lazy: trace chain from target to sample 0
                 const int g_target = genotype_at_site(target, s);
                 tree_mm_sign[tree_mm_offset[i] + k] = static_cast<int8_t>(1 - 2 * g_target);
             }
-            // Self-ref mismatches: leave as 0 (not used)
-        }
-
-        // Carry values: only needed at intervals adjacent to self-ref segments.
-        // The multiply reads tree_carry[i*ni + j-1] when entering a self-ref
-        // interval j, so we need the carry at the end of interval j-1 regardless
-        // of whether j-1 was self-ref or non-self.
-        {
-            bool has_self_ref = false;
-            for (int seg = 0; seg < static_cast<int>(instructions[i].targets.size()); seg++) {
-                if (instructions[i].targets[seg] == i) { has_self_ref = true; break; }
-            }
-            if (has_self_ref) {
-                // Rare case: compute carry for all intervals of this sample
-                for (int j = 0; j < ni; j++) {
-                    tree_carry[static_cast<size_t>(i) * ni + j] =
-                        static_cast<int8_t>(genotype_at_site(i, tree_ivl_end[j] - 1));
-                }
-            }
-            // Common case (no self-ref): carry is never read, leave as 0
         }
     }
 
     tree_ready = true;
+}
+
+int ThreadingInstructions::genotype_at_site(int sample, int site) const {
+    int parity = 0;
+    int cur = sample;
+    while (cur > 0) {
+        const auto& instr = instructions[cur];
+        int seg = static_cast<int>(
+            std::upper_bound(instr.starts.begin(), instr.starts.end(),
+                             positions[site]) - instr.starts.begin()) - 1;
+        if (std::binary_search(instr.mismatches.begin(),
+                               instr.mismatches.end(), site)) {
+            parity ^= 1;
+        }
+        cur = instr.targets[seg];
+    }
+    return tree_ref_genome[site] ^ parity;
 }
 
 std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector<double>& x) {
@@ -1393,7 +1357,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector
             const int last_ivl = (sk + 1 < n_mapped_segs)
                                      ? tree_seg_first_ivl[seg_off + sk + 1]
                                      : ni;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + first_ivl];
+            const int seg = tree_seg_id[seg_off + sk];
             const int target = instructions[i].targets[seg];
             const int site_a = ivl_s[first_ivl];
             const int site_b = ivl_e[last_ivl - 1];
@@ -1434,7 +1398,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree(const std::vector
                     const int a = ivl_s[j];
                     const int b = ivl_e[j];
                     int carry = (j == 0) ? 0
-                                : static_cast<int>(tree_carry[static_cast<size_t>(i) * ni + j - 1]);
+                                : genotype_at_site(i, tree_ivl_end[j - 1] - 1);
                     const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
                     const int* hi = std::lower_bound(mm_data, mm_data + n_mm, b);
                     double ivl_sum = 0.0;
@@ -1517,7 +1481,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree(const std::vector<
             const int last_ivl = (sk + 1 < n_mapped_segs)
                                      ? tree_seg_first_ivl[seg_off + sk + 1]
                                      : ni;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + first_ivl];
+            const int seg = tree_seg_id[seg_off + sk];
             const int target = instructions[i].targets[seg];
 
             if (target != i) {
@@ -1556,7 +1520,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree(const std::vector<
                 const int last_ivl = (sk + 1 < n_mapped_segs)
                                          ? tree_seg_first_ivl[seg_off + sk + 1]
                                          : ni;
-                const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + first_ivl];
+                const int seg = tree_seg_id[seg_off + sk];
                 const int target = instructions[i].targets[seg];
                 const int site_a = tree_ivl_start[first_ivl];
                 const int site_b = tree_ivl_end[last_ivl - 1];
@@ -1576,7 +1540,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree(const std::vector<
                         const int a = tree_ivl_start[j];
                         const int b = tree_ivl_end[j];
                         int carry = (j == 0) ? 0
-                                    : static_cast<int>(tree_carry[static_cast<size_t>(i) * ni + j - 1]);
+                                    : genotype_at_site(i, tree_ivl_end[j - 1] - 1);
                         const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
                         const int* hi_mm = std::lower_bound(mm_data, mm_data + n_mm, b);
                         const double wi = Wi[j];
@@ -1629,7 +1593,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree(const std::vector<
             const int last_ivl = (sk + 1 < n_mapped_segs)
                                      ? tree_seg_first_ivl[seg_off + sk + 1]
                                      : ni;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i) * ni + first_ivl];
+            const int seg = tree_seg_id[seg_off + sk];
             const int target = instructions[i].targets[seg];
             const int site_a = tree_ivl_start[first_ivl];
             const int site_b = tree_ivl_end[last_ivl - 1];
@@ -1647,7 +1611,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree(const std::vector<
                     const int a = tree_ivl_start[j];
                     const int b = tree_ivl_end[j];
                     int carry = (j == 0) ? 0
-                                : static_cast<int>(tree_carry[static_cast<size_t>(i) * ni + j - 1]);
+                                : genotype_at_site(i, tree_ivl_end[j - 1] - 1);
                     const int* lo = std::lower_bound(mm_data, mm_data + n_mm, a);
                     const int* hi_mm = std::lower_bound(mm_data, mm_data + n_mm, b);
                     const double wi = Wi[j];
@@ -1782,7 +1746,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
         for (int sk = 0; sk < n_mapped_segs; sk++) {
             const int fi = tree_seg_first_ivl[seg_off + sk];
             const int li = (sk+1<n_mapped_segs) ? tree_seg_first_ivl[seg_off+sk+1] : ni;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i)*ni + fi];
+            const int seg = tree_seg_id[seg_off + sk];
             const int target = instructions[i].targets[seg];
             const int sa = ivl_s[fi], sb = ivl_e[li-1];
 
@@ -1836,7 +1800,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
             } else {
                 for (int j = fi; j < li; j++) {
                     int a = ivl_s[j], b = ivl_e[j];
-                    int carry = (j==0)?0:static_cast<int>(tree_carry[static_cast<size_t>(i)*ni+j-1]);
+                    int carry = (j==0)?0:genotype_at_site(i, tree_ivl_end[j - 1] - 1);
                     const int* lo = std::lower_bound(mm_data, mm_data+n_mm, a);
                     const int* hi = std::lower_bound(mm_data, mm_data+n_mm, b);
                     for (int c = 0; c < k; c++) {
@@ -1906,7 +1870,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree_batch(
         for (int sk = 0; sk < n_mapped_segs; sk++) {
             const int fi = tree_seg_first_ivl[seg_off+sk];
             const int li = (sk+1<n_mapped_segs) ? tree_seg_first_ivl[seg_off+sk+1] : ni;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i)*ni+fi];
+            const int seg = tree_seg_id[seg_off + sk];
             const int target = instructions[i].targets[seg];
             const int sa = tree_ivl_start[fi], sb = tree_ivl_end[li-1];
 
@@ -1929,7 +1893,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree_batch(
             } else {
                 for (int j = fi; j < li; j++) {
                     int a = tree_ivl_start[j], b = tree_ivl_end[j];
-                    int carry = (j==0)?0:static_cast<int>(tree_carry[static_cast<size_t>(i)*ni+j-1]);
+                    int carry = (j==0)?0:genotype_at_site(i, tree_ivl_end[j - 1] - 1);
                     const int* lo = std::lower_bound(mm_data, mm_data+n_mm, a);
                     const int* hi_mm = std::lower_bound(mm_data, mm_data+n_mm, b);
                     const double* wi = &Wi[j*k];
@@ -2048,7 +2012,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_range(
         for (int sk = 0; sk < n_mapped_segs; sk++) {
             const int fi = tree_seg_first_ivl[seg_off + sk];
             const int li = (sk+1<n_mapped_segs) ? tree_seg_first_ivl[seg_off+sk+1] : ni;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i)*ni + fi];
+            const int seg = tree_seg_id[seg_off + sk];
             const int target = instructions[i].targets[seg];
             const int sa = ivl_s[fi], sb = ivl_e[li-1];
 
@@ -2073,7 +2037,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_range(
             } else {
                 for (int j = fi; j < li; j++) {
                     int a = ivl_s[j], b = ivl_e[j];
-                    int carry = (j==0)?0:static_cast<int>(tree_carry[static_cast<size_t>(i)*ni+j-1]);
+                    int carry = (j==0)?0:genotype_at_site(i, tree_ivl_end[j - 1] - 1);
                     const int* lo = std::lower_bound(mm_data, mm_data+n_mm, a);
                     const int* hi = std::lower_bound(mm_data, mm_data+n_mm, b);
                     double ivl_sum = 0.0; int prev = a;
@@ -2132,7 +2096,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree_range(
         for (int sk = 0; sk < n_mapped_segs; sk++) {
             const int fi = tree_seg_first_ivl[seg_off+sk];
             const int li = (sk+1<n_mapped_segs) ? tree_seg_first_ivl[seg_off+sk+1] : ni;
-            const int seg = tree_ivl_seg[static_cast<size_t>(i)*ni+fi];
+            const int seg = tree_seg_id[seg_off + sk];
             const int target = instructions[i].targets[seg];
             const int sa = tree_ivl_start[fi], sb = tree_ivl_end[li-1];
 
@@ -2158,7 +2122,7 @@ std::vector<double> ThreadingInstructions::left_multiply_tree_range(
                     // Carry logic runs over all mismatches in [a,b) for
                     // correct state, but only writes to out for in-range sites.
                     // Skip entirely if interval doesn't overlap range.
-                    int carry = (j==0)?0:static_cast<int>(tree_carry[static_cast<size_t>(i)*ni+j-1]);
+                    int carry = (j==0)?0:genotype_at_site(i, tree_ivl_end[j - 1] - 1);
                     const int* lo = std::lower_bound(mm_data, mm_data+n_mm, a);
                     const int* hi_mm = std::lower_bound(mm_data, mm_data+n_mm, b);
                     if (b <= site_start || a >= site_end) {

@@ -240,7 +240,6 @@ private:
     int tree_n_intervals = 0;
     std::vector<int> tree_ivl_start;   // first site index of each interval
     std::vector<int> tree_ivl_end;     // one past last site index
-    std::vector<int> tree_ivl_seg;     // flat [sample * n_intervals + interval] -> segment
     std::vector<int> tree_ref_genome;
 
     // Precomputed mismatch correction signs: tree_mm_sign[offset + k] = +1 or -1
@@ -252,15 +251,17 @@ private:
     // containing mismatch k for sample i. Eliminates binary search during multiply.
     std::vector<int> tree_mm_ivl;
 
-    // Precomputed carry_geno at end of each interval for each sample.
-    // tree_carry[sample * n_intervals + interval] = genotype at last site of interval.
-    std::vector<int8_t> tree_carry;
-
     // Per-sample segment-to-interval mapping for segment-level loop.
-    // tree_seg_first_ivl[sample * max_segs + seg] = first interval index of segment.
-    // Stored as flat vectors indexed by tree_seg_offset[sample] + seg.
-    std::vector<int> tree_seg_first_ivl;  // first interval of each segment
-    std::vector<int> tree_seg_offset;     // offset into tree_seg_first_ivl for each sample
+    // tree_seg_first_ivl[offset + k] = first global interval of k-th segment
+    // tree_seg_id[offset + k] = segment index in instructions[i].targets
+    // Indexed by tree_seg_offset[sample] + k.
+    std::vector<int> tree_seg_first_ivl;
+    std::vector<int> tree_seg_id;         // segment index for target lookup
+    std::vector<int> tree_seg_offset;
+
+    // Lazy genotype query: trace threading chain to sample 0.
+    // O(d * log S) per call, d = tree depth.
+    int genotype_at_site(int sample, int site) const;
 
     // RLE multiply cache: per-sample 1-runs stored as flat (start, end) pairs.
     // rle_run_start[rle_offset[i] .. rle_offset[i+1]) = start site indices of 1-runs
