@@ -54,21 +54,15 @@ term.
    Precompute 1-run (start, end) pairs per sample. Must be called before RLE
    multiply methods.
 
-.. method:: ThreadingInstructions.right_multiply_rle(x)
+.. method:: ThreadingInstructions.right_multiply_rle(X)
 
-   Compute G @ x via RLE. x has length ``num_sites``.
+   Compute G @ X via RLE. Accepts 1D array/list ``(num_sites,)`` or 2D array
+   ``(num_sites, k)``. Returns numpy array of matching shape.
 
-.. method:: ThreadingInstructions.left_multiply_rle(x)
+.. method:: ThreadingInstructions.left_multiply_rle(X)
 
-   Compute G.T @ x via RLE. x has length ``num_samples``.
-
-.. method:: ThreadingInstructions.right_multiply_rle_batch(x_flat, k)
-
-   Compute G @ X via RLE for k vectors.
-
-.. method:: ThreadingInstructions.left_multiply_rle_batch(x_flat, k)
-
-   Compute G.T @ X via RLE for k vectors.
+   Compute G.T @ X via RLE. Accepts 1D array/list ``(num_samples,)`` or 2D array
+   ``(num_samples, k)``. Returns numpy array of matching shape.
 
 Dense Multiply
 --------------
