@@ -214,6 +214,9 @@ public:
     std::vector<int> positions;
     std::vector<ThreadingInstruction> instructions;
 
+    // Returns the dense genotype matrix (materializes if needed).
+    const std::vector<int>& get_genotype_matrix() { materialize_genotypes(); return genotype_matrix; }
+
 private:
     // Cached dense genotype matrix: genotype_matrix[site * num_samples + sample]
     std::vector<int> genotype_matrix;

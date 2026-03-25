@@ -98,6 +98,13 @@ def main():
     p_vcf.add_argument("--variants", default=None, help="Path to .pvar or .bim file with variant information")
     p_vcf.add_argument("--samples", default=None, help="Path to a file with one sample ID per line")
 
+    # pgen
+    p_pgen = subparsers.add_parser("pgen", help="Write genotypes from Threads ARGs to pgen format")
+    p_pgen.add_argument("--threads", required=True, help="Path to input .threads file")
+    p_pgen.add_argument("--out", required=True, help="Output prefix (creates .pgen, .pvar, .psam)")
+    p_pgen.add_argument("--variants", default=None, help="Path to .pvar or .bim file with variant information")
+    p_pgen.add_argument("--samples", default=None, help="Path to a file with one sample ID per line")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -145,6 +152,11 @@ def main():
     elif args.command == "vcf":
         from .threads_to_vcf import threads_to_vcf
         threads_to_vcf(args.threads, samples=args.samples, variants=args.variants)
+
+    elif args.command == "pgen":
+        from .threads_to_pgen import threads_to_pgen
+        threads_to_pgen(args.threads, args.out, samples=args.samples, variants=args.variants)
+        goodbye()
 
 
 if __name__ == "__main__":

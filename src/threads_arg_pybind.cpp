@@ -190,6 +190,15 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("right_multiply", &ThreadingInstructions::right_multiply, py::arg("x"), py::arg("diploid") = false, py::arg("normalize") = false,
            py::call_guard<py::gil_scoped_release>())
       .def("materialize_genotypes", &ThreadingInstructions::materialize_genotypes)
+      .def("genotype_matrix_numpy", [](ThreadingInstructions& self) {
+        const auto& gmat = self.get_genotype_matrix();
+        int m = self.num_sites;
+        int n = self.num_samples;
+        py::array_t<int> out({m, n});
+        std::memcpy(out.mutable_data(), gmat.data(),
+                    static_cast<size_t>(m) * n * sizeof(int));
+        return out;
+      })
       .def("materialize_normalized_haploid", &ThreadingInstructions::materialize_normalized_haploid)
       .def("materialize_normalized_diploid", &ThreadingInstructions::materialize_normalized_diploid)
       .def("simplify_for_multiply", &ThreadingInstructions::simplify_for_multiply)

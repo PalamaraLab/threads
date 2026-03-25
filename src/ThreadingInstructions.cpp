@@ -560,6 +560,17 @@ ThreadingInstructions ThreadingInstructions::coarsen(int min_sites) const {
 }
 
 // ── RLE multiply ────────────────────────────────────────────────────────────
+//
+// RLE multiply is equivalent to a sparse matrix representation: each sample's
+// genotype is stored as runs of 1s (start, end pairs). Multiply accumulates
+// contributions from these runs via prefix sums.
+//
+// Complexity: O(m + total_1_runs) per multiply, where total_1_runs is the sum
+// of 1-run counts across all samples. In practice this is O(n * m * p̄) where
+// p̄ is the average allele frequency — the same dominant term as tree shuttle's
+// mismatch cost. However, tree shuttle replaces the O(m) prefix-sum sweep with
+// O(n * n_intervals) tree propagation, which is typically 10-100x smaller than
+// m, so tree shuttle is preferred for large m.
 
 void ThreadingInstructions::prepare_rle_multiply() {
     if (rle_ready) return;
