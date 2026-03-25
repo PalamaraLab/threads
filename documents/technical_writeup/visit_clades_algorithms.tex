@@ -481,21 +481,23 @@ ranges accordingly.  Useful for block-wise algorithms like SCOPE.
 Method & Prepare & Per-call & Peak memory \\
 \midrule
 Dense        & $O(nm)$  & $O(nm)$ & $O(nm)$ \\
-Tree shuttle & $O(n(S + M))$  & $O(n \cdot n_i + M)$ & $O(m \cdot d)$ \\
-RLE          & $O(n(S + M))$  & $O(m + R)$ & $O(m \cdot d + R)$ \\
+Tree shuttle & $O(nm)$  & $O(n \cdot n_i + M)$ & $O(m \cdot d)$ \\
+RLE          & $O(nm)$  & $O(m + R)$ & $O(m \cdot d + R)$ \\
 \bottomrule
 \end{tabular}
-\caption{Complexity comparison.  $S$: total segments; $M$: total
-mismatches; $n_i$: number of global intervals; $R$: total 1-runs; $d$:
-threading tree depth.  Preparation for tree shuttle and RLE visits each
-sample once, copying from the cached target genotype ($O(S)$ segment
-boundaries) and flipping at mismatches ($O(M)$).  The reference-counted
-cache limits peak memory to $O(m \cdot d)$ rather than $O(nm)$, since at
-most $d$ genotype buffers are alive simultaneously.  This makes preparation
-practical at biobank scale: for 500K haplotypes with tree depth $d \approx
-30$, the cache requires $\sim$30 genotype buffers rather than 500K.  Tree
-shuttle's per-call cost replaces the $O(m)$ prefix-sum sweep of RLE with
-$O(n \cdot n_i)$ tree propagation, where $n_i \ll m$ typically.}
+\caption{Complexity comparison.  $n_i$: number of global intervals; $M$:
+total mismatches; $R$: total 1-runs; $d$: threading tree depth.
+Preparation is $O(nm)$ for all methods: each sample's $m$-length genotype
+must be reconstructed from its target's cached genotype.  The key
+difference is \emph{memory}: dense stores $O(nm)$ permanently, while tree
+shuttle and RLE use a reference-counted cache that keeps at most $d$
+genotype buffers alive simultaneously, bounding peak memory to $O(m \cdot
+d)$.  At biobank scale ($n = 500$K), $d \approx 30$, so prepare requires
+$\sim$30 buffers rather than 500K.  Prepare is a one-time cost; the
+per-call savings dominate when many multiplies are performed (e.g., RHE
+with $B = 100$ random vectors).  Tree shuttle's per-call cost replaces the
+$O(m)$ prefix-sum sweep of RLE with $O(n \cdot n_i)$ tree propagation,
+where $n_i \ll m$ typically.}
 \label{tab:complexity}
 \end{table}
 
