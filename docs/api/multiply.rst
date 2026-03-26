@@ -7,17 +7,22 @@ matrix. Two strategies are available: tree shuttle (preferred) and RLE.
 Tree Shuttle
 ------------
 
-Propagates values through the interval-tree structure. Preferred for large *m*
-because it replaces the O(m) sweep with O(n * n_intervals), where n_intervals is
-typically 10-100x smaller than m.
+Propagates values through the interval-tree structure of threading instructions.
+Both directions use O(n) per-call memory and OpenMP multithreading.
 
-**Complexity:** O(n * n_intervals + mismatches) per multiply.
+**Right multiply:** O((n * n_intervals + mismatches) / T) per call, where T is
+the number of threads. Region-chunked parallelism with O(n*T) memory.
+
+**Left multiply:** O((m + mismatches + segments * depth) / T) per call.
+Uses an incremental O(n) subtree weight vector (not a weight matrix), achieving
+sublinear scaling in n. Empirically ~n^0.53.
 
 .. method:: ThreadingInstructions.prepare_tree_multiply()
 
-   Precompute interval-tree structure. Must be called before any tree multiply
-   method. Uses reference-counted genotype cache with O(m * tree_depth) peak
-   memory.
+   Precompute tree-shuttle structures: interval decomposition, mismatch signs
+   via lazy chain tracing, inverted mismatch index, interval change list, and
+   precomputed ancestor chains. O(n * S * d) time where S = segments per sample
+   and d = tree depth. No genotype matrix is materialized.
 
 .. method:: ThreadingInstructions.right_multiply_tree(X)
 

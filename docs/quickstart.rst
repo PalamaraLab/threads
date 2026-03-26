@@ -67,13 +67,13 @@ Multiply without materializing the full genotype matrix:
 
    import numpy as np
 
-   # Tree shuttle (preferred for large m)
+   # Tree shuttle: O(n) memory, OpenMP multithreaded
    instructions.prepare_tree_multiply()
-   y = instructions.right_multiply_tree(x)   # G @ x
-   z = instructions.left_multiply_tree(x)    # G.T @ x
+   y = instructions.right_multiply_tree(x)   # G @ x,  1D or 2D input
+   z = instructions.left_multiply_tree(x)    # G.T @ x, 1D or 2D input
 
-   # Batch multiply (k vectors at once)
-   Y = instructions.right_multiply_tree_batch(X_flat, k)
+   # 2D input dispatches to batch multiply automatically
+   Y = instructions.right_multiply_tree(X)   # X is (num_sites, k) → (num_samples, k)
 
 Export to standard formats
 --------------------------

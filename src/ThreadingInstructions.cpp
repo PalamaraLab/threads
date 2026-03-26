@@ -907,6 +907,39 @@ std::vector<double> ThreadingInstructions::left_multiply_rle_batch(
     return out;
 }
 
+std::vector<int> ThreadingInstructions::het_per_site() const {
+    const int n = num_samples;
+    const int n_dip = n / 2;
+    std::vector<int> het(num_sites, 0);
+
+    GenotypeIterator gi(*this);
+    int s = 0;
+    while (gi.has_next_genotype()) {
+        const std::vector<int>& g = gi.next_genotype();
+        int h = 0;
+        for (int j = 0; j < n_dip; j++) {
+            h += (g[2 * j] != g[2 * j + 1]);
+        }
+        het[s++] = h;
+    }
+    return het;
+}
+
+std::vector<int> ThreadingInstructions::het_per_individual() const {
+    const int n = num_samples;
+    const int n_dip = n / 2;
+    std::vector<int> het(n_dip, 0);
+
+    GenotypeIterator gi(*this);
+    while (gi.has_next_genotype()) {
+        const std::vector<int>& g = gi.next_genotype();
+        for (int j = 0; j < n_dip; j++) {
+            het[j] += (g[2 * j] != g[2 * j + 1]);
+        }
+    }
+    return het;
+}
+
 void ThreadingInstructions::materialize_genotypes() {
     if (genotypes_materialized) return;
     genotype_matrix.resize(static_cast<size_t>(num_sites) * num_samples);

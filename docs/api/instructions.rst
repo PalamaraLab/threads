@@ -71,6 +71,24 @@ Genotype Matrix
    Cache the dense genotype matrix in memory. Called automatically by multiply
    methods and ``genotype_matrix_numpy()``.
 
+.. method:: ThreadingInstructions.het_per_site()
+
+   Count heterozygous diploid individuals per site without materializing the
+   full genotype matrix. Returns an int32 array of length ``num_sites`` where
+   ``het[s]`` is the number of diploid pairs ``(2j, 2j+1)`` with different
+   alleles at site *s*.
+
+   O(n * m) time, O(n) memory. Used by ``ThreadsBackend`` for diploid variance
+   computation.
+
+.. method:: ThreadingInstructions.het_per_individual()
+
+   Count heterozygous sites per diploid individual. Returns an int32 array
+   of length ``num_samples / 2`` where ``het[j]`` is the number of sites where
+   samples ``2j`` and ``2j+1`` have different alleles.
+
+   O(n * m) time, O(n) memory. Used by SCOPE for the heterozygosity diagonal.
+
 Variant Operations
 ------------------
 

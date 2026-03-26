@@ -278,9 +278,16 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       }, py::arg("X"),
            "Compute G.T @ X via RLE. X is (num_samples,) or (num_samples, k). "
            "Returns (num_sites,) or (num_sites, k) numpy array.")
+      .def("het_per_site", &ThreadingInstructions::het_per_site,
+           "Count heterozygous diploid individuals per site. Returns int32 array "
+           "of length num_sites. O(n*m) time, O(n) memory (no dense matrix allocated).")
+      .def("het_per_individual", &ThreadingInstructions::het_per_individual,
+           "Count heterozygous sites per diploid individual. Returns int32 array "
+           "of length num_samples/2. O(n*m) time, O(n) memory.")
       .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply,
-           "Precompute interval-tree structure for tree multiply. "
-           "O(n*n_intervals + mismatches) per multiply; preferred over RLE for large m.")
+           "Precompute tree-shuttle structures for multiply. O(n*S*d) where S=segments/sample, "
+           "d=tree depth. After this, right_multiply_tree is O((n*ni+M)/T) and "
+           "left_multiply_tree is O((m+M+S*d)/T) with O(n) memory per thread.")
       .def("right_multiply_tree", [](ThreadingInstructions& self,
               py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
         auto buf = arr.request();

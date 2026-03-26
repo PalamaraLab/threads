@@ -110,10 +110,16 @@ public:
     std::vector<double> left_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
     std::vector<double> right_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
 
-    // Tree-propagation multiply: O(n * n_segments + total_mismatches) per call.
-    // Prepare precomputes mismatch corrections via lazy chain tracing
-    // (O(M_total * d) where d = tree depth), avoiding O(n*m) genotype
-    // materialization. Peak memory O(n * n_intervals), no genotype cache.
+    // Tree-propagation multiply (tree shuttle).
+    // Prepare: O(n*S*d) where S=segments/sample, d=tree depth.
+    //   Builds interval decomposition, mismatch signs via lazy chain tracing,
+    //   inverted mismatch index, interval change list, and ancestor chains.
+    //   No genotype materialization; peak memory O(S*n + M + n*S*d).
+    // Right multiply: O((n*ni + M)/T) per call, O(n*T) memory.
+    //   Region-chunked OpenMP; each thread initializes via binary search.
+    // Left multiply: O((m + M + S*d)/T) per call, O(n*T + m) memory.
+    //   Sublinear via incremental O(n) weight vector (not O(n*ni) matrix).
+    //   Region-chunked OpenMP; non-overlapping site ranges, no reduction.
     void prepare_tree_multiply();
     std::vector<double> right_multiply_tree(const std::vector<double>& x);
     std::vector<double> left_multiply_tree(const std::vector<double>& x);
@@ -196,6 +202,17 @@ public:
         int n_mutations;
     };
     MutationResult generate_mutations(double mutation_rate, int seed = 42) const;
+
+    // Count heterozygous diploid individuals per site without materializing
+    // the full genotype matrix.  Returns vector of length num_sites where
+    // het[s] = number of diploid pairs (2j, 2j+1) with different alleles.
+    // O(n*m) time, O(n) memory (no n*m matrix allocated).
+    std::vector<int> het_per_site() const;
+
+    // Count heterozygous sites per diploid individual.  Returns vector of
+    // length num_samples/2 where het[j] = number of sites where sample 2j
+    // and sample 2j+1 have different alleles.  O(n*m) time, O(n) memory.
+    std::vector<int> het_per_individual() const;
 
     // Precompute and cache the dense genotype matrix (num_sites × num_samples, row-major).
     // Subsequent left_multiply/right_multiply calls use the cached matrix.
