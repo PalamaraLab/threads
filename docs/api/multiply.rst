@@ -36,15 +36,6 @@ sublinear scaling in n. Empirically ~n^0.53.
    ``(num_samples, k)``. Returns numpy array of matching shape:
    ``(num_sites,)`` or ``(num_sites, k)``.
 
-.. method:: ThreadingInstructions.right_multiply_tree_range(x, site_start, site_end)
-
-   Compute G[site_start:site_end, :] @ x. Returns list of length ``num_samples``.
-
-.. method:: ThreadingInstructions.left_multiply_tree_range(x, site_start, site_end)
-
-   Compute G[site_start:site_end, :].T @ x. Returns list of length
-   ``site_end - site_start``.
-
 RLE (Run-Length Encoding)
 -------------------------
 

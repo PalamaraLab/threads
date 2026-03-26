@@ -285,6 +285,7 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
            "Count heterozygous sites per diploid individual. Returns int32 array "
            "of length num_samples/2. O(n*m) time, O(n) memory.")
       .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply,
+           py::call_guard<py::gil_scoped_release>(),
            "Precompute tree-shuttle structures for multiply. O(n*S*d) where S=segments/sample, "
            "d=tree depth. After this, right_multiply_tree is O((n*ni+M)/T) and "
            "left_multiply_tree is O((m+M+S*d)/T) with O(n) memory per thread.")
@@ -296,7 +297,8 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
                 throw std::runtime_error("1D input must have length num_sites");
             std::vector<double> x(static_cast<double*>(buf.ptr),
                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
-            auto result = self.right_multiply_tree(x);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.right_multiply_tree(x); }
             py::array_t<double> out(static_cast<size_t>(result.size()));
             std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
             return out;
@@ -307,7 +309,8 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
                 throw std::runtime_error("First dimension must be num_sites");
             std::vector<double> x_flat(static_cast<double*>(buf.ptr),
                                        static_cast<double*>(buf.ptr) + buf.size);
-            auto result = self.right_multiply_tree_batch(x_flat, k);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.right_multiply_tree_batch(x_flat, k); }
             py::array_t<double> out({self.num_samples, k});
             std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
             return out;
@@ -325,7 +328,8 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
                 throw std::runtime_error("1D input must have length num_samples");
             std::vector<double> x(static_cast<double*>(buf.ptr),
                                   static_cast<double*>(buf.ptr) + buf.shape[0]);
-            auto result = self.left_multiply_tree(x);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.left_multiply_tree(x); }
             py::array_t<double> out(static_cast<size_t>(result.size()));
             std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
             return out;
@@ -336,7 +340,8 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
                 throw std::runtime_error("First dimension must be num_samples");
             std::vector<double> x_flat(static_cast<double*>(buf.ptr),
                                        static_cast<double*>(buf.ptr) + buf.size);
-            auto result = self.left_multiply_tree_batch(x_flat, k);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.left_multiply_tree_batch(x_flat, k); }
             py::array_t<double> out({self.num_sites, k});
             std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
             return out;
@@ -346,14 +351,6 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       }, py::arg("X"),
            "Compute G.T @ X via tree shuttle. X is (num_samples,) or (num_samples, k). "
            "Returns (num_sites,) or (num_sites, k) numpy array.")
-      .def("right_multiply_tree_range", &ThreadingInstructions::right_multiply_tree_range,
-           py::arg("x"), py::arg("site_start"), py::arg("site_end"),
-           py::call_guard<py::gil_scoped_release>(),
-           "Compute G[site_start:site_end, :] x via tree shuttle. Returns vector of length num_samples.")
-      .def("left_multiply_tree_range", &ThreadingInstructions::left_multiply_tree_range,
-           py::arg("x"), py::arg("site_start"), py::arg("site_end"),
-           py::call_guard<py::gil_scoped_release>(),
-           "Compute G[site_start:site_end, :]^T x via tree shuttle. Returns vector of length (site_end - site_start).")
       .def("visit_clades", [](const ThreadingInstructions& self, py::function callback) {
         self.visit_clades([&](const std::vector<int>& descendants, double height,
                               int start_bp, int end_bp) {

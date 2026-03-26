@@ -132,13 +132,6 @@ public:
     std::vector<double> left_multiply_tree_batch(const std::vector<double>& x_flat, int k);
 
     // Range-restricted tree multiply: uses the full precomputed tree structure
-    // but only accumulates contributions from sites in [site_start, site_end).
-    // Carry state is correct because the full tree data is used.
-    // right: x has length (site_end - site_start), returns (num_samples,)
-    // left:  x has length num_samples, returns (site_end - site_start,)
-    std::vector<double> right_multiply_tree_range(const std::vector<double>& x, int site_start, int site_end);
-    std::vector<double> left_multiply_tree_range(const std::vector<double>& x, int site_start, int site_end);
-
     // RLE (run-length encoded) multiply: precomputes per-sample 1-runs,
     // then multiplies via prefix-sum lookups in O(m + total_1_runs).
     // Prepare is O(n*m) with O(m * tree_depth) peak memory (ref-counted cache).
