@@ -706,21 +706,26 @@ speedup to $\sim$2--3$\times$ at $T = 8$.  For chromosome-length regions
 achieved.
 
 %% ========================================================================
-\subsection{Batch and Range Variants}
+\subsection{Batch Multiply}
 
-\textbf{Batch multiply} ($k$ vectors simultaneously):
-Prefix sums, cumulative rows, $W$ vectors, and $\delta$ arrays are widened
-to $k$ columns.  Inner loops over $k$ elements auto-vectorize via SIMD.
-The batch left multiply uses precomputed ancestor chains (not
-per-query binary search) to keep the inner loop tight:
-for each ancestor step, a length-$k$ vector subtraction (detach) or
-addition (attach) is performed.
+Processing $k$ vectors simultaneously avoids $k$ separate tree traversals.
+Both batch functions use the same region-chunked OpenMP strategy as their
+single-vector counterparts: each thread handles a contiguous chunk of
+intervals, initializes its own state at the chunk boundary, and sweeps
+independently.
 
-\textbf{Range multiply} (submatrix $\mathbf{G}[s_a{:}s_b, :]$):
-Restricts interval iteration to $[j_a, j_b)$ where $j_a, j_b$ are the
-intervals containing $s_a, s_b$.  The full precomputed tree structure is
-used (correct carry state), but only sites in $[s_a, s_b)$ contribute to
-the output.  Input vector has length $s_b - s_a$ (right) or $n$ (left).
+\textbf{Right multiply batch:}
+Thread-local $\delta$, \texttt{mm\_corr}, and \texttt{local\_out} arrays
+are widened to $n \times k$.  Inner loops over $k$ elements auto-vectorize
+via SIMD.  Each thread accumulates into its own \texttt{local\_out} and
+a critical-section reduction combines results.
+
+\textbf{Left multiply batch:}
+Each thread builds a $k$-wide $W$ vector ($n \times k$) for its starting
+interval and sweeps its chunk.  Precomputed ancestor chains are used for
+boundary updates: for each detach/attach step, a length-$k$ vector
+subtraction or addition is performed.  Since intervals partition the sites,
+threads write to non-overlapping ranges of the output---no reduction needed.
 
 %% ========================================================================
 \subsection{Complexity Summary}
