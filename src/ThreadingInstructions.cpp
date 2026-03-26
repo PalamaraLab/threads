@@ -1732,11 +1732,17 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
     const int* ivl_s = tree_ivl_start.data();
     const int* ivl_e = tree_ivl_end.data();
 
+    // Column block size: keep delta+mm_corr per thread ≤ ~1MB so the
+    // propagation loop's working set fits in L2/L3 cache.
+    // 2 arrays × n × bk × 8 bytes ≤ 1MB → bk ≤ 65536/n
+    const int bk = std::max(1, std::min(k, 65536 / std::max(1, n)));
+
     std::vector<double> out(static_cast<size_t>(n) * k, 0.0);
 
-    // Region-chunked parallel sweep with k-wide vectors: single tree traversal
-    // processes all k columns simultaneously.  Each thread handles a contiguous
-    // range of intervals with its own k-wide state.
+    // Region-chunked parallel sweep with column blocking.  cur_target is
+    // initialized once per thread (the expensive O(n log S) part); the
+    // mismatch scatter + propagation loop runs in bk-wide blocks to keep
+    // the hot arrays (delta, mm_corr) cache-resident.
     #pragma omp parallel
     {
         const int T = omp_get_num_threads();
@@ -1747,12 +1753,16 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
 
         if (j_start < j_end) {
             const size_t nk = static_cast<size_t>(n) * k;
+            const size_t nbk = static_cast<size_t>(n) * bk;
             std::vector<int> cur_target(n);
-            std::vector<double> delta(nk, 0.0);
-            std::vector<double> mm_corr(nk, 0.0);
+            // bk-wide working arrays (hot, cache-resident)
+            std::vector<double> delta(nbk, 0.0);
+            std::vector<double> mm_corr(nbk, 0.0);
+            // k-wide accumulator (only bk columns hot at a time)
             std::vector<double> local_out(nk, 0.0);
             std::vector<double> total_ref(k, 0.0);
 
+            // Initialize cur_target ONCE per thread
             cur_target[0] = 0;
             for (int i = 1; i < n; i++)
                 cur_target[i] = target_at_interval(i, j_start);
@@ -1763,7 +1773,7 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
                         cur_target[ivl_change_sample[c]] = ivl_change_new_tgt[c];
                 }
 
-                // Ref contribution: accumulate x[s,:] for ref[s]==1 sites
+                // Ref contribution: full k width (tiny per site)
                 for (int s = ivl_s[j]; s < ivl_e[j]; s++) {
                     if (ref[s]) {
                         const double* xs = &xp[static_cast<size_t>(s) * k];
@@ -1775,32 +1785,36 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
                 const int mm_b = inv_mm_offset[j + 1];
                 if (mm_a == mm_b) continue;
 
-                // Scatter k-wide mismatch corrections
-                for (int c = mm_a; c < mm_b; c++) {
-                    const double* xs = &xp[static_cast<size_t>(inv_mm_site[c]) * k];
-                    double* mc = &mm_corr[static_cast<size_t>(inv_mm_sample[c]) * k];
-                    const double sign = static_cast<double>(inv_mm_sign[c]);
-                    for (int col = 0; col < k; col++) mc[col] += xs[col] * sign;
-                }
+                // Process mismatches + propagation in column blocks
+                for (int col0 = 0; col0 < k; col0 += bk) {
+                    const int cols = std::min(bk, k - col0);
 
-                // Propagate corrections root→leaves (delta[0,:] = 0 always)
-                for (int i = 1; i < n; i++) {
-                    const double* dt = &delta[static_cast<size_t>(cur_target[i]) * k];
-                    const double* mc = &mm_corr[static_cast<size_t>(i) * k];
-                    double* di = &delta[static_cast<size_t>(i) * k];
-                    double* lo = &local_out[static_cast<size_t>(i) * k];
-                    for (int col = 0; col < k; col++) {
-                        const double d = dt[col] + mc[col];
-                        di[col] = d;
-                        lo[col] += d;
+                    // Scatter mismatches into bk-wide mm_corr
+                    for (int c = mm_a; c < mm_b; c++) {
+                        const double* xs = &xp[static_cast<size_t>(inv_mm_site[c]) * k + col0];
+                        double* mc = &mm_corr[static_cast<size_t>(inv_mm_sample[c]) * bk];
+                        const double sign = static_cast<double>(inv_mm_sign[c]);
+                        for (int col = 0; col < cols; col++) mc[col] += xs[col] * sign;
                     }
-                }
 
-                // Clear mm_corr sparsely; delta not cleared — delta[0,:]=0
-                // always, and delta[i,:] for i>=1 are overwritten next iteration
-                for (int c = mm_a; c < mm_b; c++) {
-                    double* mc = &mm_corr[static_cast<size_t>(inv_mm_sample[c]) * k];
-                    std::fill_n(mc, k, 0.0);
+                    // Propagate with bk-wide delta, write to k-strided local_out
+                    for (int i = 1; i < n; i++) {
+                        const double* dt = &delta[static_cast<size_t>(cur_target[i]) * bk];
+                        const double* mc = &mm_corr[static_cast<size_t>(i) * bk];
+                        double* di = &delta[static_cast<size_t>(i) * bk];
+                        double* lo = &local_out[static_cast<size_t>(i) * k + col0];
+                        for (int col = 0; col < cols; col++) {
+                            const double d = dt[col] + mc[col];
+                            di[col] = d;
+                            lo[col] += d;
+                        }
+                    }
+
+                    // Clear mm_corr sparsely
+                    for (int c = mm_a; c < mm_b; c++) {
+                        double* mc = &mm_corr[static_cast<size_t>(inv_mm_sample[c]) * bk];
+                        std::fill_n(mc, cols, 0.0);
+                    }
                 }
             }
 
