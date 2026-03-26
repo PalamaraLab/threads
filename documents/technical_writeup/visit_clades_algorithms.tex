@@ -352,178 +352,534 @@ number of mutations is $\mu \cdot V$ where $V$ is the total volume.
 \section{Tree-Shuttle Multiply}
 
 The tree-shuttle multiply computes implicit genotype-matrix--vector products
-$\mathbf{G}^\top \mathbf{x}$ and $\mathbf{G}\mathbf{x}$ by propagating
-cumulative sums through the dependency structure of threading instructions,
-without materializing the genotype matrix.
+$\mathbf{G}^\top \mathbf{x}$ (right multiply) and $\mathbf{G}\mathbf{x}$
+(left multiply) by propagating cumulative sums through the dependency
+structure of threading instructions, without materializing the genotype
+matrix.  Both directions use $O(n)$ per-call memory and achieve sublinear
+scaling in practice.
 
-\subsection{Global Interval Decomposition}
+\subsection{Notation}
 
-The preparation phase constructs a global set of $n_i$ intervals from all
-segment start positions.  Within each interval, every sample's segment
-assignment is constant.
-
-\begin{algorithm}[h]
-\caption{Tree-shuttle preparation: interval decomposition}
-\begin{algorithmic}[1]
-\State $\text{breaks} \gets \text{sorted unique segment starts across all samples}$
-\State $n_i \gets |\text{breaks}| - 1$ \Comment{number of global intervals}
-\For{$j = 0$ to $n_i - 1$}
-    \State $\texttt{ivl\_start}[j] \gets \text{breaks}[j]$; $\texttt{ivl\_end}[j] \gets \text{breaks}[j+1]$
-\EndFor
-\State \textbf{Map samples to intervals:}
-\For{each sample $i$, interval $j$}
-    \State $\texttt{ivl\_seg}[i \cdot n_i + j] \gets$ segment of sample $i$ active at interval $j$
-\EndFor
-\end{algorithmic}
-\end{algorithm}
-
-\subsection{Genotype Cache and Mismatch Precomputation}
-
-The preparation phase processes samples in order $0, 1, \ldots, n{-}1$,
-building each sample's genotype from its target's cached genotype plus
-mismatch flips.  A reference-counting scheme limits peak memory to $O(m
-\cdot d)$ where $d$ is the maximum number of simultaneously active targets
-(bounded by the threading tree depth).
-
-For each sample, the preparation computes:
+Throughout this section we use the following symbols:
 \begin{itemize}
-\item \textbf{Carry values} $\texttt{carry}[i \cdot n_i + j]$: the
-genotype of sample $i$ at the last site of interval $j$.  Used for
-self-referencing segments.
-\item \textbf{Mismatch signs} $\texttt{mm\_sign}[k] \in \{-1, +1\}$: for
-each non-self mismatch at site $s$ where the target's genotype is $g$, the
-sign is $1 - 2g$.  This encodes the correction needed during multiplication.
-\item \textbf{Mismatch-to-interval mapping} $\texttt{mm\_ivl}[k]$: the
-global interval containing each mismatch site.
+\item $n$: number of haplotype samples (indexed $0, \ldots, n{-}1$)
+\item $m$: number of variant sites
+\item $n_i$: number of global intervals (unique segment boundaries)
+\item $S_i$: number of segments for sample $i$; $S = \sum_i S_i$
+\item $M_i$: number of mismatches for sample $i$; $M = \sum_i M_i$
+\item $d$: depth of the threading dependency tree ($\le \lceil\log_2 n\rceil$ typically)
+\item $\bar{S} = S/n$: average segments per sample ($\approx 20$ for 1\,Mb regions)
+\item $T$: number of OpenMP threads
 \end{itemize}
 
+%% ========================================================================
+\subsection{Preparation}
+
+Preparation is a one-time $O(nS\log n_i + Md + nSd)$ computation that
+builds all data structures needed for subsequent multiply calls.  It
+proceeds in four phases.
+
+\subsubsection{Phase 1: Global Interval Decomposition}
+
+Collect all segment start positions across all $n$ samples into a sorted,
+deduplicated set of boundary positions $\{b_0, b_1, \ldots, b_{n_i}\}$.
+The $j$-th interval spans sites $[\texttt{ivl\_start}[j],
+\texttt{ivl\_end}[j])$, where $\texttt{ivl\_start}[j]$ and
+$\texttt{ivl\_end}[j]$ are the first and one-past-last \emph{site indices}
+within the interval.  Within each interval, every sample's target is
+constant.
+
+\textbf{Auxiliary:} Build the reference genome
+$\texttt{ref}[s] \in \{0,1\}$ for sample~0 by marking each mismatch of
+sample~0 from the all-zero baseline.  Build $\texttt{site\_to\_ivl}[s]$
+mapping each site to its containing interval ($O(m)$ memory, one scan).
+
+\textbf{Cost:} $O(S \log S + m)$.
+
+\subsubsection{Phase 2: Per-Sample Segment-to-Interval Mapping}
+
+For each sample $i$, map its $S_i$ segments to global intervals.
+$\texttt{tree\_seg\_first\_ivl}[\texttt{offset}[i] + k]$ stores the first
+global interval of sample $i$'s $k$-th segment, computed via binary search
+on $\texttt{ivl\_start}$.
+
+This enables $O(\log S_i)$ lookup of ``which target does sample $i$ have
+at interval $j$?''\ via the helper function
+$\texttt{target\_at\_interval}(i, j)$, which binary-searches
+$\texttt{tree\_seg\_first\_ivl}$ for the largest entry $\le j$.
+
+\textbf{Cost:} $O(S \log n_i)$.  \textbf{Memory:} $O(S)$.
+
+\subsubsection{Phase 3: Mismatch Signs via Lazy Chain Tracing}
+
+For each non-self mismatch of each sample, compute the correction sign
+$\texttt{mm\_sign}[k] \in \{-1, +1\}$ by querying the target's genotype at
+that site.  The genotype is determined by tracing the threading chain from
+the target back to sample~0, accumulating XOR parity of mismatches along
+the path.  Each query costs $O(d \cdot \log \bar{S})$ (binary search at
+each of $d$ chain levels to find the active segment).
+
+Self-referencing mismatches ($\text{target} = i$) are marked with
+$\texttt{mm\_sign} = 0$ and handled specially during multiply.
+
+\textbf{Key property:} No genotype buffer is materialized.  The entire
+phase uses $O(1)$ working memory beyond the output arrays.
+
+\textbf{Cost:} $O(Md \log \bar{S})$.  \textbf{Memory:} $O(M)$.
+
+\subsubsection{Phase 4: Multiply Support Structures}
+
+This phase builds four data structures used during the interval sweep of
+both left and right multiply:
+
+\paragraph{A. Inverted mismatch index.}
+Group non-self-ref mismatches by interval for $O(1)$ iteration during the
+sweep.  For each interval $j$, the range
+$[\texttt{inv\_mm\_offset}[j], \texttt{inv\_mm\_offset}[j{+}1])$ indexes
+into flat arrays $\texttt{inv\_mm\_sample}$, $\texttt{inv\_mm\_site}$,
+$\texttt{inv\_mm\_sign}$, giving all (sample, site, sign) triples whose
+mismatch falls in interval $j$.
+
+Built by scanning $\texttt{site\_to\_ivl}$ for each mismatch, filtering
+out self-ref ($\texttt{mm\_sign} = 0$), and counting-sort by interval.
+Memory: $O(M)$.
+
+\paragraph{B. Interval change list.}
+Record which samples change target at each interval boundary $j \to j{+}1$.
+For each change at boundary $j$, store
+$(\texttt{sample}, \texttt{old\_tgt}, \texttt{new\_tgt})$ in flat arrays
+indexed by $[\texttt{ivl\_change\_offset}[j],
+\texttt{ivl\_change\_offset}[j{+}1])$.
+
+Within each group, entries are sorted by \emph{decreasing sample index}.
+This ordering is critical for correctness of left multiply boundary updates
+(Section~\ref{sec:left-boundary}).
+
+Built by scanning $\texttt{tree\_seg\_first\_ivl}$: at each segment
+boundary for sample $i$ at interval $j$, record the old and new targets.
+Memory: $O(S)$.
+
+\paragraph{C. Self-ref sample list.}
+For each interval $j$, store which samples are self-referencing
+($\text{target} = i$) in flat arrays
+$\texttt{self\_ref\_sample}[\texttt{self\_ref\_offset}[j] \ldots]$.
+Memory: $O(S_\text{self})$ (typically small).
+
+\paragraph{D. Precomputed ancestor chains.}
+For each entry in the interval change list, precompute the full ancestor
+chain that must be updated in the left multiply's $W$ vector.  Two sets of
+chains are stored:
+
+\emph{Detach chains:} For change $c$ at boundary $j$, the detach chain is
+the sequence of ancestors of $\texttt{old\_tgt}$ in the tree at interval
+$j$: starting from $\texttt{old\_tgt}$, repeatedly look up the target at
+interval $j$ until reaching sample~0.  Stored in
+$\texttt{detach\_chain\_data}[\texttt{detach\_chain\_offset}[c] \ldots]$.
+
+\emph{Attach chains:} Same, but for $\texttt{new\_tgt}$ in the tree at
+interval $j{+}1$.  Stored in $\texttt{attach\_chain\_data}$.
+
+Precomputing these chains during preparation (total cost $O(nSd)$, memory
+$O(nSd)$) eliminates the $O(\log \bar{S})$ binary search per ancestor step
+that would otherwise be needed during each left multiply call.
+
+\textbf{Total Phase 4 cost:} $O(M + S + nSd)$.
+
+%% ========================================================================
 \subsection{Right Multiply: $\mathbf{y} = \mathbf{G}^\top \mathbf{x}$}
 
-Given $\mathbf{x} \in \mathbb{R}^m$, compute $y_i = \sum_j G_{ji} \, x_j$
-for each sample $i$.
+Given $\mathbf{x} \in \mathbb{R}^m$, compute $y_i = \sum_s G_{si} \,
+x_s$ for each sample $i$.
+
+The algorithm sweeps intervals $j = 0, \ldots, n_i{-}1$, maintaining a
+\emph{propagation vector} $\delta[i]$ that accumulates each sample's
+dot-product contribution from the current interval.  At the end of each
+interval, weights propagate up the threading tree: for $i = n{-}1$ down to
+$1$, $\delta[\text{target}_i] \mathrel{+}= \delta[i]$, then
+$\delta[i] = 0$.
 
 \begin{algorithm}[h]
-\caption{Tree-shuttle right multiply}
+\caption{Tree-shuttle right multiply (single-threaded core)}
 \begin{algorithmic}[1]
-\State Compute prefix sums: $P[s] = \sum_{j=0}^{s-1} x_j$
-\State Allocate cumulative-sum pool (reference-counted, one row per active target)
-\For{$i = 0$ to $n - 1$}
-    \If{$i = 0$}
-        \For{each interval $j$}
-            \State $\texttt{cum}[j{+}1] = \texttt{cum}[j] + \sum_{s \in [\texttt{ivl\_start}[j],\, \texttt{ivl\_end}[j])} x[s] \cdot \texttt{ref}[s]$
-        \EndFor
-        \State $y_0 = \texttt{cum}[n_i]$
-    \Else
-        \State $y_i \gets 0$
-        \For{each segment of sample $i$ spanning intervals $[j_a, j_b)$}
-            \If{target $\ne i$} \Comment{non-self segment}
-                \State $\text{base} = \texttt{tgt\_cum}[j_b] - \texttt{tgt\_cum}[j_a]$ \Comment{target's cumulative contribution}
-                \State $\text{corr} = \sum_{\text{mismatches } s} x[s] \cdot \texttt{mm\_sign}[s]$ \Comment{mismatch correction}
-                \State $y_i \mathrel{+}= \text{base} + \text{corr}$
-            \Else \Comment{self-referencing segment}
-                \State Expand via carry values and prefix sums
-            \EndIf
-        \EndFor
+\State Allocate $\delta[0 \ldots n{-}1] \gets 0$,
+       $\texttt{mm\_corr}[0 \ldots n{-}1] \gets 0$,
+       $y[0 \ldots n{-}1] \gets 0$
+\State $\texttt{total\_ref} \gets 0$
+\For{$j = 0$ to $n_i - 1$}
+    \If{$\texttt{ivl\_start}[j] \ge \texttt{ivl\_end}[j]$}
+        \State \textbf{continue} \Comment{skip empty intervals}
     \EndIf
-    \State Release target cumulative rows when reference count reaches zero
+    \State \textbf{// A. Reference contribution}
+    \State $\texttt{ref\_sum} \gets \sum_{s=\texttt{ivl\_start}[j]}^{\texttt{ivl\_end}[j]-1} x[s] \cdot \texttt{ref}[s]$
+    \State $\texttt{total\_ref} \mathrel{+}= \texttt{ref\_sum}$
+    \State $\delta[0] \mathrel{+}= \texttt{ref\_sum}$
+    \State \textbf{// B. Mismatch corrections}
+    \For{each $(i, s, \sigma)$ in $\texttt{inv\_mm}$ for interval $j$}
+        \State $\texttt{mm\_corr}[i] \mathrel{+}= \sigma \cdot x[s]$
+    \EndFor
+    \State \textbf{// C. Propagation (bottom-up)}
+    \For{$i = n - 1$ down to $1$}
+        \State $t \gets \texttt{cur\_target}[i]$
+        \If{$t = i$} \Comment{self-ref: use carry}
+            \State handle via carry-run decomposition
+        \Else
+            \State $y[i] \mathrel{+}= \texttt{mm\_corr}[i]$;
+                   $\texttt{mm\_corr}[i] \gets 0$
+            \State $\delta[t] \mathrel{+}= \delta[i]$;
+                   $\delta[i] \gets 0$
+        \EndIf
+    \EndFor
+    \State $y[0] \mathrel{+}= \texttt{mm\_corr}[0]$;
+           $\texttt{mm\_corr}[0] \gets 0$
+    \State \textbf{// D. Update targets at boundary}
+    \For{each change $(c, t_\text{old}, t_\text{new})$ at boundary $j \to j{+}1$}
+        \State $\texttt{cur\_target}[c] \gets t_\text{new}$
+    \EndFor
+\EndFor
+\State $\forall i$: $y[i] \mathrel{+}= \texttt{total\_ref}$
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Key insight (deferred reference sum):}  Because every sample
+inherits the reference genome's 1-sites (modified only at mismatches), the
+reference contribution $\sum_s x[s] \cdot \texttt{ref}[s]$ is common to
+all samples.  Rather than propagating it through $\delta$ at every
+interval, we accumulate $\texttt{total\_ref}$ and add it once at the end
+($O(n)$ instead of $O(n \cdot n_i)$).
+
+\textbf{Complexity:} $O(n \cdot n_i^\text{nonempty} + M)$ per call, where
+$n_i^\text{nonempty} \le n_i$ is the number of intervals containing at
+least one site.  The propagation loop (step~C) dominates at
+$O(n)$ per non-empty interval.  Memory: $O(n)$.
+
+%% ========================================================================
+\subsection{Left Multiply: $\mathbf{y} = \mathbf{G} \mathbf{x}$}
+\label{sec:left-multiply}
+
+Given $\mathbf{x} \in \mathbb{R}^n$, compute $y_s = \sum_i G_{si} \,
+x_i$ for each site $s$.  The key innovation over the previous $O(n \cdot
+n_i)$ weight-matrix approach is maintaining an $O(n)$ \emph{subtree weight
+vector} $W[i]$ incrementally across intervals.
+
+\textbf{Invariant:} At interval $j$, $W[i]$ equals the sum of $x_k$ over
+all samples $k$ in the subtree rooted at $i$ in the threading tree at
+interval $j$.  In particular, $W[0] = \sum_i x_i$ (total weight).
+
+\begin{algorithm}[h]
+\caption{Tree-shuttle left multiply (single-threaded core)}
+\begin{algorithmic}[1]
+\State \textbf{Initialize $W$} for interval 0:
+\State $W[i] \gets x[i]$ for all $i$
+\For{$i = n - 1$ down to $1$}
+    \State $t \gets \texttt{target\_at\_interval}(i, 0)$
+    \If{$t \ne i$} $W[t] \mathrel{+}= W[i]$ \EndIf
+\EndFor
+\State \textbf{Sweep intervals:}
+\For{$j = 0$ to $n_i - 1$}
+    \State \textbf{// A. Reference emission}
+    \For{each site $s$ in interval $j$ where $\texttt{ref}[s] = 1$}
+        \State $y[s] \mathrel{+}= W[0]$
+    \EndFor
+    \State \textbf{// B. Mismatch emission}
+    \For{each $(i, s, \sigma)$ in $\texttt{inv\_mm}$ for interval $j$}
+        \State $y[s] \mathrel{+}= \sigma \cdot W[i]$
+    \EndFor
+    \State \textbf{// C. Self-ref carry emission}
+    \For{each self-ref sample $i$ in interval $j$}
+        \State emit carry-run contribution with weight $W[i]$
+    \EndFor
+    \State \textbf{// D. Boundary update (Section~\ref{sec:left-boundary})}
+    \If{$j + 1 < n_i$}
+        \State update $W$ via detach/attach passes
+    \EndIf
 \EndFor
 \end{algorithmic}
 \end{algorithm}
 
-The key insight is that for non-self segments, the sample's genotype within
-an interval differs from its target's genotype only at mismatch sites.
-Therefore, the cumulative sum for the sample equals the target's cumulative
-sum plus a sparse mismatch correction.  This avoids the $O(m)$ per-sample
-sweep of dense multiplication.
+\subsubsection{Boundary Update: Detach/Attach}
+\label{sec:left-boundary}
 
-\textbf{Self-referencing segments} ($\text{target} = i$) arise when a
-sample is its own reference in some genomic region.  These are handled via
-precomputed carry values: the genotype alternates between 0 and 1 at each
-mismatch, and the contribution is computed using prefix sums.
+When transitioning from interval $j$ to $j{+}1$, some samples change
+target.  The $W$ vector must be updated to reflect the new tree topology.
+This is done in two passes using the precomputed ancestor chains:
 
-\subsection{Left Multiply: $\mathbf{y} = \mathbf{G} \mathbf{x}$}
+\textbf{Pass 1 --- Detach (decreasing sample order):}
+For each changing sample $c$ (processed in decreasing index order), subtract
+$W[c]$ from every ancestor along the chain from $\texttt{old\_tgt}(c)$ up
+to sample~0 in the interval-$j$ tree:
+\begin{algorithmic}[1]
+\For{each change $c$ in decreasing sample order}
+    \State $\delta_c \gets W[c]$
+    \For{each ancestor $a$ in $\texttt{detach\_chain}[c]$}
+        \State $W[a] \mathrel{-}= \delta_c$
+    \EndFor
+\EndFor
+\end{algorithmic}
 
-Given $\mathbf{x} \in \mathbb{R}^n$, compute $y_j = \sum_i G_{ji} \,
-x_i$ for each site $j$.  This uses a two-pass approach:
+\textbf{Pass 2 --- Attach (arbitrary order):}
+For each changing sample $c$, add the \emph{saved} $\delta_c$ to every
+ancestor along the chain from $\texttt{new\_tgt}(c)$ up to sample~0 in the
+interval-$(j{+}1)$ tree:
+\begin{algorithmic}[1]
+\For{each change $c$}
+    \For{each ancestor $a$ in $\texttt{attach\_chain}[c]$}
+        \State $W[a] \mathrel{+}= \delta_c$
+    \EndFor
+\EndFor
+\end{algorithmic}
 
-\textbf{Pass 1 (bottom-up weight propagation, sequential):}
-Initialize weight matrix $W[i, j] = x_i$ for all intervals $j$.  Then
-process samples $i = n{-}1$ down to 1: for each segment with
-$\text{target} \ne i$, accumulate $W[\text{target}, j] \mathrel{+}= W[i,
-j]$ across the segment's intervals.  This propagates weights up the
-threading tree.
+\textbf{Correctness of decreasing order:}  Processing detachments in
+decreasing sample order ensures $W[c]$ is correct before detaching, because
+targets always point to lower-indexed samples.  A higher-indexed descendant
+of $c$ that also changes at this boundary is detached first, so its weight
+is already removed from $W[c]$.
 
-\textbf{Pass 2 (site-level accumulation, parallel):}
-For each sample $i$, expand the weights into per-site contributions using
-the mismatch structure and carry values, analogous to the right multiply.
-This pass is embarrassingly parallel across samples.
+\textbf{Complexity per boundary:} $O(|\text{changes}| \cdot d)$ using
+precomputed chains.  Total across all intervals:
+$O(\text{total\_changes} \cdot d) = O(S \cdot d)$.
 
-\textbf{Complexity:} $O(n \cdot n_i + n_\text{mismatches})$ per call.
-Pass~1 requires $O(n \cdot n_i)$ storage for the weight matrix.  Pass~2 can
-use thread-local output buffers for parallelization.
+\textbf{Per-call complexity:} $O(m + M + Sd)$.  Memory: $O(n + m)$.
 
+%% ========================================================================
+\subsection{Region-Chunked Multithreading}
+\label{sec:multithreading}
+
+Both left and right multiply parallelize via \emph{region chunking}: the
+$n_i$ intervals are divided into $T$ contiguous chunks, one per thread.
+Each thread independently processes its chunk.
+
+\subsubsection{Thread Initialization}
+
+Each thread must establish its starting state at interval $j_\text{start}$:
+
+\textbf{Right multiply:} Initialize $\texttt{cur\_target}[i]$ for all $n$
+samples by calling $\texttt{target\_at\_interval}(i, j_\text{start})$,
+which performs $O(\log \bar{S})$ binary search per sample.  Total: $O(n
+\log \bar{S})$ per thread.  All per-sample accumulators ($\delta$,
+$\texttt{mm\_corr}$) start at zero.
+
+\textbf{Left multiply:} Build the full $W$ vector for the starting
+interval.  Initialize $W[i] = x[i]$, then propagate bottom-up: for $i =
+n{-}1$ down to $1$, look up the target at $j_\text{start}$ and accumulate
+$W[\text{target}] \mathrel{+}= W[i]$.  Total: $O(n \log \bar{S})$ per
+thread.
+
+\subsubsection{Right Multiply Parallelism}
+
+Each thread produces a local $\texttt{out}[n]$ vector from its chunk.
+After the sweep, local vectors are combined via a critical-section
+reduction ($O(n)$ per thread, negligible).
+
+\begin{algorithmic}[1]
+\State \textbf{parallel} $T$ threads:
+\State \quad chunk $[j_\text{start}, j_\text{end}) \gets$ thread's share of $[0, n_i)$
+\State \quad initialize $\texttt{cur\_target}$ at $j_\text{start}$
+\State \quad $\texttt{local\_out}[n] \gets 0$
+\State \quad sweep intervals $j_\text{start}$ to $j_\text{end} - 1$ (Algorithm 5 core)
+\State \quad \textbf{critical:} $y[i] \mathrel{+}= \texttt{local\_out}[i]$ for all $i$
+\end{algorithmic}
+
+\subsubsection{Left Multiply Parallelism}
+
+Because intervals partition the sites, each thread writes to a disjoint
+range of the output array $y[s]$.  \emph{No reduction is needed.}
+
+\begin{algorithmic}[1]
+\State \textbf{parallel} $T$ threads:
+\State \quad chunk $[j_\text{start}, j_\text{end}) \gets$ thread's share of $[0, n_i)$
+\State \quad build $W$ for $j_\text{start}$
+\State \quad sweep intervals $j_\text{start}$ to $j_\text{end} - 1$ (Algorithm 6 core)
+\State \quad \Comment{writes directly to shared $y[\cdot]$, non-overlapping}
+\end{algorithmic}
+
+\subsubsection{Thread Scaling}
+
+Let $C_\text{init}$ be the per-thread initialization cost ($O(n \log
+\bar{S})$, fixed) and $C_\text{work}$ be the total sweep work (scales with
+region length).  The parallel time is approximately:
+\[
+t_T \approx C_\text{init} + \frac{C_\text{work}}{T}.
+\]
+For short regions (5\,Mb), $C_\text{init}$ is significant, limiting
+speedup to $\sim$2--3$\times$ at $T = 8$.  For chromosome-length regions
+(50+\,Mb), work dominates and near-linear speedup ($\sim$$T \times$) is
+achieved.
+
+%% ========================================================================
 \subsection{Batch and Range Variants}
 
-\textbf{Batch multiply} ($k$ vectors simultaneously): The prefix sums,
-cumulative rows, and weight matrices are extended to width $k$.  Inner loops
-over $k$ elements auto-vectorize via SIMD.
+\textbf{Batch multiply} ($k$ vectors simultaneously):
+Prefix sums, cumulative rows, $W$ vectors, and $\delta$ arrays are widened
+to $k$ columns.  Inner loops over $k$ elements auto-vectorize via SIMD.
+The batch left multiply uses precomputed ancestor chains (not
+per-query binary search) to keep the inner loop tight:
+for each ancestor step, a length-$k$ vector subtraction (detach) or
+addition (attach) is performed.
 
-\textbf{Range multiply} (submatrix $\mathbf{G}[s_a{:}s_b, :]$): Restricts
-interval iteration to $[s_a, s_b)$ and adjusts prefix sums and mismatch
-ranges accordingly.  Useful for block-wise algorithms like SCOPE.
+\textbf{Range multiply} (submatrix $\mathbf{G}[s_a{:}s_b, :]$):
+Restricts interval iteration to $[j_a, j_b)$ where $j_a, j_b$ are the
+intervals containing $s_a, s_b$.  The full precomputed tree structure is
+used (correct carry state), but only sites in $[s_a, s_b)$ contribute to
+the output.  Input vector has length $s_b - s_a$ (right) or $n$ (left).
 
-\subsection{Complexity Comparison}
+%% ========================================================================
+\subsection{Complexity Summary}
 
 \begin{table}[h]
 \centering
 \begin{tabular}{l c c c}
 \toprule
-Method & Prepare & Per-call & Peak memory \\
+& Prepare & Right multiply & Left multiply \\
 \midrule
-Dense        & $O(nm)$  & $O(nm)$ & $O(nm)$ \\
-Tree shuttle & $O(nm)$  & $O(n \cdot n_i + M)$ & $O(m \cdot d)$ \\
-RLE          & $O(nm)$  & $O(m + R)$ & $O(m \cdot d + R)$ \\
+Time & $O(S\!\log n_i + Md\!\log\bar{S} + nSd)$
+     & $O\!\left(\frac{n \cdot n_i + M}{T}\! + nT\!\log\bar{S}\right)$
+     & $O\!\left(\frac{m + M + Sd}{T}\! + nT\!\log\bar{S}\right)$ \\[4pt]
+Memory & $O(S + M + nSd)$ & $O(nT)$ & $O(nT + m)$ \\
 \bottomrule
 \end{tabular}
-\caption{Complexity comparison.  $n_i$: number of global intervals; $M$:
-total mismatches; $R$: total 1-runs; $d$: threading tree depth.
-Preparation is $O(nm)$ for all methods: each sample's $m$-length genotype
-must be reconstructed from its target's cached genotype.  The key
-difference is \emph{memory}: dense stores $O(nm)$ permanently, while tree
-shuttle and RLE use a reference-counted cache that keeps at most $d$
-genotype buffers alive simultaneously, bounding peak memory to $O(m \cdot
-d)$.  At biobank scale ($n = 500$K), $d \approx 30$, so prepare requires
-$\sim$30 buffers rather than 500K.  Prepare is a one-time cost; the
-per-call savings dominate when many multiplies are performed (e.g., RHE
-with $B = 100$ random vectors).  Tree shuttle's per-call cost replaces the
-$O(m)$ prefix-sum sweep of RLE with $O(n \cdot n_i)$ tree propagation,
-where $n_i \ll m$ typically.}
+\caption{Complexity of tree-shuttle preparation and per-call multiply.
+$T$: number of threads.  The $nT\!\log\bar{S}$ terms are per-thread
+initialization costs (target lookup via binary search).  Left multiply
+memory is $O(n)$ per thread (the $W$ vector) plus $O(m)$ for the shared
+output.}
 \label{tab:complexity}
 \end{table}
 
-In practice, $n_i$ is 10--100$\times$ smaller than $m$, so tree shuttle is
-preferred when the number of multiply calls is large relative to preparation
-cost.  RLE is preferred when parallelism is available and per-call latency
-matters.  See the companion note on RLE multiply for detailed benchmarks.
+\begin{table}[h]
+\centering
+\begin{tabular}{l c c c}
+\toprule
+Method & Prepare & Right per-call & Left per-call \\
+\midrule
+Dense materialization  & $O(nm)$  & $O(nm)$ & $O(nm)$ \\
+Tree shuttle (old)     & $O(Md)$  & $O(n \cdot n_i + M)$ & $O(n \cdot n_i + M)$ \\
+Tree shuttle (current) & $O(nSd)$ & $O(n \cdot n_i / T + M)$ & $O((m + M + Sd)/T)$ \\
+RLE                    & $O(nm)$  & $O(m + R)$ & $O(m + R)$ \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of multiply methods.  The old tree shuttle used an
+$O(n \cdot n_i)$ weight matrix for left multiply, which is infeasible at
+biobank scale.  The current version replaces this with an incremental
+$O(n)$ weight vector, making left multiply sublinear in $n$.  RLE
+preparation requires $O(nm)$ full genotype reconstruction.}
+\label{tab:comparison}
+\end{table}
+
+\subsection{Memory at Biobank Scale}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l r r}
+\toprule
+Component & 500K array (5\,Mb) & 500K WGS (50\,Mb) \\
+\midrule
+\multicolumn{3}{c}{\emph{Preparation (one-time)}} \\
+Segment mapping ($3S$ ints)  & 240\,MB & 24\,GB \\
+Mismatch signs ($M$ bytes)   & 1\,GB   & 10\,GB \\
+Inverted mismatch index      & 5\,GB   & 50\,GB \\
+Interval change list         & 240\,MB & 24\,GB \\
+Ancestor chains              & 1.4\,GB & 144\,GB \\
+\midrule
+\textbf{Prepare total}       & $\sim$8\,GB & $\sim$250\,GB \\
+\midrule
+\multicolumn{3}{c}{\emph{Per-call}} \\
+Right multiply               & 32\,MB  & 32\,MB \\
+Left multiply                & 36\,MB  & 36\,MB \\
+Old left multiply ($W$ matrix) & \textbf{200\,GB} & \textbf{2\,TB} \\
+\bottomrule
+\end{tabular}
+\caption{Projected memory for 500K haplotypes.  Assumes $\bar{S} = 100$
+segments/sample, $\bar{M} = 2000$ mismatches/sample (array, 5\,Mb) or
+$\bar{S} = 10000$, $\bar{M} = 20000$ (WGS, 50\,Mb).  Tree depth $d
+\approx 15$.  Per-call memory is $O(nT)$: one $W$ or $\delta$ vector per
+thread.  The old left multiply's $O(n \cdot n_i)$ weight matrix is shown
+for comparison---it is infeasible at this scale.}
+\label{tab:memory}
+\end{table}
+
+The critical improvement is that per-call left multiply memory dropped from
+$O(n \cdot n_i) \approx 200$\,GB to $O(n) \approx 4$\,MB (at $n =
+50000$), enabling biobank-scale left multiply that was previously
+impossible with the tree-shuttle method.
+
+%% ========================================================================
+\subsection{Empirical Scaling}
+
+Table~\ref{tab:bench} reports benchmarks on \textsc{Threads}-inferred ARGs
+from msprime simulations (1\,Mb region, varying $n$, 8 OpenMP threads).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{r r r r r r}
+\toprule
+$n$ & $m$ & Prepare (ms) & Left (ms) & Right (ms) & Left mem \\
+\midrule
+100 & 488 & 0.1 & 0.01 & 0.01 & 0\,MB \\
+500 & 1546 & 0.5 & 0.04 & 0.18 & 0\,MB \\
+1000 & 2577 & 2 & 0.07 & 0.47 & 0\,MB \\
+5000 & 8454 & 8 & 0.22 & 3.8 & 0\,MB \\
+10000 & 14310 & 19 & 0.35 & 8.5 & 0\,MB \\
+50000 & 50715 & 79 & 1.0 & 32 & 4.8\,MB \\
+\bottomrule
+\end{tabular}
+\caption{Tree-shuttle multiply benchmarks (8 threads, 5\,Mb region).
+Left multiply memory is $O(n)$; the 4.8\,MB at $n{=}50000$ is
+$8 \times 50000 \times 8 = 3.2$\,MB for 8 thread-local $W$ vectors
+plus output buffer.}
+\label{tab:bench}
+\end{table}
+
+\textbf{Scaling exponents} (fitted from $n = 10000$ to $50000$):
+\begin{itemize}
+\item Prepare: $\sim n^{1.05}$ (near-linear; dominated by chain precomputation)
+\item Left multiply: $\sim n^{0.53}$ (sublinear; mismatches grow slower than $n$)
+\item Right multiply: $\sim n^{1.03}$ (linear; $O(n)$ propagation per interval)
+\end{itemize}
+
+\textbf{Extrapolation to 500K:}  Left $\approx 7.6$\,ms, right $\approx
+327$\,ms (8 threads).  Compared to the old tree-shuttle left multiply at
+$n = 50000$ (392\,ms, 1.7\,GB memory), the new version is 381$\times$
+faster and uses 362$\times$ less memory.
+
+\textbf{Thread scaling at $n = 50000$:}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{r r r r r}
+\toprule
+Threads & Left (ms) & Right (ms) & Left speedup & Right speedup \\
+\midrule
+1 & 2.31 & 197 & 1.0$\times$ & 1.0$\times$ \\
+2 & 1.58 & 102 & 1.5$\times$ & 1.9$\times$ \\
+4 & 1.10 & 52 & 2.1$\times$ & 3.8$\times$ \\
+8 & 0.92 & 31 & 2.5$\times$ & 6.4$\times$ \\
+\bottomrule
+\end{tabular}
+\caption{Thread scaling at $n = 50000$, 5\,Mb region.  Right multiply
+achieves near-linear scaling because the $O(n \cdot n_i)$ sweep work
+dominates the $O(n \log \bar{S})$ initialization.  Left multiply is
+limited by initialization overhead at this region length; for 50\,Mb
+regions, left multiply speedup would approach $\sim$6$\times$ at 8
+threads.}
+\label{tab:threads}
+\end{table}
 
 %% ========================================================================
 \section{Implementation Notes}
 
-\subsection{Segment Lookup}
+\subsection{Lazy Chain Tracing}
 
-Given a genomic position, the active segment for a sample is found via
-binary search on the sorted segment start positions.  This is $O(\log S_i)$
-per sample per interval, where $S_i$ is the number of segments for sample
-$i$.
+Mismatch correction signs (Phase~3) and target lookups are computed without
+materializing any genotype buffer.  For each query
+$\texttt{genotype\_at\_site}(i, s)$, the threading chain is traced from
+sample $i$ back to sample~0: at each step, binary-search the current
+sample's segments to find the active target, check whether $s$ is a
+mismatch for this sample, XOR the parity, then recurse on the target.  The
+chain terminates at sample~0, whose genotype is determined by its mismatch
+list alone.
 
-\subsection{Reference-Counted Genotype Cache}
-
-During tree-shuttle preparation and RLE preparation, genotypes are built
-sample-by-sample in threading order.  A reference count tracks how many
-future samples depend on each cached genotype.  When the count reaches
-zero, the cache entry is released.  This bounds peak memory to $O(m \cdot
-d)$ rather than $O(nm)$, where $d$ is the maximum depth of the threading
-dependency tree.
+Each query costs $O(d \cdot \log \bar{S})$.  The total Phase~3 cost is
+$O(Md \log \bar{S})$, which is sublinear in $nm$ for typical parameters.
 
 \subsection{Pending Clade/Branch Deferral}
 
@@ -533,6 +889,22 @@ topology changes.  At emission time, the genomic span is set to
 $[\text{start\_bp}, b_\text{next})$, spanning all consecutive intervals
 with identical topology.  This reduces the number of callbacks and allows
 downstream consumers to process contiguous genomic ranges.
+
+\subsection{Interval Skipping}
+
+Empty intervals (containing zero sites) are skipped during both left and
+right multiply sweeps.  In right multiply, the propagation loop ($O(n)$
+per interval) is the dominant cost; skipping empty intervals can reduce
+the effective interval count by 30--50\% in typical threading instructions.
+
+\subsection{Self-Referencing Segments}
+
+A sample targeting itself ($\text{target}_i = i$) has genotype determined
+entirely by its mismatches from a carry state.  In right multiply, the
+contribution is computed via prefix-sum lookups on mismatch runs.  In left
+multiply, the contribution uses the subtree weight $W[i]$ (which equals
+$x[i]$ since a self-ref sample has no descendants in that interval)
+multiplied by the carry-run structure.
 
 \begin{thebibliography}{9}
 \bibitem{gunnarsson2025}

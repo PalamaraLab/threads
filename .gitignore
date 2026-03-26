@@ -1,6 +1,34 @@
 # PDFs (compile locally from .tex)
 *.pdf
 
+# Build directories
+build_bench/
+build_committed/
+
+# Benchmark data
+bench_data/
+
+# Test binaries
+test_bench
+test_debug
+test_diag
+test_left_large
+test_left_multiply
+test_left_multiply_large
+test_quick
+test_right_quick
+test_scaling
+*.dSYM/
+
+# macOS
+.DS_Store
+
+# LaTeX aux files
+*.aux
+*.log
+*.out
+*.synctex.gz
+
 # Prerequisites
 *.d
 

@@ -247,9 +247,9 @@ private:
     std::vector<int8_t> tree_mm_sign;
     std::vector<int> tree_mm_offset;   // tree_mm_offset[i] = start index for sample i
 
-    // Precomputed mismatch-to-interval mapping: tree_mm_ivl[offset + k] = interval index
-    // containing mismatch k for sample i. Eliminates binary search during multiply.
-    std::vector<int> tree_mm_ivl;
+    // Site-to-interval lookup: site_to_ivl[s] = interval index containing site s.
+    // O(m) memory, replaces O(M_total) tree_mm_ivl array.
+    std::vector<int> site_to_ivl;
 
     // Per-sample segment-to-interval mapping for segment-level loop.
     // tree_seg_first_ivl[offset + k] = first global interval of k-th segment
@@ -262,6 +262,37 @@ private:
     // Lazy genotype query: trace threading chain to sample 0.
     // O(d * log S) per call, d = tree depth.
     int genotype_at_site(int sample, int site) const;
+
+    // Target lookup: which sample does `sample` target at a given interval?
+    // O(log S_i) via binary search on tree_seg_first_ivl.
+    int target_at_interval(int sample, int interval) const;
+
+    // Inverted mismatch index: non-self-ref mismatches grouped by interval.
+    // inv_mm_offset[j]..inv_mm_offset[j+1] indexes into the flat arrays.
+    std::vector<int> inv_mm_sample;
+    std::vector<int> inv_mm_site;
+    std::vector<int8_t> inv_mm_sign;
+    std::vector<int> inv_mm_offset;    // ni+1 entries
+
+    // Interval change list: samples whose target changes at each boundary.
+    // Sorted by sample descending within each boundary group.
+    std::vector<int> ivl_change_sample;
+    std::vector<int> ivl_change_old_tgt;
+    std::vector<int> ivl_change_new_tgt;
+    std::vector<int> ivl_change_offset;  // ni+1 entries
+
+    // Self-ref samples per interval (for carry-run handling in left multiply).
+    std::vector<int> self_ref_sample;
+    std::vector<int> self_ref_offset;    // ni+1 entries
+
+    // Precomputed ancestor chains for left multiply W updates.
+    // chain_data[chain_offset[c]..chain_offset[c+1]) = ancestor list
+    // for change c (detach uses old tree, attach uses new tree).
+    std::vector<int> detach_chain_data;
+    std::vector<int> detach_chain_offset;  // total_changes + 1
+    std::vector<int> attach_chain_data;
+    std::vector<int> attach_chain_offset;  // total_changes + 1
+
 
     // RLE multiply cache: per-sample 1-runs stored as flat (start, end) pairs.
     // rle_run_start[rle_offset[i] .. rle_offset[i+1]) = start site indices of 1-runs
