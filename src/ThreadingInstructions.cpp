@@ -1724,97 +1724,24 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
         throw std::runtime_error("Input must have length num_sites * k");
     if (k == 1) return right_multiply_tree(x_flat);
 
-    prepare_tree_multiply();
-
+    // Sequential per-column calls: each call uses interval-parallel OMP
+    // internally with O(n) working set. Avoids the O(n*k) cache thrashing
+    // of the k-wide approach at large n.
     const int n = num_samples;
-    const int ni = tree_n_intervals;
+    const int m = num_sites;
     const double* xp = x_flat.data();
-    const int* ref = tree_ref_genome.data();
-    const int* ivl_s = tree_ivl_start.data();
-    const int* ivl_e = tree_ivl_end.data();
 
-    std::vector<double> out(static_cast<size_t>(n) * k, 0.0);
+    std::vector<double> out(static_cast<size_t>(n) * k);
 
-    // Region-chunked parallel sweep: single tree traversal processes all
-    // k columns simultaneously with k-wide inner loops.
-    #pragma omp parallel
-    {
-        const int T = omp_get_num_threads();
-        const int tid = omp_get_thread_num();
-        const int chunk_size = (ni + T - 1) / T;
-        const int j_start = std::min(tid * chunk_size, ni);
-        const int j_end = std::min(j_start + chunk_size, ni);
+    for (int col = 0; col < k; col++) {
+        std::vector<double> x_col(m);
+        for (int s = 0; s < m; s++)
+            x_col[s] = xp[static_cast<size_t>(s) * k + col];
 
-        if (j_start < j_end) {
-            const size_t nk = static_cast<size_t>(n) * k;
-            std::vector<int> cur_target(n);
-            std::vector<double> delta(nk, 0.0);
-            std::vector<double> mm_corr(nk, 0.0);
-            std::vector<double> local_out(nk, 0.0);
-            std::vector<double> total_ref(k, 0.0);
+        auto result = right_multiply_tree(x_col);
 
-            cur_target[0] = 0;
-            for (int i = 1; i < n; i++)
-                cur_target[i] = target_at_interval(i, j_start);
-
-            for (int j = j_start; j < j_end; j++) {
-                if (j > j_start) {
-                    for (int c = ivl_change_offset[j]; c < ivl_change_offset[j + 1]; c++)
-                        cur_target[ivl_change_sample[c]] = ivl_change_new_tgt[c];
-                }
-
-                // Ref contribution
-                for (int s = ivl_s[j]; s < ivl_e[j]; s++) {
-                    if (ref[s]) {
-                        const double* xs = &xp[static_cast<size_t>(s) * k];
-                        for (int c = 0; c < k; c++) total_ref[c] += xs[c];
-                    }
-                }
-
-                const int mm_a = inv_mm_offset[j];
-                const int mm_b = inv_mm_offset[j + 1];
-                if (mm_a == mm_b) continue;
-
-                // Scatter k-wide mismatch corrections
-                for (int c = mm_a; c < mm_b; c++) {
-                    const double* xs = &xp[static_cast<size_t>(inv_mm_site[c]) * k];
-                    double* mc = &mm_corr[static_cast<size_t>(inv_mm_sample[c]) * k];
-                    const double sign = static_cast<double>(inv_mm_sign[c]);
-                    for (int col = 0; col < k; col++) mc[col] += xs[col] * sign;
-                }
-
-                // Propagate corrections root→leaves (delta fully overwritten,
-                // no fill needed between intervals).
-                std::fill_n(delta.data(), k, 0.0);
-                for (int i = 1; i < n; i++) {
-                    const double* dt = &delta[static_cast<size_t>(cur_target[i]) * k];
-                    const double* mc = &mm_corr[static_cast<size_t>(i) * k];
-                    double* di = &delta[static_cast<size_t>(i) * k];
-                    double* lo = &local_out[static_cast<size_t>(i) * k];
-                    for (int col = 0; col < k; col++) {
-                        const double d = dt[col] + mc[col];
-                        di[col] = d;
-                        lo[col] += d;
-                    }
-                }
-
-                // Clear mm_corr sparsely
-                for (int c = mm_a; c < mm_b; c++) {
-                    double* mc = &mm_corr[static_cast<size_t>(inv_mm_sample[c]) * k];
-                    std::fill_n(mc, k, 0.0);
-                }
-            }
-
-            for (int i = 0; i < n; i++) {
-                double* lo = &local_out[static_cast<size_t>(i) * k];
-                for (int col = 0; col < k; col++) lo[col] += total_ref[col];
-            }
-
-            #pragma omp critical
-            {
-                for (size_t idx = 0; idx < nk; idx++) out[idx] += local_out[idx];
-            }
-        }
+        for (int i = 0; i < n; i++)
+            out[static_cast<size_t>(i) * k + col] = result[i];
     }
 
     return out;
