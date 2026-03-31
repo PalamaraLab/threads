@@ -351,6 +351,80 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       }, py::arg("X"),
            "Compute G.T @ X via tree shuttle. X is (num_samples,) or (num_samples, k). "
            "Returns (num_sites,) or (num_sites, k) numpy array.")
+      .def_property_readonly("dag_num_sets", &ThreadingInstructions::get_dag_num_sets,
+           "Total mutation set nodes across all DAG chunks (0 until prepare_dag_multiply is called).")
+      .def_property_readonly("dag_total_edges", &ThreadingInstructions::get_dag_total_edges)
+      .def_property_readonly("dag_total_connections", &ThreadingInstructions::get_dag_total_connections)
+      .def_property_readonly("dag_total_mutations", &ThreadingInstructions::get_dag_total_mutations)
+      .def_property_readonly("dag_num_chunks", &ThreadingInstructions::get_dag_num_chunks)
+      .def("prepare_dag_multiply", &ThreadingInstructions::prepare_dag_multiply,
+           py::call_guard<py::gil_scoped_release>(),
+           py::arg("num_chunks") = 0,
+           "Precompute region-chunked mutation-set DAGs for sublinear multiply. "
+           "num_chunks=0 (default) uses OMP_NUM_THREADS. Each chunk covers a disjoint "
+           "site range and is processed in parallel during multiply.")
+      .def("right_multiply_dag", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim == 1) {
+            if (static_cast<int>(buf.shape[0]) != self.num_sites)
+                throw std::runtime_error("1D input must have length num_sites");
+            std::vector<double> x(static_cast<double*>(buf.ptr),
+                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.right_multiply_dag(x); }
+            py::array_t<double> out(static_cast<size_t>(result.size()));
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else if (buf.ndim == 2) {
+            int m = static_cast<int>(buf.shape[0]);
+            int k = static_cast<int>(buf.shape[1]);
+            if (m != self.num_sites)
+                throw std::runtime_error("First dimension must be num_sites");
+            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                       static_cast<double*>(buf.ptr) + buf.size);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.right_multiply_dag_batch(x_flat, k); }
+            py::array_t<double> out({self.num_samples, k});
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else {
+            throw std::runtime_error("Input must be 1D (num_sites,) or 2D (num_sites, k)");
+        }
+      }, py::arg("X"),
+           "Compute G @ X via mutation-set DAG. X is (num_sites,) or (num_sites, k). "
+           "Returns (num_samples,) or (num_samples, k) numpy array. Sublinear in n.")
+      .def("left_multiply_dag", [](ThreadingInstructions& self,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+        auto buf = arr.request();
+        if (buf.ndim == 1) {
+            if (static_cast<int>(buf.shape[0]) != self.num_samples)
+                throw std::runtime_error("1D input must have length num_samples");
+            std::vector<double> x(static_cast<double*>(buf.ptr),
+                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.left_multiply_dag(x); }
+            py::array_t<double> out(static_cast<size_t>(result.size()));
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else if (buf.ndim == 2) {
+            int n = static_cast<int>(buf.shape[0]);
+            int k = static_cast<int>(buf.shape[1]);
+            if (n != self.num_samples)
+                throw std::runtime_error("First dimension must be num_samples");
+            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
+                                       static_cast<double*>(buf.ptr) + buf.size);
+            std::vector<double> result;
+            { py::gil_scoped_release release; result = self.left_multiply_dag_batch(x_flat, k); }
+            py::array_t<double> out({self.num_sites, k});
+            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+            return out;
+        } else {
+            throw std::runtime_error("Input must be 1D (num_samples,) or 2D (num_samples, k)");
+        }
+      }, py::arg("X"),
+           "Compute G.T @ X via mutation-set DAG. X is (num_samples,) or (num_samples, k). "
+           "Returns (num_sites,) or (num_sites, k) numpy array. Sublinear in n.")
       .def("visit_clades", [](const ThreadingInstructions& self, py::function callback) {
         self.visit_clades([&](const std::vector<int>& descendants, double height,
                               int start_bp, int end_bp) {

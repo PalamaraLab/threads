@@ -26,6 +26,8 @@
 #include <random>
 #include <iostream>
 #include <limits>
+#include <deque>
+#include <map>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -1725,8 +1727,11 @@ std::vector<double> ThreadingInstructions::right_multiply_tree_batch(
     if (k == 1) return right_multiply_tree(x_flat);
 
     // Sequential per-column calls: each call uses interval-parallel OMP
-    // internally with O(n) working set. Avoids the O(n*k) cache thrashing
-    // of the k-wide approach at large n.
+    // internally with O(n) working set per thread.  This keeps the delta
+    // array small enough to fit in L2 cache, which is critical for the
+    // random-access pattern delta[cur_target[i]].  A k-wide interleaved
+    // approach was tested but regresses at large n because the expanded
+    // n*k delta array exceeds L2, increasing cache miss cost.
     const int n = num_samples;
     const int m = num_sites;
     const double* xp = x_flat.data();
@@ -2473,5 +2478,606 @@ ThreadingInstructions::generate_mutations(double mutation_rate, int seed) const
         }
     });
 
+    return result;
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+//  DAG (mutation-set) multiply — region-chunked for embarrassing parallelism
+// ════════════════════════════════════════════════════════════════════════════
+
+// Getters that aggregate across chunks
+int ThreadingInstructions::get_dag_num_sets() const {
+    int total = 0;
+    for (const auto& c : dag_chunks) total += c.num_sets;
+    return total;
+}
+int ThreadingInstructions::get_dag_total_edges() const {
+    if (!dag_ready) return 0;
+    int total = 0;
+    for (const auto& c : dag_chunks) total += static_cast<int>(c.d2a.size());
+    return total;
+}
+int ThreadingInstructions::get_dag_total_connections() const {
+    if (!dag_ready) return 0;
+    int total = 0;
+    for (const auto& c : dag_chunks) total += static_cast<int>(c.indiv_set.size());
+    return total;
+}
+int ThreadingInstructions::get_dag_total_mutations() const {
+    if (!dag_ready) return 0;
+    int total = 0;
+    for (const auto& c : dag_chunks) total += static_cast<int>(c.mut_site.size());
+    return total;
+}
+
+void ThreadingInstructions::prepare_dag_multiply(int num_chunks) {
+    if (dag_ready) return;
+
+    const int n = num_samples;
+    const int m = num_sites;
+
+    // Ensure ref genome is available for genotype_at_site()
+    if (tree_ref_genome.empty()) {
+        tree_ref_genome.assign(m, 0);
+        for (int idx : instructions[0].mismatches) {
+            if (idx >= 0 && idx < m) tree_ref_genome[idx] = 1;
+        }
+    }
+
+    // Determine number of chunks
+    if (num_chunks <= 0) {
+        #ifdef _OPENMP
+        num_chunks = omp_get_max_threads();
+        #else
+        num_chunks = 1;
+        #endif
+    }
+    if (num_chunks > m) num_chunks = m;
+    if (num_chunks < 1) num_chunks = 1;
+
+    // ── Phase 1: Compute aligned split points (shared) ─────────────────────
+
+    std::vector<std::set<int>> sample_splits(n);
+
+    for (int i = 0; i < n; i++) {
+        for (int s : instructions[i].starts) {
+            sample_splits[i].insert(s);
+        }
+        sample_splits[i].insert(end);
+        if (instructions[i].starts.empty() || instructions[i].starts[0] != start) {
+            sample_splits[i].insert(start);
+        }
+    }
+
+    // Reverse pass: propagate child boundaries to parents
+    for (int i = n - 1; i >= 1; i--) {
+        const auto& starts_i = instructions[i].starts;
+        const auto& targets_i = instructions[i].targets;
+        const int num_segs = static_cast<int>(starts_i.size());
+
+        for (int k = 0; k < num_segs; k++) {
+            const int target = targets_i[k];
+            if (target == i) continue;  // self-ref
+            const int seg_start_bp = starts_i[k];
+            const int seg_end_bp = (k < num_segs - 1) ? starts_i[k + 1] : end;
+
+            auto lo = sample_splits[i].lower_bound(seg_start_bp);
+            auto hi = sample_splits[i].upper_bound(seg_end_bp);
+            for (auto it = lo; it != hi; ++it) {
+                sample_splits[target].insert(*it);
+            }
+        }
+    }
+
+    // ── Build chunks in parallel ──────────────────────────────────────────
+    dag_chunks.resize(num_chunks);
+    #pragma omp parallel for schedule(static)
+    for (int c = 0; c < num_chunks; c++) {
+        int site_lo = c * m / num_chunks;
+        int site_hi = (c + 1) * m / num_chunks;
+        dag_chunks[c] = build_dag_chunk(sample_splits, site_lo, site_hi);
+    }
+
+    dag_ready = true;
+}
+
+// Build a single DAG chunk for sites in [chunk_site_lo, chunk_site_hi).
+ThreadingInstructions::DagChunk ThreadingInstructions::build_dag_chunk(
+    const std::vector<std::set<int>>& sample_splits,
+    int chunk_site_lo, int chunk_site_hi)
+{
+    const int n = num_samples;
+    DagChunk chunk;
+    chunk.site_lo = chunk_site_lo;
+    chunk.site_hi = chunk_site_hi;
+
+    // Helper lambda to flatten vector-of-vectors into flat + offset arrays
+    auto flatten_int = [](const std::vector<std::vector<int>>& vv,
+                          std::vector<int>& flat, std::vector<int>& off) {
+        const int sz = static_cast<int>(vv.size());
+        off.resize(sz + 1);
+        off[0] = 0;
+        for (int j = 0; j < sz; j++)
+            off[j + 1] = off[j] + static_cast<int>(vv[j].size());
+        flat.resize(off[sz]);
+        for (int j = 0; j < sz; j++)
+            std::copy(vv[j].begin(), vv[j].end(), flat.begin() + off[j]);
+    };
+
+    // ── Phase 2: Build DAG (forward pass) with site range filter ───────────
+
+    std::vector<std::map<int, std::vector<int>>> sample_split_sets(n);
+    for (int sp : sample_splits[0]) {
+        sample_split_sets[0][sp] = {};
+    }
+
+    std::vector<std::vector<int>> tmp_d2a;
+    std::vector<std::vector<int>> tmp_muts;
+    std::vector<std::vector<int8_t>> tmp_signs;
+    int mut_set_id = 0;
+
+    for (int i = 1; i < n; i++) {
+        const auto& starts_i = instructions[i].starts;
+        const auto& targets_i = instructions[i].targets;
+        const int num_segs = static_cast<int>(starts_i.size());
+
+        std::vector<int> mm_i(instructions[i].mismatches.begin(),
+                              instructions[i].mismatches.end());
+        std::sort(mm_i.begin(), mm_i.end());
+
+        auto& si_map = sample_split_sets[i];
+        for (int sp : sample_splits[i]) {
+            si_map[sp] = {};
+        }
+
+        for (int k = 0; k < num_segs; k++) {
+            const int target = targets_i[k];
+            const int seg_start_bp = starts_i[k];
+            const int seg_end_bp = (k < num_segs - 1) ? starts_i[k + 1] : end;
+
+            std::vector<int> my_splits;
+            {
+                auto lo = sample_splits[i].lower_bound(seg_start_bp);
+                auto hi = sample_splits[i].lower_bound(seg_end_bp);
+                for (auto it = lo; it != hi; ++it) my_splits.push_back(*it);
+            }
+
+            const auto& target_map = sample_split_sets[target];
+
+            for (int r = 0; r < static_cast<int>(my_splits.size()); r++) {
+                const int sub_start_bp = my_splits[r];
+                const int sub_end_bp = (r + 1 < static_cast<int>(my_splits.size()))
+                                       ? my_splits[r + 1] : seg_end_bp;
+                if (sub_start_bp >= sub_end_bp) continue;
+
+                std::vector<int> parent_sets;
+                int count_meaningful = 0;
+                {
+                    auto t_lo = target_map.lower_bound(sub_start_bp);
+                    auto t_hi = target_map.lower_bound(sub_end_bp);
+                    for (auto t_it = t_lo; t_it != t_hi; ++t_it) {
+                        if (!t_it->second.empty()) count_meaningful++;
+                        parent_sets.insert(parent_sets.end(),
+                                           t_it->second.begin(), t_it->second.end());
+                    }
+                }
+
+                // Find mismatches intersected with this chunk's site range
+                const int site_lo = static_cast<int>(
+                    std::lower_bound(positions.begin(), positions.end(), sub_start_bp)
+                    - positions.begin());
+                const int site_hi = static_cast<int>(
+                    std::lower_bound(positions.begin(), positions.end(), sub_end_bp)
+                    - positions.begin());
+                const int eff_lo = std::max(site_lo, chunk_site_lo);
+                const int eff_hi = std::min(site_hi, chunk_site_hi);
+                auto mm_lo = std::lower_bound(mm_i.begin(), mm_i.end(), eff_lo);
+                auto mm_hi = std::lower_bound(mm_i.begin(), mm_i.end(), eff_hi);
+
+                const bool has_mm = (eff_lo < eff_hi) && (mm_lo != mm_hi);
+
+                if (!has_mm && count_meaningful <= 1) {
+                    si_map[sub_start_bp] = std::move(parent_sets);
+                } else {
+                    std::vector<int> mm_in_range(mm_lo, mm_hi);
+                    std::vector<int8_t> signs;
+                    signs.reserve(mm_in_range.size());
+                    for (int s : mm_in_range) {
+                        const int g_target = genotype_at_site(target, s);
+                        signs.push_back(static_cast<int8_t>(1 - 2 * g_target));
+                    }
+
+                    tmp_d2a.push_back(std::move(parent_sets));
+                    tmp_muts.push_back(std::move(mm_in_range));
+                    tmp_signs.push_back(std::move(signs));
+                    si_map[sub_start_bp] = {mut_set_id};
+                    mut_set_id++;
+                }
+            }
+        }
+    }
+
+    chunk.num_sets = mut_set_id;
+
+    if (chunk.num_sets == 0) {
+        // Empty chunk: only ref_ones contribute
+        chunk.d2a_off.assign(1, 0);
+        chunk.a2d_off.assign(1, 0);
+        chunk.mut_off.assign(1, 0);
+        chunk.indiv_off.assign(n + 1, 0);
+        chunk.set_indiv_off.assign(1, 0);
+        for (int s = chunk_site_lo; s < chunk_site_hi; s++)
+            if (tree_ref_genome[s]) chunk.ref_ones.push_back(s);
+        return chunk;
+    }
+
+    // ── Phase 3: anc_to_desc + topological order ───────────────────────────
+
+    std::vector<std::vector<int>> tmp_a2d(chunk.num_sets);
+    for (int j = 0; j < chunk.num_sets; j++) {
+        for (int anc : tmp_d2a[j]) {
+            tmp_a2d[anc].push_back(j);
+        }
+    }
+
+    std::vector<int> desc_count(chunk.num_sets);
+    for (int j = 0; j < chunk.num_sets; j++)
+        desc_count[j] = static_cast<int>(tmp_a2d[j].size());
+    std::deque<int> queue;
+    for (int j = 0; j < chunk.num_sets; j++)
+        if (desc_count[j] == 0) queue.push_back(j);
+    std::vector<int> topo_order;
+    topo_order.reserve(chunk.num_sets);
+    while (!queue.empty()) {
+        int j = queue.front();
+        queue.pop_front();
+        topo_order.push_back(j);
+        for (int anc : tmp_d2a[j])
+            if (--desc_count[anc] == 0) queue.push_back(anc);
+    }
+
+    // ── Phase 4: Leaf connections ──────────────────────────────────────────
+
+    std::vector<std::vector<int>> tmp_i2s(n);
+    std::vector<std::vector<int>> tmp_s2i(chunk.num_sets);
+    for (int i = 0; i < n; i++) {
+        std::set<int> seen;
+        for (const auto& kv : sample_split_sets[i]) {
+            for (int s : kv.second) {
+                if (seen.insert(s).second) {
+                    tmp_i2s[i].push_back(s);
+                    tmp_s2i[s].push_back(i);
+                }
+            }
+        }
+    }
+
+    // ── Phase 5: Relabel set IDs to topo order ─────────────────────────────
+
+    std::vector<int> relabel(chunk.num_sets);
+    for (int ti = 0; ti < chunk.num_sets; ti++)
+        relabel[topo_order[ti]] = ti;
+
+    auto reorder = [&](std::vector<std::vector<int>>& vv, bool relabel_values) {
+        std::vector<std::vector<int>> tmp(chunk.num_sets);
+        for (int old_j = 0; old_j < chunk.num_sets; old_j++) {
+            if (relabel_values)
+                for (auto& v : vv[old_j]) v = relabel[v];
+            tmp[relabel[old_j]] = std::move(vv[old_j]);
+        }
+        vv = std::move(tmp);
+    };
+    reorder(tmp_d2a, true);
+    reorder(tmp_a2d, true);
+    {
+        std::vector<std::vector<int>> new_muts(chunk.num_sets);
+        std::vector<std::vector<int8_t>> new_signs(chunk.num_sets);
+        for (int old_j = 0; old_j < chunk.num_sets; old_j++) {
+            new_muts[relabel[old_j]] = std::move(tmp_muts[old_j]);
+            new_signs[relabel[old_j]] = std::move(tmp_signs[old_j]);
+        }
+        tmp_muts = std::move(new_muts);
+        tmp_signs = std::move(new_signs);
+    }
+    for (int i = 0; i < n; i++)
+        for (auto& s : tmp_i2s[i]) s = relabel[s];
+    {
+        std::vector<std::vector<int>> new_s2i(chunk.num_sets);
+        for (int old_j = 0; old_j < chunk.num_sets; old_j++)
+            new_s2i[relabel[old_j]] = std::move(tmp_s2i[old_j]);
+        tmp_s2i = std::move(new_s2i);
+    }
+
+    // ── Phase 6: Flatten into offset arrays ────────────────────────────────
+
+    flatten_int(tmp_d2a, chunk.d2a, chunk.d2a_off);
+    flatten_int(tmp_a2d, chunk.a2d, chunk.a2d_off);
+    flatten_int(tmp_i2s, chunk.indiv_set, chunk.indiv_off);
+    flatten_int(tmp_s2i, chunk.set_indiv, chunk.set_indiv_off);
+
+    chunk.mut_off.resize(chunk.num_sets + 1);
+    chunk.mut_off[0] = 0;
+    for (int j = 0; j < chunk.num_sets; j++)
+        chunk.mut_off[j + 1] = chunk.mut_off[j] + static_cast<int>(tmp_muts[j].size());
+    const int total_muts = chunk.mut_off[chunk.num_sets];
+    chunk.mut_site.resize(total_muts);
+    chunk.mut_sign.resize(total_muts);
+    for (int j = 0; j < chunk.num_sets; j++) {
+        std::copy(tmp_muts[j].begin(), tmp_muts[j].end(),
+                  chunk.mut_site.begin() + chunk.mut_off[j]);
+        std::copy(tmp_signs[j].begin(), tmp_signs[j].end(),
+                  chunk.mut_sign.begin() + chunk.mut_off[j]);
+    }
+
+    for (int s = chunk_site_lo; s < chunk_site_hi; s++)
+        if (tree_ref_genome[s]) chunk.ref_ones.push_back(s);
+
+    return chunk;
+}
+
+
+// ── Right multiply single-column helper (no OMP — called from parallel regions) ──
+
+void ThreadingInstructions::right_multiply_dag_single(const double* xp, double* out) const {
+    const int n = num_samples;
+    const int nc = static_cast<int>(dag_chunks.size());
+
+    double total_ref_sum = 0.0;
+    // Use a single flat partial buffer to avoid per-chunk allocations.
+    // Chunk c's partials start at partial_base[c].
+    std::vector<int> partial_base(nc + 1, 0);
+    for (int c = 0; c < nc; c++) partial_base[c + 1] = partial_base[c] + dag_chunks[c].num_sets;
+    std::vector<double> partial(partial_base[nc], 0.0);
+
+    for (int c = 0; c < nc; c++) {
+        const auto& ch = dag_chunks[c];
+        double ref_sum = 0.0;
+        for (int idx : ch.ref_ones) ref_sum += xp[idx];
+        total_ref_sum += ref_sum;
+
+        if (ch.num_sets > 0) {
+            double* p = partial.data() + partial_base[c];
+            for (int j = ch.num_sets - 1; j >= 0; j--) {
+                double val = 0.0;
+                for (int a = ch.d2a_off[j]; a < ch.d2a_off[j + 1]; a++)
+                    val += p[ch.d2a[a]];
+                for (int a = ch.mut_off[j]; a < ch.mut_off[j + 1]; a++)
+                    val += ch.mut_sign[a] * xp[ch.mut_site[a]];
+                p[j] = val;
+            }
+        }
+    }
+
+    for (int i = 0; i < n; i++) {
+        double sum = total_ref_sum;
+        for (int c = 0; c < nc; c++) {
+            const auto& ch = dag_chunks[c];
+            if (ch.num_sets > 0) {
+                const double* p = partial.data() + partial_base[c];
+                for (int a = ch.indiv_off[i]; a < ch.indiv_off[i + 1]; a++)
+                    sum += p[ch.indiv_set[a]];
+            }
+        }
+        out[i] = sum;
+    }
+}
+
+
+// ── Right multiply: result = G x  (single vector) ───────────────────────
+
+std::vector<double> ThreadingInstructions::right_multiply_dag(const std::vector<double>& x) {
+    if (static_cast<int>(x.size()) != num_sites)
+        throw std::runtime_error("Input vector must have length " + std::to_string(num_sites));
+    prepare_dag_multiply();
+
+    std::vector<double> result(num_samples);
+    right_multiply_dag_single(x.data(), result.data());
+    return result;
+}
+
+
+// ── Right multiply batch: result = G X  (k vectors) ─────────────────────
+// Hybrid parallelism: columns are split across threads in groups.
+// Each thread processes its group with amortized multi-column DAG traversal
+// (vectorization across columns) while different groups run in parallel.
+// DAG structure is shared read-only in L3; each thread has private partials.
+
+std::vector<double> ThreadingInstructions::right_multiply_dag_batch(
+        const std::vector<double>& x_flat, int k) {
+    if (static_cast<int>(x_flat.size()) != num_sites * k)
+        throw std::runtime_error("Input must have length " + std::to_string(num_sites) + " * " + std::to_string(k));
+    prepare_dag_multiply();
+
+    const int n = num_samples;
+    const int nc = static_cast<int>(dag_chunks.size());
+    const double* xp = x_flat.data();
+
+    std::vector<double> result(static_cast<size_t>(n) * k, 0.0);
+
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        int T = omp_get_num_threads();
+        int cols_per = (k + T - 1) / T;
+        int col_lo = std::min(tid * cols_per, k);
+        int col_hi = std::min(col_lo + cols_per, k);
+        int my_k = col_hi - col_lo;
+
+        if (my_k > 0) {
+            for (int c = 0; c < nc; c++) {
+                const auto& ch = dag_chunks[c];
+
+                // ref_sum for my columns
+                std::vector<double> ref_sum(my_k, 0.0);
+                for (int idx : ch.ref_ones) {
+                    const double* xs = xp + static_cast<size_t>(idx) * k + col_lo;
+                    for (int j = 0; j < my_k; j++) ref_sum[j] += xs[j];
+                }
+
+                if (ch.num_sets > 0) {
+                    // Propagation (amortized across my_k columns)
+                    std::vector<double> partial(static_cast<size_t>(ch.num_sets) * my_k, 0.0);
+                    for (int j = ch.num_sets - 1; j >= 0; j--) {
+                        double* pj = partial.data() + static_cast<size_t>(j) * my_k;
+                        for (int a = ch.d2a_off[j]; a < ch.d2a_off[j + 1]; a++) {
+                            const double* pa = partial.data() + static_cast<size_t>(ch.d2a[a]) * my_k;
+                            for (int j2 = 0; j2 < my_k; j2++) pj[j2] += pa[j2];
+                        }
+                        for (int a = ch.mut_off[j]; a < ch.mut_off[j + 1]; a++) {
+                            const int8_t sign = ch.mut_sign[a];
+                            const double* xs = xp + static_cast<size_t>(ch.mut_site[a]) * k + col_lo;
+                            for (int j2 = 0; j2 < my_k; j2++) pj[j2] += sign * xs[j2];
+                        }
+                    }
+
+                    // Scatter — each thread writes to its own disjoint columns
+                    for (int i = 0; i < n; i++) {
+                        double* ri = result.data() + static_cast<size_t>(i) * k + col_lo;
+                        for (int j = 0; j < my_k; j++) ri[j] += ref_sum[j];
+                        for (int a = ch.indiv_off[i]; a < ch.indiv_off[i + 1]; a++) {
+                            const double* pa = partial.data() + static_cast<size_t>(ch.indiv_set[a]) * my_k;
+                            for (int j2 = 0; j2 < my_k; j2++) ri[j2] += pa[j2];
+                        }
+                    }
+                } else {
+                    for (int i = 0; i < n; i++) {
+                        double* ri = result.data() + static_cast<size_t>(i) * k + col_lo;
+                        for (int j = 0; j < my_k; j++) ri[j] += ref_sum[j];
+                    }
+                }
+            }
+        }
+    }
+    return result;
+}
+
+
+// ── Left multiply single-column helper (no OMP) ─────────────────────────
+
+void ThreadingInstructions::left_multiply_dag_single(const double* yp, double* out) const {
+    const int n = num_samples;
+    const int nc = static_cast<int>(dag_chunks.size());
+
+    double y_sum = 0.0;
+    for (int i = 0; i < n; i++) y_sum += yp[i];
+
+    // Zero output (caller may not have initialized)
+    for (int s = 0; s < num_sites; s++) out[s] = 0.0;
+
+    for (int c = 0; c < nc; c++) {
+        const auto& ch = dag_chunks[c];
+
+        for (int idx : ch.ref_ones) out[idx] = y_sum;
+
+        if (ch.num_sets > 0) {
+            std::vector<double> partial(ch.num_sets, 0.0);
+            for (int j = 0; j < ch.num_sets; j++) {
+                double sum = 0.0;
+                for (int a = ch.set_indiv_off[j]; a < ch.set_indiv_off[j + 1]; a++)
+                    sum += yp[ch.set_indiv[a]];
+                partial[j] = sum;
+            }
+            for (int j = 0; j < ch.num_sets; j++) {
+                for (int a = ch.a2d_off[j]; a < ch.a2d_off[j + 1]; a++)
+                    partial[j] += partial[ch.a2d[a]];
+            }
+            for (int j = 0; j < ch.num_sets; j++) {
+                const double pj = partial[j];
+                for (int a = ch.mut_off[j]; a < ch.mut_off[j + 1]; a++)
+                    out[ch.mut_site[a]] += ch.mut_sign[a] * pj;
+            }
+        }
+    }
+}
+
+
+// ── Left multiply: result = G^T y  (single vector) ──────────────────────
+
+std::vector<double> ThreadingInstructions::left_multiply_dag(const std::vector<double>& y) {
+    if (static_cast<int>(y.size()) != num_samples)
+        throw std::runtime_error("Input vector must have length " + std::to_string(num_samples));
+    prepare_dag_multiply();
+
+    std::vector<double> result(num_sites);
+    left_multiply_dag_single(y.data(), result.data());
+    return result;
+}
+
+
+// ── Left multiply batch: result = G^T Y  (k vectors) ────────────────────
+// Hybrid parallelism: columns split across threads, amortized DAG traversal.
+
+std::vector<double> ThreadingInstructions::left_multiply_dag_batch(
+        const std::vector<double>& y_flat, int k) {
+    if (static_cast<int>(y_flat.size()) != num_samples * k)
+        throw std::runtime_error("Input must have length " + std::to_string(num_samples) + " * " + std::to_string(k));
+    prepare_dag_multiply();
+
+    const int n = num_samples;
+    const int m = num_sites;
+    const double* yp = y_flat.data();
+    const int nc = static_cast<int>(dag_chunks.size());
+
+    std::vector<double> result(static_cast<size_t>(m) * k, 0.0);
+
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        int T = omp_get_num_threads();
+        int cols_per = (k + T - 1) / T;
+        int col_lo = std::min(tid * cols_per, k);
+        int col_hi = std::min(col_lo + cols_per, k);
+        int my_k = col_hi - col_lo;
+
+        if (my_k > 0) {
+            // y_sum for my columns
+            std::vector<double> y_sum(my_k, 0.0);
+            for (int i = 0; i < n; i++) {
+                const double* yi = yp + static_cast<size_t>(i) * k + col_lo;
+                for (int j = 0; j < my_k; j++) y_sum[j] += yi[j];
+            }
+
+            for (int c = 0; c < nc; c++) {
+                const auto& ch = dag_chunks[c];
+
+                // ref sites get y_sum
+                for (int idx : ch.ref_ones) {
+                    double* rs = result.data() + static_cast<size_t>(idx) * k + col_lo;
+                    for (int j = 0; j < my_k; j++) rs[j] = y_sum[j];
+                }
+
+                if (ch.num_sets > 0) {
+                    // Gather from individuals (amortized across my_k columns)
+                    std::vector<double> partial(static_cast<size_t>(ch.num_sets) * my_k, 0.0);
+                    for (int j = 0; j < ch.num_sets; j++) {
+                        double* pj = partial.data() + static_cast<size_t>(j) * my_k;
+                        for (int a = ch.set_indiv_off[j]; a < ch.set_indiv_off[j + 1]; a++) {
+                            const double* yi = yp + static_cast<size_t>(ch.set_indiv[a]) * k + col_lo;
+                            for (int j2 = 0; j2 < my_k; j2++) pj[j2] += yi[j2];
+                        }
+                    }
+                    // Propagation (forward/bottom-up)
+                    for (int j = 0; j < ch.num_sets; j++) {
+                        double* pj = partial.data() + static_cast<size_t>(j) * my_k;
+                        for (int a = ch.a2d_off[j]; a < ch.a2d_off[j + 1]; a++) {
+                            const double* pd = partial.data() + static_cast<size_t>(ch.a2d[a]) * my_k;
+                            for (int j2 = 0; j2 < my_k; j2++) pj[j2] += pd[j2];
+                        }
+                    }
+                    // Scatter to sites
+                    for (int j = 0; j < ch.num_sets; j++) {
+                        const double* pj = partial.data() + static_cast<size_t>(j) * my_k;
+                        for (int a = ch.mut_off[j]; a < ch.mut_off[j + 1]; a++) {
+                            const int s = ch.mut_site[a];
+                            const int8_t sign = ch.mut_sign[a];
+                            double* rs = result.data() + static_cast<size_t>(s) * k + col_lo;
+                            for (int j2 = 0; j2 < my_k; j2++) rs[j2] += sign * pj[j2];
+                        }
+                    }
+                }
+            }
+        }
+    }
     return result;
 }

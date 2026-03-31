@@ -21,6 +21,7 @@
 
 #include <functional>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -145,6 +146,39 @@ public:
     // left:  X is (num_samples, k), returns (num_sites, k)
     std::vector<double> right_multiply_rle_batch(const std::vector<double>& x_flat, int k);
     std::vector<double> left_multiply_rle_batch(const std::vector<double>& x_flat, int k);
+
+    // DAG (mutation-set directed acyclic graph) multiply: preprocesses threading
+    // instructions into a compact DAG of mutation sets, following the ARGMatMult
+    // approach. Segments without mismatches are collapsed (pass-through), yielding
+    // a DAG whose size grows sublinearly with n.
+    //
+    // The genomic region is split into num_chunks independent sub-DAGs (default:
+    // OMP_NUM_THREADS). Each chunk covers a disjoint site range and can be
+    // processed in parallel, giving embarrassingly-parallel speedup for the
+    // propagation phase.
+    //
+    // Prepare: builds split points (reverse pass), then per-chunk DAG construction.
+    // Right multiply: O(sum_c (|DAG_c| + connections_c) * k) — sublinear in n.
+    // Left multiply:  O(sum_c (|DAG_c| + connections_c + m_c) * k) — sublinear in n.
+    void prepare_dag_multiply(int num_chunks = 0);
+    std::vector<double> right_multiply_dag(const std::vector<double>& x);
+    std::vector<double> left_multiply_dag(const std::vector<double>& x);
+
+    // Batch DAG multiply: process k vectors via outer-loop parallelism.
+    // Each column is an independent multiply; OMP distributes columns across threads.
+    // DAG structure is shared read-only in L3; per-thread data (partial, result) is private.
+    // Input/output are row-major flat arrays: X[row * k + col].
+    // right_multiply_dag_batch: X is (num_sites, k), returns (num_samples, k)
+    // left_multiply_dag_batch:  X is (num_samples, k), returns (num_sites, k)
+    std::vector<double> right_multiply_dag_batch(const std::vector<double>& x_flat, int k);
+    std::vector<double> left_multiply_dag_batch(const std::vector<double>& x_flat, int k);
+
+    // DAG statistics (valid after prepare_dag_multiply)
+    int get_dag_num_sets() const;
+    int get_dag_total_edges() const;
+    int get_dag_total_connections() const;
+    int get_dag_total_mutations() const;
+    int get_dag_num_chunks() const { return dag_ready ? static_cast<int>(dag_chunks.size()) : 0; }
 
     // ARG traversals directly on threading instructions (no materialized ARG).
     //
@@ -310,6 +344,29 @@ private:
     std::vector<int> rle_offset;      // n+1 entries
     std::vector<int> rle_run_start;   // total_runs entries
     std::vector<int> rle_run_end;     // total_runs entries
+
+    // DAG multiply cache: region-chunked mutation-set DAGs.
+    struct DagChunk {
+        int num_sets = 0;
+        int site_lo = 0, site_hi = 0;  // site index range [lo, hi)
+        std::vector<int> d2a, d2a_off;
+        std::vector<int> a2d, a2d_off;
+        std::vector<int> mut_site;
+        std::vector<int8_t> mut_sign;
+        std::vector<int> mut_off;
+        std::vector<int> indiv_set, indiv_off;
+        std::vector<int> set_indiv, set_indiv_off;
+        std::vector<int> ref_ones;
+    };
+    bool dag_ready = false;
+    std::vector<DagChunk> dag_chunks;
+
+    DagChunk build_dag_chunk(const std::vector<std::set<int>>& sample_splits,
+                             int chunk_site_lo, int chunk_site_hi);
+
+    // Non-OMP single-column multiply helpers (called within OMP parallel regions)
+    void right_multiply_dag_single(const double* x, double* out) const;
+    void left_multiply_dag_single(const double* y, double* out) const;
 };
 
 #endif // THREADS_ARG_THREADING_INSTRUCTIONS_HPP
