@@ -104,5 +104,5 @@ Variant Operations
 
 .. method:: ThreadingInstructions.coarsen(min_sites)
 
-   Merge segments shorter than ``min_sites`` (lossy). Reduces tree count for
-   faster tree multiply at the cost of genotype accuracy.
+   Merge segments shorter than ``min_sites`` (lossy). Reduces segment count
+   for faster multiply at the cost of genotype accuracy.

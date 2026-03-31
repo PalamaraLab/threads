@@ -30,6 +30,124 @@
 
 namespace py = pybind11;
 
+// ---------------------------------------------------------------------------
+// Normalize/diploid helpers for DAG and RLE multiply wrappers.
+// All pre/post-processing is O(m) or O(n), negligible vs the DAG traversal.
+// ---------------------------------------------------------------------------
+
+struct NormStats {
+    std::vector<double> inv_std;  // 1/std per site
+    std::vector<double> mean;     // mean per site (haploid p or diploid 2p)
+};
+
+// Compute per-site normalization stats.
+// Haploid: mean = p, std = sqrt(p*(1-p))
+// Diploid: mean = ac/n_dip, std = empirical dosage std (matches dense baseline)
+static NormStats get_norm_stats(ThreadingInstructions& self, bool diploid) {
+    self.compute_allele_counts();
+    const auto& ac = self.get_allele_counts();
+    const int n = self.num_samples;
+    const int m = self.num_sites;
+    NormStats ns;
+    ns.inv_std.resize(m);
+    ns.mean.resize(m);
+    if (diploid) {
+        const int n_dip = n / 2;
+        // Need het counts to compute empirical dosage variance:
+        // dosage_sumsq = 2*ac - n_het, var = sumsq/n_dip - mean^2
+        auto het = self.het_per_site();
+        for (int s = 0; s < m; s++) {
+            double mu = static_cast<double>(ac[s]) / n_dip;
+            double sumsq = static_cast<double>(2 * ac[s] - het[s]);
+            double var = sumsq / n_dip - mu * mu;
+            ns.mean[s] = mu;
+            ns.inv_std[s] = (var > 0) ? 1.0 / std::sqrt(var) : 0.0;
+        }
+    } else {
+        for (int s = 0; s < m; s++) {
+            double p = static_cast<double>(ac[s]) / n;
+            double var = p * (1.0 - p);
+            ns.mean[s] = p;
+            ns.inv_std[s] = (var > 0) ? 1.0 / std::sqrt(var) : 0.0;
+        }
+    }
+    return ns;
+}
+
+// Pre-process x (sites) for normalized right multiply: x_scaled[s] = x[s] * inv_std[s]
+// Also computes offset = sum_s(mean[s] * x_scaled[s]) to subtract from result.
+// Works on flat arrays with k columns: x[s*k + c].
+static void norm_prescale_right(std::vector<double>& x, const NormStats& ns,
+                                std::vector<double>& offsets, int m, int k) {
+    offsets.assign(k, 0.0);
+    for (int s = 0; s < m; s++) {
+        for (int c = 0; c < k; c++) {
+            x[s * k + c] *= ns.inv_std[s];
+            offsets[c] += ns.mean[s] * x[s * k + c];
+        }
+    }
+}
+
+// Post-process result of right multiply: reduce to diploid first, then subtract offset.
+// result is flat (n, k). Output is (out_n, k) where out_n = n or n/2.
+static void norm_postprocess_right(std::vector<double>& result, const std::vector<double>& offsets,
+                                   bool diploid, int n, int k) {
+    // Reduce to diploid first (offset must be subtracted once per diploid, not per haploid)
+    int out_n = n;
+    if (diploid) {
+        const int n_dip = n / 2;
+        for (int j = 0; j < n_dip; j++)
+            for (int c = 0; c < k; c++)
+                result[j * k + c] = result[(2*j) * k + c] + result[(2*j+1) * k + c];
+        result.resize(static_cast<size_t>(n_dip) * k);
+        out_n = n_dip;
+    }
+    // Subtract mean offset
+    for (int i = 0; i < out_n; i++)
+        for (int c = 0; c < k; c++)
+            result[i * k + c] -= offsets[c];
+}
+
+// Reduce haploid result to diploid (no normalize).
+static void diploid_reduce_right(std::vector<double>& result, int n, int k) {
+    const int n_dip = n / 2;
+    for (int j = 0; j < n_dip; j++)
+        for (int c = 0; c < k; c++)
+            result[j * k + c] = result[(2*j) * k + c] + result[(2*j+1) * k + c];
+    result.resize(static_cast<size_t>(n_dip) * k);
+}
+
+// Pre-process y (samples) for left multiply with diploid: expand n_dip → n.
+// y[j*k + c] → y_hap[(2j)*k + c] = y_hap[(2j+1)*k + c] = y[j*k + c]
+static std::vector<double> diploid_expand_left(const std::vector<double>& y, int n, int k) {
+    const int n_dip = n / 2;
+    std::vector<double> y_hap(static_cast<size_t>(n) * k);
+    for (int j = 0; j < n_dip; j++)
+        for (int c = 0; c < k; c++) {
+            y_hap[(2*j) * k + c] = y[j * k + c];
+            y_hap[(2*j+1) * k + c] = y[j * k + c];
+        }
+    return y_hap;
+}
+
+// Post-process result of left multiply for normalize:
+// result[s] = (result[s] - mean[s] * sum_y) / std[s]
+static void norm_postprocess_left(std::vector<double>& result, const NormStats& ns,
+                                  const std::vector<double>& col_sums, int m, int k) {
+    for (int s = 0; s < m; s++)
+        for (int c = 0; c < k; c++)
+            result[s * k + c] = (result[s * k + c] - ns.mean[s] * col_sums[c]) * ns.inv_std[s];
+}
+
+// Compute column sums of input y (flat, rows × k).
+static std::vector<double> col_sums_of(const double* y, int rows, int k) {
+    std::vector<double> sums(k, 0.0);
+    for (int i = 0; i < rows; i++)
+        for (int c = 0; c < k; c++)
+            sums[c] += y[i * k + c];
+    return sums;
+}
+
 PYBIND11_MODULE(threads_arg_python_bindings, m) {
   py::class_<ImputationSegment>(m, "ImputationSegment")
       .def_readonly("seg_start", &ImputationSegment::seg_start)
@@ -216,141 +334,103 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("simplify_for_multiply", &ThreadingInstructions::simplify_for_multiply,
            "Strip TMRCAs and merge consecutive segments with the same target. Reduces multiply cost without changing genotypes.")
       .def("coarsen", &ThreadingInstructions::coarsen, py::arg("min_sites"),
-           "Merge segments shorter than min_sites (lossy). Reduces tree count for faster tree multiply at the cost of genotype accuracy.")
+           "Merge segments shorter than min_sites (lossy). Reduces segment count for faster multiply at the cost of genotype accuracy.")
       .def("prepare_rle_multiply", &ThreadingInstructions::prepare_rle_multiply,
-           "Precompute run-length encoding of 1-runs per sample. Equivalent to sparse matrix representation. "
-           "O(m + total_1_runs) per multiply; prefer tree multiply for large m.")
+           "Precompute run-length encoding of 1-runs per sample. Sparse baseline multiply. "
+           "O(m + total_1_runs) per multiply; prefer DAG multiply for large n.")
       .def("right_multiply_rle", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr,
+              bool diploid, bool normalize) {
         auto buf = arr.request();
+        const int m = self.num_sites;
+        const int n = self.num_samples;
+        NormStats ns;
+        if (normalize) ns = get_norm_stats(self, diploid);
+        int k;
+        std::vector<double> result;
         if (buf.ndim == 1) {
-            if (static_cast<int>(buf.shape[0]) != self.num_sites)
+            k = 1;
+            if (static_cast<int>(buf.shape[0]) != m)
                 throw std::runtime_error("1D input must have length num_sites");
-            std::vector<double> x(static_cast<double*>(buf.ptr),
-                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
-            auto result = self.right_multiply_rle(x);
-            py::array_t<double> out(static_cast<size_t>(result.size()));
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            std::vector<double> x(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + m);
+            std::vector<double> offsets;
+            if (normalize) norm_prescale_right(x, ns, offsets, m, 1);
+            result = self.right_multiply_rle(x);
+            if (normalize) norm_postprocess_right(result, offsets, diploid, n, 1);
+            else if (diploid) diploid_reduce_right(result, n, 1);
         } else if (buf.ndim == 2) {
-            int m = static_cast<int>(buf.shape[0]);
-            int k = static_cast<int>(buf.shape[1]);
-            if (m != self.num_sites)
+            if (static_cast<int>(buf.shape[0]) != m)
                 throw std::runtime_error("First dimension must be num_sites");
-            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                       static_cast<double*>(buf.ptr) + buf.size);
-            auto result = self.right_multiply_rle_batch(x_flat, k);
-            py::array_t<double> out({self.num_samples, k});
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            k = static_cast<int>(buf.shape[1]);
+            std::vector<double> x(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + buf.size);
+            std::vector<double> offsets;
+            if (normalize) norm_prescale_right(x, ns, offsets, m, k);
+            result = self.right_multiply_rle_batch(x, k);
+            if (normalize) norm_postprocess_right(result, offsets, diploid, n, k);
+            else if (diploid) diploid_reduce_right(result, n, k);
         } else {
-            throw std::runtime_error("Input must be 1D (num_sites,) or 2D (num_sites, k)");
+            throw std::runtime_error("Input must be 1D or 2D");
         }
-      }, py::arg("X"),
-           "Compute G @ X via RLE. X is (num_sites,) or (num_sites, k). "
-           "Returns (num_samples,) or (num_samples, k) numpy array.")
+        int out_rows = (diploid ? n / 2 : n);
+        if (k == 1) {
+            py::array_t<double> out(static_cast<size_t>(out_rows));
+            std::memcpy(out.mutable_data(), result.data(), out_rows * sizeof(double));
+            return out;
+        }
+        py::array_t<double> out({out_rows, k});
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("X"), py::arg("diploid")=false, py::arg("normalize")=false,
+           "Compute G @ X via RLE. Supports diploid and normalize flags.")
       .def("left_multiply_rle", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr,
+              bool diploid, bool normalize) {
         auto buf = arr.request();
+        const int m = self.num_sites;
+        const int n = self.num_samples;
+        const int n_dip = n / 2;
+        const int expected_rows = diploid ? n_dip : n;
+        NormStats ns;
+        if (normalize) ns = get_norm_stats(self, diploid);
+        int k;
+        std::vector<double> result;
         if (buf.ndim == 1) {
-            if (static_cast<int>(buf.shape[0]) != self.num_samples)
-                throw std::runtime_error("1D input must have length num_samples");
-            std::vector<double> x(static_cast<double*>(buf.ptr),
-                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
-            auto result = self.left_multiply_rle(x);
-            py::array_t<double> out(static_cast<size_t>(result.size()));
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            k = 1;
+            if (static_cast<int>(buf.shape[0]) != expected_rows)
+                throw std::runtime_error("1D input length mismatch");
+            std::vector<double> y(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + expected_rows);
+            auto sums = col_sums_of(y.data(), expected_rows, 1);
+            if (diploid) y = diploid_expand_left(y, n, 1);
+            result = self.left_multiply_rle(y);
+            if (normalize) norm_postprocess_left(result, ns, sums, m, 1);
         } else if (buf.ndim == 2) {
-            int n = static_cast<int>(buf.shape[0]);
-            int k = static_cast<int>(buf.shape[1]);
-            if (n != self.num_samples)
-                throw std::runtime_error("First dimension must be num_samples");
-            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                       static_cast<double*>(buf.ptr) + buf.size);
-            auto result = self.left_multiply_rle_batch(x_flat, k);
-            py::array_t<double> out({self.num_sites, k});
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            if (static_cast<int>(buf.shape[0]) != expected_rows)
+                throw std::runtime_error("First dimension mismatch");
+            k = static_cast<int>(buf.shape[1]);
+            std::vector<double> y(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + buf.size);
+            auto sums = col_sums_of(y.data(), expected_rows, k);
+            if (diploid) y = diploid_expand_left(y, n, k);
+            result = self.left_multiply_rle_batch(y, k);
+            if (normalize) norm_postprocess_left(result, ns, sums, m, k);
         } else {
-            throw std::runtime_error("Input must be 1D (num_samples,) or 2D (num_samples, k)");
+            throw std::runtime_error("Input must be 1D or 2D");
         }
-      }, py::arg("X"),
-           "Compute G.T @ X via RLE. X is (num_samples,) or (num_samples, k). "
-           "Returns (num_sites,) or (num_sites, k) numpy array.")
+        if (k == 1) {
+            py::array_t<double> out(static_cast<size_t>(m));
+            std::memcpy(out.mutable_data(), result.data(), m * sizeof(double));
+            return out;
+        }
+        py::array_t<double> out({m, k});
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("X"), py::arg("diploid")=false, py::arg("normalize")=false,
+           "Compute G.T @ X via RLE. Supports diploid and normalize flags.")
       .def("het_per_site", &ThreadingInstructions::het_per_site,
            "Count heterozygous diploid individuals per site. Returns int32 array "
            "of length num_sites. O(n*m) time, O(n) memory (no dense matrix allocated).")
       .def("het_per_individual", &ThreadingInstructions::het_per_individual,
            "Count heterozygous sites per diploid individual. Returns int32 array "
            "of length num_samples/2. O(n*m) time, O(n) memory.")
-      .def("prepare_tree_multiply", &ThreadingInstructions::prepare_tree_multiply,
-           py::call_guard<py::gil_scoped_release>(),
-           "Precompute tree-shuttle structures for multiply. O(n*S*d) where S=segments/sample, "
-           "d=tree depth. After this, right_multiply_tree is O((n*ni+M)/T) and "
-           "left_multiply_tree is O((m+M+S*d)/T) with O(n) memory per thread.")
-      .def("right_multiply_tree", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
-        auto buf = arr.request();
-        if (buf.ndim == 1) {
-            if (static_cast<int>(buf.shape[0]) != self.num_sites)
-                throw std::runtime_error("1D input must have length num_sites");
-            std::vector<double> x(static_cast<double*>(buf.ptr),
-                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
-            std::vector<double> result;
-            { py::gil_scoped_release release; result = self.right_multiply_tree(x); }
-            py::array_t<double> out(static_cast<size_t>(result.size()));
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
-        } else if (buf.ndim == 2) {
-            int m = static_cast<int>(buf.shape[0]);
-            int k = static_cast<int>(buf.shape[1]);
-            if (m != self.num_sites)
-                throw std::runtime_error("First dimension must be num_sites");
-            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                       static_cast<double*>(buf.ptr) + buf.size);
-            std::vector<double> result;
-            { py::gil_scoped_release release; result = self.right_multiply_tree_batch(x_flat, k); }
-            py::array_t<double> out({self.num_samples, k});
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
-        } else {
-            throw std::runtime_error("Input must be 1D (num_sites,) or 2D (num_sites, k)");
-        }
-      }, py::arg("X"),
-           "Compute G @ X via tree shuttle. X is (num_sites,) or (num_sites, k). "
-           "Returns (num_samples,) or (num_samples, k) numpy array.")
-      .def("left_multiply_tree", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
-        auto buf = arr.request();
-        if (buf.ndim == 1) {
-            if (static_cast<int>(buf.shape[0]) != self.num_samples)
-                throw std::runtime_error("1D input must have length num_samples");
-            std::vector<double> x(static_cast<double*>(buf.ptr),
-                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
-            std::vector<double> result;
-            { py::gil_scoped_release release; result = self.left_multiply_tree(x); }
-            py::array_t<double> out(static_cast<size_t>(result.size()));
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
-        } else if (buf.ndim == 2) {
-            int n = static_cast<int>(buf.shape[0]);
-            int k = static_cast<int>(buf.shape[1]);
-            if (n != self.num_samples)
-                throw std::runtime_error("First dimension must be num_samples");
-            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                       static_cast<double*>(buf.ptr) + buf.size);
-            std::vector<double> result;
-            { py::gil_scoped_release release; result = self.left_multiply_tree_batch(x_flat, k); }
-            py::array_t<double> out({self.num_sites, k});
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
-        } else {
-            throw std::runtime_error("Input must be 1D (num_samples,) or 2D (num_samples, k)");
-        }
-      }, py::arg("X"),
-           "Compute G.T @ X via tree shuttle. X is (num_samples,) or (num_samples, k). "
-           "Returns (num_sites,) or (num_sites, k) numpy array.")
       .def_property_readonly("dag_num_sets", &ThreadingInstructions::get_dag_num_sets,
            "Total mutation set nodes across all DAG chunks (0 until prepare_dag_multiply is called).")
       .def_property_readonly("dag_total_edges", &ThreadingInstructions::get_dag_total_edges)
@@ -360,71 +440,97 @@ PYBIND11_MODULE(threads_arg_python_bindings, m) {
       .def("prepare_dag_multiply", &ThreadingInstructions::prepare_dag_multiply,
            py::call_guard<py::gil_scoped_release>(),
            py::arg("num_chunks") = 0,
-           "Precompute region-chunked mutation-set DAGs for sublinear multiply. "
+           "Precompute region-chunked mutation-set DAGs for sublinear multiply, "
+           "following the ARG multiplication approach used in arg-needle-lib. "
            "num_chunks=0 (default) uses OMP_NUM_THREADS. Each chunk covers a disjoint "
            "site range and is processed in parallel during multiply.")
       .def("right_multiply_dag", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr,
+              bool diploid, bool normalize) {
         auto buf = arr.request();
+        const int m = self.num_sites;
+        const int n = self.num_samples;
+        NormStats ns;
+        if (normalize) ns = get_norm_stats(self, diploid);
+        int k;
+        std::vector<double> result;
         if (buf.ndim == 1) {
-            if (static_cast<int>(buf.shape[0]) != self.num_sites)
+            k = 1;
+            if (static_cast<int>(buf.shape[0]) != m)
                 throw std::runtime_error("1D input must have length num_sites");
-            std::vector<double> x(static_cast<double*>(buf.ptr),
-                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
-            std::vector<double> result;
+            std::vector<double> x(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + m);
+            std::vector<double> offsets;
+            if (normalize) norm_prescale_right(x, ns, offsets, m, 1);
             { py::gil_scoped_release release; result = self.right_multiply_dag(x); }
-            py::array_t<double> out(static_cast<size_t>(result.size()));
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            if (normalize) norm_postprocess_right(result, offsets, diploid, n, 1);
+            else if (diploid) diploid_reduce_right(result, n, 1);
         } else if (buf.ndim == 2) {
-            int m = static_cast<int>(buf.shape[0]);
-            int k = static_cast<int>(buf.shape[1]);
-            if (m != self.num_sites)
+            if (static_cast<int>(buf.shape[0]) != m)
                 throw std::runtime_error("First dimension must be num_sites");
-            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                       static_cast<double*>(buf.ptr) + buf.size);
-            std::vector<double> result;
-            { py::gil_scoped_release release; result = self.right_multiply_dag_batch(x_flat, k); }
-            py::array_t<double> out({self.num_samples, k});
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            k = static_cast<int>(buf.shape[1]);
+            std::vector<double> x(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + buf.size);
+            std::vector<double> offsets;
+            if (normalize) norm_prescale_right(x, ns, offsets, m, k);
+            { py::gil_scoped_release release; result = self.right_multiply_dag_batch(x, k); }
+            if (normalize) norm_postprocess_right(result, offsets, diploid, n, k);
+            else if (diploid) diploid_reduce_right(result, n, k);
         } else {
-            throw std::runtime_error("Input must be 1D (num_sites,) or 2D (num_sites, k)");
+            throw std::runtime_error("Input must be 1D or 2D");
         }
-      }, py::arg("X"),
-           "Compute G @ X via mutation-set DAG. X is (num_sites,) or (num_sites, k). "
-           "Returns (num_samples,) or (num_samples, k) numpy array. Sublinear in n.")
+        int out_rows = (diploid ? n / 2 : n);
+        if (k == 1) {
+            py::array_t<double> out(static_cast<size_t>(out_rows));
+            std::memcpy(out.mutable_data(), result.data(), out_rows * sizeof(double));
+            return out;
+        }
+        py::array_t<double> out({out_rows, k});
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("X"), py::arg("diploid")=false, py::arg("normalize")=false,
+           "Compute G @ X via mutation-set DAG (arg-needle-lib approach). Supports diploid and normalize flags. Sublinear in n.")
       .def("left_multiply_dag", [](ThreadingInstructions& self,
-              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr,
+              bool diploid, bool normalize) {
         auto buf = arr.request();
+        const int m = self.num_sites;
+        const int n = self.num_samples;
+        const int n_dip = n / 2;
+        const int expected_rows = diploid ? n_dip : n;
+        NormStats ns;
+        if (normalize) ns = get_norm_stats(self, diploid);
+        int k;
+        std::vector<double> result;
         if (buf.ndim == 1) {
-            if (static_cast<int>(buf.shape[0]) != self.num_samples)
-                throw std::runtime_error("1D input must have length num_samples");
-            std::vector<double> x(static_cast<double*>(buf.ptr),
-                                  static_cast<double*>(buf.ptr) + buf.shape[0]);
-            std::vector<double> result;
-            { py::gil_scoped_release release; result = self.left_multiply_dag(x); }
-            py::array_t<double> out(static_cast<size_t>(result.size()));
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            k = 1;
+            if (static_cast<int>(buf.shape[0]) != expected_rows)
+                throw std::runtime_error("1D input length mismatch");
+            std::vector<double> y(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + expected_rows);
+            auto sums = col_sums_of(y.data(), expected_rows, 1);
+            if (diploid) y = diploid_expand_left(y, n, 1);
+            { py::gil_scoped_release release; result = self.left_multiply_dag(y); }
+            if (normalize) norm_postprocess_left(result, ns, sums, m, 1);
         } else if (buf.ndim == 2) {
-            int n = static_cast<int>(buf.shape[0]);
-            int k = static_cast<int>(buf.shape[1]);
-            if (n != self.num_samples)
-                throw std::runtime_error("First dimension must be num_samples");
-            std::vector<double> x_flat(static_cast<double*>(buf.ptr),
-                                       static_cast<double*>(buf.ptr) + buf.size);
-            std::vector<double> result;
-            { py::gil_scoped_release release; result = self.left_multiply_dag_batch(x_flat, k); }
-            py::array_t<double> out({self.num_sites, k});
-            std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
-            return out;
+            if (static_cast<int>(buf.shape[0]) != expected_rows)
+                throw std::runtime_error("First dimension mismatch");
+            k = static_cast<int>(buf.shape[1]);
+            std::vector<double> y(static_cast<double*>(buf.ptr), static_cast<double*>(buf.ptr) + buf.size);
+            auto sums = col_sums_of(y.data(), expected_rows, k);
+            if (diploid) y = diploid_expand_left(y, n, k);
+            { py::gil_scoped_release release; result = self.left_multiply_dag_batch(y, k); }
+            if (normalize) norm_postprocess_left(result, ns, sums, m, k);
         } else {
-            throw std::runtime_error("Input must be 1D (num_samples,) or 2D (num_samples, k)");
+            throw std::runtime_error("Input must be 1D or 2D");
         }
-      }, py::arg("X"),
-           "Compute G.T @ X via mutation-set DAG. X is (num_samples,) or (num_samples, k). "
-           "Returns (num_sites,) or (num_sites, k) numpy array. Sublinear in n.")
+        if (k == 1) {
+            py::array_t<double> out(static_cast<size_t>(m));
+            std::memcpy(out.mutable_data(), result.data(), m * sizeof(double));
+            return out;
+        }
+        py::array_t<double> out({m, k});
+        std::memcpy(out.mutable_data(), result.data(), result.size() * sizeof(double));
+        return out;
+      }, py::arg("X"), py::arg("diploid")=false, py::arg("normalize")=false,
+           "Compute G.T @ X via mutation-set DAG (arg-needle-lib approach). Supports diploid and normalize flags. Sublinear in n.")
       .def("visit_clades", [](const ThreadingInstructions& self, py::function callback) {
         self.visit_clades([&](const std::vector<int>& descendants, double height,
                               int start_bp, int end_bp) {

@@ -104,38 +104,17 @@ public:
     // Aggressively coarsen by merging short segments into neighbors.
     // A segment covering fewer than min_sites variant sites is absorbed into
     // the previous segment (its target is replaced by the neighbor's target).
-    // This is lossy — it changes some genotypes — but reduces tree_n_intervals.
+    // This is lossy — it changes some genotypes — but reduces segment count.
     ThreadingInstructions coarsen(int min_sites) const;
 
     // Common operations
     std::vector<double> left_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
     std::vector<double> right_multiply(const std::vector<double>& x, bool diploid=false, bool normalize=false);
 
-    // Tree-propagation multiply (tree shuttle).
-    // Prepare: O(n*S*d) where S=segments/sample, d=tree depth.
-    //   Builds interval decomposition, mismatch signs via lazy chain tracing,
-    //   inverted mismatch index, interval change list, and ancestor chains.
-    //   No genotype materialization; peak memory O(S*n + M + n*S*d).
-    // Right multiply: O((n*ni + M)/T) per call, O(n*T) memory.
-    //   Region-chunked OpenMP; each thread initializes via binary search.
-    // Left multiply: O((m + M + S*d)/T) per call, O(n*T + m) memory.
-    //   Sublinear via incremental O(n) weight vector (not O(n*ni) matrix).
-    //   Region-chunked OpenMP; non-overlapping site ranges, no reduction.
-    void prepare_tree_multiply();
-    std::vector<double> right_multiply_tree(const std::vector<double>& x);
-    std::vector<double> left_multiply_tree(const std::vector<double>& x);
-
-    // Batch tree multiply: process k vectors in a single tree traversal.
-    // Input/output are row-major flat arrays: X[row * k + col].
-    // right_multiply_tree_batch: X is (num_sites, k), returns (num_samples, k)
-    // left_multiply_tree_batch:  X is (num_samples, k), returns (num_sites, k)
-    std::vector<double> right_multiply_tree_batch(const std::vector<double>& x_flat, int k);
-    std::vector<double> left_multiply_tree_batch(const std::vector<double>& x_flat, int k);
-
-    // RLE (run-length encoded) multiply: precomputes per-sample 1-runs,
-    // then multiplies via prefix-sum lookups in O(m + total_1_runs).
-    // Prepare is O(n*m) with O(m * tree_depth) peak memory (ref-counted cache).
-    // Per-call cost is much lower than tree multiply when total_1_runs << n*ni.
+    // RLE (run-length encoded) multiply: sparse baseline that precomputes
+    // per-sample 1-runs, then multiplies via prefix-sum lookups in O(m + total_1_runs).
+    // Prepare is O(n*m) with O(m * chain_depth) peak memory (ref-counted cache).
+    // For large n, prefer DAG multiply which scales sublinearly.
     void prepare_rle_multiply();
     std::vector<double> right_multiply_rle(const std::vector<double>& x);
     std::vector<double> left_multiply_rle(const std::vector<double>& x);
@@ -148,8 +127,9 @@ public:
     std::vector<double> left_multiply_rle_batch(const std::vector<double>& x_flat, int k);
 
     // DAG (mutation-set directed acyclic graph) multiply: preprocesses threading
-    // instructions into a compact DAG of mutation sets, following the ARGMatMult
-    // approach. Segments without mismatches are collapsed (pass-through), yielding
+    // instructions into a compact DAG of mutation sets, following the ARG
+    // multiplication approach used in arg-needle-lib (ARGMatMult).
+    // Segments without mismatches are collapsed (pass-through), yielding
     // a DAG whose size grows sublinearly with n.
     //
     // The genomic region is split into num_chunks independent sub-DAGs (default:
@@ -278,64 +258,20 @@ private:
     std::vector<double> standardized_dip;
     bool standardized_dip_ready = false;
 
-    // Tree-propagation multiply cache
-    bool tree_ready = false;
-    int tree_n_intervals = 0;
-    std::vector<int> tree_ivl_start;   // first site index of each interval
-    std::vector<int> tree_ivl_end;     // one past last site index
+    // Reference genome (sample 0's genotype at each site). Shared by DAG multiply.
     std::vector<int> tree_ref_genome;
 
-    // Precomputed mismatch correction signs: tree_mm_sign[offset + k] = +1 or -1
-    // for non-self mismatches, 0 for self-ref (unused). Per-sample offsets in tree_mm_offset.
-    std::vector<int8_t> tree_mm_sign;
-    std::vector<int> tree_mm_offset;   // tree_mm_offset[i] = start index for sample i
-
-    // Site-to-interval lookup: site_to_ivl[s] = interval index containing site s.
-    // O(m) memory, replaces O(M_total) tree_mm_ivl array.
-    std::vector<int> site_to_ivl;
-
-    // Per-sample segment-to-interval mapping for segment-level loop.
-    // tree_seg_first_ivl[offset + k] = first global interval of k-th segment
-    // tree_seg_id[offset + k] = segment index in instructions[i].targets
-    // Indexed by tree_seg_offset[sample] + k.
-    std::vector<int> tree_seg_first_ivl;
-    std::vector<int> tree_seg_id;         // segment index for target lookup
-    std::vector<int> tree_seg_offset;
-
     // Lazy genotype query: trace threading chain to sample 0.
-    // O(d * log S) per call, d = tree depth.
+    // O(d * log S) per call, d = threading chain depth. Used by DAG construction.
     int genotype_at_site(int sample, int site) const;
 
-    // Target lookup: which sample does `sample` target at a given interval?
-    // O(log S_i) via binary search on tree_seg_first_ivl.
-    int target_at_interval(int sample, int interval) const;
-
-    // Inverted mismatch index: non-self-ref mismatches grouped by interval.
-    // inv_mm_offset[j]..inv_mm_offset[j+1] indexes into the flat arrays.
-    std::vector<int> inv_mm_sample;
-    std::vector<int> inv_mm_site;
-    std::vector<int8_t> inv_mm_sign;
-    std::vector<int> inv_mm_offset;    // ni+1 entries
-
-    // Interval change list: samples whose target changes at each boundary.
-    // Sorted by sample descending within each boundary group.
-    std::vector<int> ivl_change_sample;
-    std::vector<int> ivl_change_old_tgt;
-    std::vector<int> ivl_change_new_tgt;
-    std::vector<int> ivl_change_offset;  // ni+1 entries
-
-    // Self-ref samples per interval (for carry-run handling in left multiply).
-    std::vector<int> self_ref_sample;
-    std::vector<int> self_ref_offset;    // ni+1 entries
-
-    // Precomputed ancestor chains for left multiply W updates.
-    // chain_data[chain_offset[c]..chain_offset[c+1]) = ancestor list
-    // for change c (detach uses old tree, attach uses new tree).
-    std::vector<int> detach_chain_data;
-    std::vector<int> detach_chain_offset;  // total_changes + 1
-    std::vector<int> attach_chain_data;
-    std::vector<int> attach_chain_offset;  // total_changes + 1
-
+    // Per-site haploid allele counts, cached for normalize multiply.
+    std::vector<int> allele_counts;
+    bool allele_counts_ready = false;
+public:
+    void compute_allele_counts();
+    const std::vector<int>& get_allele_counts();
+private:
 
     // RLE multiply cache: per-sample 1-runs stored as flat (start, end) pairs.
     // rle_run_start[rle_offset[i] .. rle_offset[i+1]) = start site indices of 1-runs

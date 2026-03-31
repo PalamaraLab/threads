@@ -14,104 +14,166 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+"""
+Tests for genotype-matrix multiplication.
+
+Dense multiply is the reference baseline. RLE (sparse baseline) and DAG
+(fast sublinear multiply, following the arg-needle-lib approach) are
+validated against it.
+"""
+
 import numpy as np
 import pgenlib
-import pytest 
+import pytest
 
 from threads_arg.serialization import load_instructions
+from snapshot_runners import TEST_DATA_DIR
 
-from snapshot_runners import (
-    TEST_DATA_DIR
-)
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def ground_truth():
+    """Load ground-truth genotype matrix from pgen."""
+    pgen_path = str(TEST_DATA_DIR / "panel.pgen")
+    reader = pgenlib.PgenReader(pgen_path.encode())
+    n_var = reader.get_variant_ct()
+    n_samp = reader.get_raw_sample_ct()
+    gt = np.empty((n_var, 2 * n_samp), dtype=np.int32)
+    reader.read_alleles_range(0, n_var, gt)
+    return gt.T  # (2*n_samp, n_var)
+
+
+@pytest.fixture(scope="module")
+def instructions():
+    """Load threading instructions and prepare RLE + DAG."""
+    path = str(TEST_DATA_DIR / "expected_infer_snapshot.threads")
+    ti = load_instructions(path)
+    ti.prepare_rle_multiply()
+    ti.prepare_dag_multiply(num_chunks=1)
+    return ti
+
 
 def _col_normalize(x):
-    z = x.copy()
-    mu = z.mean(axis=0, keepdims=True)
-    std = z.std(axis=0, keepdims=True)
-    return (z - mu) / std
+    mu = x.mean(axis=0, keepdims=True)
+    std = x.std(axis=0, keepdims=True)
+    return (x - mu) / std
 
-def test_left_multiply():
-    # Read ground truth genotypes
-    pgen_path = str(TEST_DATA_DIR / "panel.pgen")
-    reader = pgenlib.PgenReader(str(pgen_path).encode())
-    expected_num_variants = reader.get_variant_ct()
-    num_samples = reader.get_raw_sample_ct()
-    expected_gt = np.empty((expected_num_variants, 2 * num_samples), dtype=np.int32)
-    reader.read_alleles_range(0, expected_num_variants, expected_gt)
-    gt_matrix = expected_gt.transpose()
-    gt_matrix_dip = gt_matrix[::2] + gt_matrix[1::2]
-    gt_matrix_norm = _col_normalize(gt_matrix)
-    gt_matrix_dip_norm = _col_normalize(gt_matrix_dip)
 
-    # Read threading instructions
-    threads_path = str(TEST_DATA_DIR / "expected_infer_snapshot.threads")
-    instructions = load_instructions(threads_path)
+# ---------------------------------------------------------------------------
+# Parametrized tests: each method vs dense baseline
+# ---------------------------------------------------------------------------
 
-    # Random vector to multiply with
-    rng = np.random.default_rng(130222)
-    x_hap = rng.normal(0, 1, 2 * num_samples)
-    x_dip = rng.normal(0, 1, num_samples)
+METHODS = ["dense", "rle", "dag"]
+MODES = [
+    pytest.param(False, False, id="haploid"),
+    pytest.param(True, False, id="diploid"),
+    pytest.param(False, True, id="normalize"),
+    pytest.param(True, True, id="diploid+normalize"),
+]
 
-    # Make sure length checks are performed
+
+def _right_multiply(ti, method, x, diploid, normalize):
+    if method == "dense":
+        return ti.right_multiply(x, diploid=diploid, normalize=normalize)
+    elif method == "rle":
+        return ti.right_multiply_rle(x, diploid=diploid, normalize=normalize)
+    elif method == "dag":
+        return ti.right_multiply_dag(x, diploid=diploid, normalize=normalize)
+
+
+def _left_multiply(ti, method, x, diploid, normalize):
+    if method == "dense":
+        return ti.left_multiply(x, diploid=diploid, normalize=normalize)
+    elif method == "rle":
+        return ti.left_multiply_rle(x, diploid=diploid, normalize=normalize)
+    elif method == "dag":
+        return ti.left_multiply_dag(x, diploid=diploid, normalize=normalize)
+
+
+@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("diploid,normalize", MODES)
+def test_right_multiply(ground_truth, instructions, method, diploid, normalize):
+    """G @ x must match dense numpy baseline."""
+    gt = ground_truth  # (n_hap, m)
+    m = gt.shape[1]
+    rng = np.random.default_rng(42)
+    x = rng.normal(size=m)
+
+    if diploid:
+        ref = _col_normalize(gt[::2] + gt[1::2]) @ x if normalize else (gt[::2] + gt[1::2]) @ x
+    else:
+        ref = _col_normalize(gt.astype(float)) @ x if normalize else gt @ x
+
+    result = _right_multiply(instructions, method, x, diploid, normalize)
+    assert np.allclose(ref, result, atol=1e-10), f"{method} right {diploid=} {normalize=}"
+
+
+@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("diploid,normalize", MODES)
+def test_left_multiply(ground_truth, instructions, method, diploid, normalize):
+    """G.T @ x must match dense numpy baseline."""
+    gt = ground_truth  # (n_hap, m)
+    n_hap = gt.shape[0]
+    n_dip = n_hap // 2
+    rng = np.random.default_rng(99)
+
+    if diploid:
+        x = rng.normal(size=n_dip)
+        G = gt[::2] + gt[1::2]
+        ref = _col_normalize(G.astype(float)).T @ x if normalize else x @ G
+    else:
+        x = rng.normal(size=n_hap)
+        ref = _col_normalize(gt.astype(float)).T @ x if normalize else x @ gt
+
+    result = _left_multiply(instructions, method, x, diploid, normalize)
+    assert np.allclose(ref, result, atol=1e-10), f"{method} left {diploid=} {normalize=}"
+
+
+# ---------------------------------------------------------------------------
+# Batch multiply (RLE + DAG)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("method", ["rle", "dag"])
+def test_right_batch(ground_truth, instructions, method):
+    """Batch right multiply matches column-by-column."""
+    m = ground_truth.shape[1]
+    k = 3
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(m, k))
+
+    singles = np.column_stack([
+        _right_multiply(instructions, method, X[:, j], False, False) for j in range(k)
+    ])
+    batch = _right_multiply(instructions, method, X, False, False)
+    assert np.allclose(singles, batch, atol=1e-10)
+
+
+@pytest.mark.parametrize("method", ["rle", "dag"])
+def test_left_batch(ground_truth, instructions, method):
+    """Batch left multiply matches column-by-column."""
+    n_hap = ground_truth.shape[0]
+    k = 3
+    rng = np.random.default_rng(8)
+    X = rng.normal(size=(n_hap, k))
+
+    singles = np.column_stack([
+        _left_multiply(instructions, method, X[:, j], False, False) for j in range(k)
+    ])
+    batch = _left_multiply(instructions, method, X, False, False)
+    assert np.allclose(singles, batch, atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+def test_length_checks(instructions):
+    """Wrong-length inputs raise RuntimeError."""
+    bad = np.ones(instructions.num_sites + 1)
     with pytest.raises(RuntimeError):
-        instructions.left_multiply(x_dip)
+        instructions.left_multiply(bad)
     with pytest.raises(RuntimeError):
-        instructions.left_multiply(x_hap, diploid=True)
-
-    # Do normal left-multiplication
-    expected = x_hap @ gt_matrix
-    expected_norm = x_hap @ gt_matrix_norm
-    expected_dip = x_dip @ gt_matrix_dip
-    expected_dip_norm = x_dip @ gt_matrix_dip_norm
-
-    # Do threads left-multiplication and confirm results are correct
-    found = instructions.left_multiply(x_hap)
-    assert np.allclose(expected, found)
-    found_norm = instructions.left_multiply(x_hap, normalize=True)
-    assert np.allclose(expected_norm, found_norm)
-    found_dip = instructions.left_multiply(x_dip, diploid=True)
-    assert np.allclose(expected_dip, found_dip)
-    found_dip_norm = instructions.left_multiply(x_dip, normalize=True, diploid=True)
-    assert np.allclose(expected_dip_norm, found_dip_norm)
-
-def test_right_multiply():
-    # Read ground truth genotypes
-    pgen_path = str(TEST_DATA_DIR / "panel.pgen")
-    reader = pgenlib.PgenReader(str(pgen_path).encode())
-    expected_num_variants = reader.get_variant_ct()
-    num_samples = reader.get_raw_sample_ct()
-    expected_gt = np.empty((expected_num_variants, 2 * num_samples), dtype=np.int32)
-    reader.read_alleles_range(0, expected_num_variants, expected_gt)
-    gt_matrix = expected_gt.transpose()
-    gt_matrix_dip = gt_matrix[::2] + gt_matrix[1::2]
-    gt_matrix_norm = _col_normalize(gt_matrix)
-    gt_matrix_dip_norm = _col_normalize(gt_matrix_dip)
-
-    # Read threading instructions
-    threads_path = str(TEST_DATA_DIR / "expected_infer_snapshot.threads")
-    instructions = load_instructions(threads_path)
-
-    # Random vector to multiply with
-    rng = np.random.default_rng(130222)
-    x = rng.normal(0, 1, expected_num_variants)
-    x_wrong_length = rng.normal(0, 1, expected_num_variants + 1)
-
-    # Make sure length check is performed
-    with pytest.raises(RuntimeError):
-        instructions.left_multiply(x_wrong_length)
-
-    # Do normal right-multiplication
-    expected = gt_matrix @ x
-    expected_norm = gt_matrix_norm @ x
-    expected_dip = gt_matrix_dip @ x
-    expected_dip_norm = gt_matrix_dip_norm @ x
-
-    # Do threads right-multiplication and confirm results are correct
-    found = instructions.right_multiply(x)
-    assert np.allclose(expected, found)
-    found_norm = instructions.right_multiply(x, normalize=True)
-    assert np.allclose(expected_norm, found_norm)
-    found_dip = instructions.right_multiply(x, diploid=True)
-    assert np.allclose(expected_dip, found_dip)
-    found_dip_norm = instructions.right_multiply(x, normalize=True, diploid=True)
-    assert np.allclose(expected_dip_norm, found_dip_norm)
+        instructions.right_multiply(bad)
