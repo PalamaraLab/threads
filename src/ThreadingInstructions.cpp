@@ -30,6 +30,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifdef _OPENMP
@@ -1195,53 +1196,26 @@ const std::vector<int>& ThreadingInstructions::get_allele_counts() {
 
 namespace {
 
-struct SimpleUF {
-    std::vector<int> par;
-    std::vector<int> rnk;
-    std::vector<std::vector<int>> members;
-    std::vector<double> height;  // height of each root's subtree
-
-    explicit SimpleUF(int n) : par(n), rnk(n, 0), members(n), height(n, 0.0) {
-        for (int i = 0; i < n; i++) {
-            par[i] = i;
-            members[i] = {i};
-        }
-    }
-
-    int find(int x) {
-        while (par[x] != par[par[x]]) par[x] = par[par[x]];
-        while (par[x] != x) x = par[x];
-        return x;
-    }
-
-    // Merge sets containing a and b.  Returns root of merged set.
-    int unite(int a, int b) {
-        int ra = find(a), rb = find(b);
-        if (ra == rb) return ra;
-        if (rnk[ra] < rnk[rb]) std::swap(ra, rb);
-        par[rb] = ra;
-        if (rnk[ra] == rnk[rb]) rnk[ra]++;
-        members[ra].insert(members[ra].end(), members[rb].begin(), members[rb].end());
-        members[rb].clear();
-        return ra;
-    }
-
-    void reset(int n) {
-        for (int i = 0; i < n; i++) {
-            par[i] = i;
-            rnk[i] = 0;
-            members[i].clear();
-            members[i].push_back(i);
-            height[i] = 0.0;
-        }
-    }
+// Dendrogram node: O(n) memory representation of an implicit coalescent tree.
+// n leaves (implicit, IDs 0..n-1) + up to n-1 internal nodes (IDs n..2n-2).
+struct DNode {
+    int left, right;    // child node indices
+    double height;      // coalescence height
+    uint64_t hash;      // commutative bottom-up hash for clade/branch identity
 };
 
-struct Edge {
-    int child;
-    int parent;
-    double height;
-};
+inline uint64_t dendro_leaf_hash(int id) {
+    return static_cast<uint64_t>(id) * 0x9e3779b97f4a7c15ULL ^ 0x517cc1b727220a95ULL;
+}
+
+inline uint64_t dendro_combine(uint64_t h1, uint64_t h2, double height) {
+    if (h1 > h2) std::swap(h1, h2);
+    uint64_t hbits;
+    std::memcpy(&hbits, &height, sizeof(double));
+    uint64_t h = h1 * 0x9e3779b97f4a7c15ULL + h2;
+    h ^= hbits + 0x517cc1b727220a95ULL + (h << 6) + (h >> 2);
+    return h;
+}
 
 // Find segment index for a sample at a given bp position via binary search.
 // instructions[i].starts contains bp positions.
@@ -1260,104 +1234,220 @@ void ThreadingInstructions::visit_clades(
     const int n = num_samples;
     if (n == 0 || num_sites == 0) return;
 
-    // Collect all segment boundary bp positions across all samples
-    std::set<int> boundary_set;
-    boundary_set.insert(start);
-    for (int i = 0; i < n; i++) {
-        for (int s : instructions[i].starts) {
-            if (s > start && s < end)
-                boundary_set.insert(s);
+    // Emit leaf clades spanning the full region
+    for (int i = 0; i < n; i++)
+        callback({i}, 0.0, start, end);
+
+    if (n <= 1) return;
+    const int ne = n - 1;
+
+    // Precompute leaf hashes (immutable, O(n))
+    std::vector<uint64_t> lhash(n);
+    for (int i = 0; i < n; i++)
+        lhash[i] = dendro_leaf_hash(i);
+
+    // Precompute edge events sorted by genomic position
+    struct EdgeEvent { int bp; int sample; int target; double tmrca; };
+    std::vector<EdgeEvent> events;
+    events.reserve(ne * 20);
+    for (int i = 1; i < n; i++) {
+        const auto& instr = instructions[i];
+        int seg0 = segment_at_bp(instr, start);
+        events.push_back({start, i,
+            seg0 < 0 ? 0 : instr.targets[seg0],
+            seg0 < 0 ? 0.0 : instr.tmrcas[seg0]});
+        for (int j = 0; j < static_cast<int>(instr.num_segments); j++) {
+            int s = instr.starts[j];
+            if (s <= start) continue;
+            if (s >= end) break;
+            events.push_back({s, i, instr.targets[j], instr.tmrcas[j]});
         }
     }
-    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+    std::sort(events.begin(), events.end(),
+              [](const EdgeEvent& a, const EdgeEvent& b) { return a.bp < b.bp; });
 
-    // Emit leaf clades once, spanning the full range
-    for (int i = 0; i < n; i++) {
-        callback({i}, 0.0, start, end);
-    }
+    // Single dendrogram buffer + previous snapshot (avoids double-buffer swap)
+    std::vector<DNode> dendro(ne), prev_dendro(ne);
+    int dcount = 0, prev_dcount = 0;
 
-    SimpleUF uf(n);
-    std::vector<Edge> edges;
-    edges.reserve(n);
+    // UF arrays (reused per rebuild, O(n))
+    std::vector<int> uf_p(n), uf_r(n), uf_dendro(n);
 
-    // Track previous interval's (target, tmrca) to skip re-processing identical trees
-    std::vector<int> prev_target(n, -2);
-    std::vector<double> prev_tmrca(n, -1.0);
-    std::vector<int> cur_target(n);
-    std::vector<double> cur_tmrca(n);
+    // Current tree state
+    std::vector<int> cur_tgt(n, 0);
+    std::vector<double> cur_tmr(n, 0.0);
 
-    // Pending clades from the current identical-tree run
-    struct PendingClade { std::vector<int> desc; double height; int start_bp; };
-    std::vector<PendingClade> pending;
+    // Compact-and-merge sorted edges: O(n + k log k) per boundary instead of O(n log n)
+    struct SE { double h; int c, p; };
+    std::vector<SE> sorted(ne), merge_buf(ne);
+    std::vector<int> spos(n, -1);   // sample → position in sorted array
+    std::vector<SE> new_entries;
+    std::vector<int> changed;
+    changed.reserve(32);
 
-    auto flush_pending = [&](int end_bp) {
-        for (auto& pc : pending)
-            callback(pc.desc, pc.height, pc.start_bp, end_bp);
-        pending.clear();
+    // Pending clades: hash → start_bp. Pre-allocated.
+    std::unordered_map<uint64_t, int> pending;
+    pending.reserve(ne * 2);
+
+    // Diff map: hash → old dendrogram node index. Pre-allocated, reused.
+    std::unordered_map<uint64_t, int> old_map;
+    old_map.reserve(ne * 2);
+
+    // DFS buffers for on-demand descendant materialization (reused, O(n))
+    std::vector<int> dfs_stack, desc_buf;
+    dfs_stack.reserve(n);
+    desc_buf.reserve(n);
+
+    auto collect_desc = [&](const std::vector<DNode>& dn, int node_id) {
+        desc_buf.clear();
+        dfs_stack.clear();
+        dfs_stack.push_back(node_id);
+        while (!dfs_stack.empty()) {
+            int id = dfs_stack.back();
+            dfs_stack.pop_back();
+            if (id < n) {
+                desc_buf.push_back(id);
+            } else {
+                dfs_stack.push_back(dn[id - n].left);
+                dfs_stack.push_back(dn[id - n].right);
+            }
+        }
+        std::sort(desc_buf.begin(), desc_buf.end());
     };
 
-    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
-        int bp_pos = boundaries[b];
-        int bp_next = (b + 1 < static_cast<int>(boundaries.size()))
-                        ? boundaries[b + 1] : end;
+    int ei = 0;
+    const int E = static_cast<int>(events.size());
+    bool need_init = true;
+    bool have_prev = false;
 
-        // Determine (target, tmrca) for each sample at this bp position
-        cur_target[0] = -1;
-        cur_tmrca[0] = 0.0;
-        for (int i = 1; i < n; i++) {
-            int seg = segment_at_bp(instructions[i], bp_pos);
-            if (seg < 0) { cur_target[i] = 0; cur_tmrca[i] = 0.0; continue; }
-            cur_target[i] = instructions[i].targets[seg];
-            cur_tmrca[i] = instructions[i].tmrcas[seg];
+    while (ei < E) {
+        int bp = events[ei].bp;
+
+        // Consume events, tracking changed samples
+        changed.clear();
+        bool tree_changed = false;
+        while (ei < E && events[ei].bp == bp) {
+            const auto& ev = events[ei++];
+            if (need_init || ev.target != cur_tgt[ev.sample] || ev.tmrca != cur_tmr[ev.sample]) {
+                cur_tgt[ev.sample] = ev.target;
+                cur_tmr[ev.sample] = ev.tmrca;
+                changed.push_back(ev.sample);
+                tree_changed = true;
+            }
+        }
+        if (!tree_changed) continue;
+
+        // Compact-and-merge sorted edges
+        if (need_init) {
+            for (int i = 1; i < n; i++)
+                sorted[i - 1] = {cur_tmr[i], i, cur_tgt[i]};
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            for (int i = 0; i < ne; i++) spos[sorted[i].c] = i;
+            need_init = false;
+        } else {
+            std::sort(changed.begin(), changed.end(),
+                      [&](int a, int b) { return spos[a] < spos[b]; });
+            int blen = 0, ci = 0;
+            for (int i = 0; i < ne; i++) {
+                if (ci < static_cast<int>(changed.size()) && i == spos[changed[ci]])
+                    ci++;
+                else
+                    merge_buf[blen++] = sorted[i];
+            }
+            new_entries.clear();
+            for (int s : changed)
+                new_entries.push_back({cur_tmr[s], s, cur_tgt[s]});
+            std::sort(new_entries.begin(), new_entries.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            int ri = 0, ni = 0, out = 0;
+            while (ri < blen && ni < static_cast<int>(new_entries.size())) {
+                if (merge_buf[ri].h <= new_entries[ni].h)
+                    sorted[out] = merge_buf[ri++];
+                else
+                    sorted[out] = new_entries[ni++];
+                spos[sorted[out].c] = out;
+                out++;
+            }
+            while (ri < blen) { sorted[out] = merge_buf[ri++]; spos[sorted[out].c] = out; out++; }
+            while (ni < static_cast<int>(new_entries.size())) { sorted[out] = new_entries[ni++]; spos[sorted[out].c] = out; out++; }
         }
 
-        // Check if tree topology changed from previous interval
-        bool same = (b > 0);
-        if (same) {
-            for (int i = 1; i < n; i++) {
-                if (cur_target[i] != prev_target[i] || cur_tmrca[i] != prev_tmrca[i]) {
-                    same = false;
-                    break;
+        // Build dendrogram via bottom-up UF merges
+        for (int i = 0; i < n; i++) {
+            uf_p[i] = i;
+            uf_r[i] = 0;
+            uf_dendro[i] = i;
+        }
+        dcount = 0;
+
+        for (int i = 0; i < ne; i++) {
+            int a = sorted[i].c, b = sorted[i].p;
+            int ra = a;
+            while (uf_p[ra] != ra) { uf_p[ra] = uf_p[uf_p[ra]]; ra = uf_p[ra]; }
+            int rb = b;
+            while (uf_p[rb] != rb) { uf_p[rb] = uf_p[uf_p[rb]]; rb = uf_p[rb]; }
+            if (ra == rb) continue;
+
+            int na = uf_dendro[ra], nb = uf_dendro[rb];
+            uint64_t ha = (na < n) ? lhash[na] : dendro[na - n].hash;
+            uint64_t hb = (nb < n) ? lhash[nb] : dendro[nb - n].hash;
+
+            int inode = dcount++;
+            dendro[inode] = {na, nb, sorted[i].h,
+                             dendro_combine(ha, hb, sorted[i].h)};
+
+            if (uf_r[ra] < uf_r[rb]) std::swap(ra, rb);
+            uf_p[rb] = ra;
+            if (uf_r[ra] == uf_r[rb]) uf_r[ra]++;
+            uf_dendro[ra] = n + inode;
+        }
+
+        // Single-map diff: build map from old hashes, probe with new hashes
+        if (have_prev) {
+            old_map.clear();
+            for (int i = 0; i < prev_dcount; i++)
+                old_map[prev_dendro[i].hash] = i;
+
+            for (int i = 0; i < dcount; i++) {
+                uint64_t h = dendro[i].hash;
+                auto it = old_map.find(h);
+                if (it != old_map.end())
+                    old_map.erase(it);   // persisted clade
+                else
+                    pending[h] = bp;     // new clade
+            }
+
+            // Flush disappeared clades (remaining in old_map)
+            for (const auto& [h, node_idx] : old_map) {
+                auto pit = pending.find(h);
+                if (pit != pending.end()) {
+                    collect_desc(prev_dendro, n + node_idx);
+                    callback(desc_buf, prev_dendro[node_idx].height, pit->second, bp);
+                    pending.erase(pit);
                 }
             }
+        } else {
+            // First tree: all clades are new
+            for (int i = 0; i < dcount; i++)
+                pending[dendro[i].hash] = bp;
         }
 
-        if (same) continue;
-
-        // Tree changed — flush previous run's clades
-        if (!pending.empty()) flush_pending(bp_pos);
-
-        // Save current state
-        std::swap(prev_target, cur_target);
-        std::swap(prev_tmrca, cur_tmrca);
-
-        // Build edges from this interval's threading state
-        edges.clear();
-        for (int i = 1; i < n; i++) {
-            if (prev_target[i] >= 0) {
-                edges.push_back({i, prev_target[i], prev_tmrca[i]});
-            }
-        }
-        std::sort(edges.begin(), edges.end(),
-                  [](const Edge& a, const Edge& b) { return a.height < b.height; });
-
-        // Union-find: build tree bottom-up, emit clades
-        uf.reset(n);
-        for (const auto& e : edges) {
-            int rc = uf.find(e.child);
-            int rp = uf.find(e.parent);
-            if (rc != rp) {
-                int root = uf.unite(rc, rp);
-                uf.height[root] = e.height;
-                auto& m = uf.members[root];
-                std::sort(m.begin(), m.end());
-                pending.push_back({m, e.height, bp_pos});
-            }
-        }
+        // Save current dendrogram for next iteration's diff
+        std::copy(dendro.begin(), dendro.begin() + dcount, prev_dendro.begin());
+        prev_dcount = dcount;
+        have_prev = true;
     }
 
-    // Flush final run
-    flush_pending(end);
+    // Flush all remaining pending clades
+    for (int i = 0; i < prev_dcount; i++) {
+        auto it = pending.find(prev_dendro[i].hash);
+        if (it != pending.end()) {
+            collect_desc(prev_dendro, n + i);
+            callback(desc_buf, prev_dendro[i].height, it->second, end);
+            pending.erase(it);
+        }
+    }
 }
 
 
@@ -1366,184 +1456,338 @@ void ThreadingInstructions::visit_branches(
 {
     const int n = num_samples;
     if (n == 0 || num_sites == 0) return;
+    if (n <= 1) return;
+    const int ne = n - 1;
 
-    // Collect all segment boundary bp positions
-    std::set<int> boundary_set;
-    boundary_set.insert(start);
-    for (int i = 0; i < n; i++) {
-        for (int s : instructions[i].starts) {
-            if (s > start && s < end)
-                boundary_set.insert(s);
+    // Precompute leaf hashes
+    std::vector<uint64_t> lhash(n);
+    for (int i = 0; i < n; i++)
+        lhash[i] = dendro_leaf_hash(i);
+
+    // Precompute edge events sorted by genomic position
+    struct EdgeEvent { int bp; int sample; int target; double tmrca; };
+    std::vector<EdgeEvent> events;
+    events.reserve(ne * 20);
+    for (int i = 1; i < n; i++) {
+        const auto& instr = instructions[i];
+        int seg0 = segment_at_bp(instr, start);
+        events.push_back({start, i,
+            seg0 < 0 ? 0 : instr.targets[seg0],
+            seg0 < 0 ? 0.0 : instr.tmrcas[seg0]});
+        for (int j = 0; j < static_cast<int>(instr.num_segments); j++) {
+            int s = instr.starts[j];
+            if (s <= start) continue;
+            if (s >= end) break;
+            events.push_back({s, i, instr.targets[j], instr.tmrcas[j]});
         }
     }
-    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+    std::sort(events.begin(), events.end(),
+              [](const EdgeEvent& a, const EdgeEvent& b) { return a.bp < b.bp; });
 
-    SimpleUF uf(n);
-    std::vector<Edge> edges;
-    edges.reserve(n);
+    // Single dendrogram buffer + previous snapshot
+    std::vector<DNode> dendro(ne), prev_dendro(ne);
+    int dcount = 0, prev_dcount = 0;
 
-    std::vector<int> prev_target(n, -2);
-    std::vector<double> prev_tmrca(n, -1.0);
-    std::vector<int> cur_target(n);
-    std::vector<double> cur_tmrca(n);
+    // UF arrays
+    std::vector<int> uf_p(n), uf_r(n), uf_dendro(n);
 
-    struct PendingBranch { std::vector<int> desc; double child_h; double parent_h; int start_bp; };
-    std::vector<PendingBranch> pending;
+    // Current tree state
+    std::vector<int> cur_tgt(n, 0);
+    std::vector<double> cur_tmr(n, 0.0);
 
-    auto flush_pending = [&](int end_bp) {
-        for (auto& pb : pending)
-            callback(pb.desc, pb.child_h, pb.parent_h, pb.start_bp, end_bp);
-        pending.clear();
+    // Compact-and-merge sorted edges
+    struct SE { double h; int c, p; };
+    std::vector<SE> sorted(ne), merge_buf(ne);
+    std::vector<int> spos(n, -1);
+    std::vector<SE> new_entries;
+    std::vector<int> changed;
+    changed.reserve(32);
+
+    // Branch hash
+    auto branch_hash_fn = [](uint64_t child_hash, double child_h, double parent_h) -> uint64_t {
+        uint64_t ch_bits, ph_bits;
+        std::memcpy(&ch_bits, &child_h, sizeof(double));
+        std::memcpy(&ph_bits, &parent_h, sizeof(double));
+        uint64_t h = child_hash ^ (ch_bits * 0x9e3779b97f4a7c15ULL);
+        h ^= ph_bits + 0x517cc1b727220a95ULL + (h << 6) + (h >> 2);
+        return h;
     };
 
-    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
-        int bp_pos = boundaries[b];
+    // Branch info for enumeration from dendrogram
+    struct BranchInfo {
+        uint64_t hash;
+        int child_node;
+        double child_h, parent_h;
+    };
+    std::vector<BranchInfo> branches, prev_branches;
+    branches.reserve(2 * ne);
+    prev_branches.reserve(2 * ne);
 
-        cur_target[0] = -1;
-        cur_tmrca[0] = 0.0;
-        for (int i = 1; i < n; i++) {
-            int seg = segment_at_bp(instructions[i], bp_pos);
-            if (seg < 0) { cur_target[i] = 0; cur_tmrca[i] = 0.0; continue; }
-            cur_target[i] = instructions[i].targets[seg];
-            cur_tmrca[i] = instructions[i].tmrcas[seg];
-        }
-
-        bool same = (b > 0);
-        if (same) {
-            for (int i = 1; i < n; i++) {
-                if (cur_target[i] != prev_target[i] || cur_tmrca[i] != prev_tmrca[i]) {
-                    same = false;
-                    break;
-                }
+    auto enumerate_branches = [&](const std::vector<DNode>& dn, int count,
+                                   std::vector<BranchInfo>& out) {
+        out.clear();
+        for (int i = 0; i < count; i++) {
+            const DNode& nd = dn[i];
+            double lh = (nd.left < n) ? 0.0 : dn[nd.left - n].height;
+            if (lh < nd.height) {
+                uint64_t ch = (nd.left < n) ? lhash[nd.left] : dn[nd.left - n].hash;
+                out.push_back({branch_hash_fn(ch, lh, nd.height), nd.left, lh, nd.height});
+            }
+            double rh = (nd.right < n) ? 0.0 : dn[nd.right - n].height;
+            if (rh < nd.height) {
+                uint64_t ch = (nd.right < n) ? lhash[nd.right] : dn[nd.right - n].hash;
+                out.push_back({branch_hash_fn(ch, rh, nd.height), nd.right, rh, nd.height});
             }
         }
+    };
 
-        if (same) continue;
+    // Pending branches: hash → start_bp. Pre-allocated.
+    std::unordered_map<uint64_t, int> pending;
+    pending.reserve(2 * ne * 2);
 
-        if (!pending.empty()) flush_pending(bp_pos);
+    // Diff map: pre-allocated, reused
+    std::unordered_map<uint64_t, int> old_map;  // hash → index in prev_branches
+    old_map.reserve(2 * ne * 2);
 
-        std::swap(prev_target, cur_target);
-        std::swap(prev_tmrca, cur_tmrca);
+    // DFS buffers
+    std::vector<int> dfs_stack, desc_buf;
+    dfs_stack.reserve(n);
+    desc_buf.reserve(n);
 
-        edges.clear();
-        for (int i = 1; i < n; i++) {
-            if (prev_target[i] >= 0)
-                edges.push_back({i, prev_target[i], prev_tmrca[i]});
+    auto collect_desc = [&](const std::vector<DNode>& dn, int node_id) {
+        desc_buf.clear();
+        dfs_stack.clear();
+        dfs_stack.push_back(node_id);
+        while (!dfs_stack.empty()) {
+            int id = dfs_stack.back();
+            dfs_stack.pop_back();
+            if (id < n) {
+                desc_buf.push_back(id);
+            } else {
+                dfs_stack.push_back(dn[id - n].left);
+                dfs_stack.push_back(dn[id - n].right);
+            }
         }
-        std::sort(edges.begin(), edges.end(),
-                  [](const Edge& a, const Edge& b) { return a.height < b.height; });
+        std::sort(desc_buf.begin(), desc_buf.end());
+    };
 
-        uf.reset(n);
-        for (const auto& e : edges) {
-            int rc = uf.find(e.child);
-            int rp = uf.find(e.parent);
-            if (rc != rp) {
-                if (uf.height[rc] < e.height) {
-                    auto desc_c = uf.members[rc];
-                    std::sort(desc_c.begin(), desc_c.end());
-                    pending.push_back({desc_c, uf.height[rc], e.height, bp_pos});
+    int ei = 0;
+    const int E = static_cast<int>(events.size());
+    bool need_init = true;
+    bool have_prev = false;
+
+    while (ei < E) {
+        int bp = events[ei].bp;
+
+        changed.clear();
+        bool tree_changed = false;
+        while (ei < E && events[ei].bp == bp) {
+            const auto& ev = events[ei++];
+            if (need_init || ev.target != cur_tgt[ev.sample] || ev.tmrca != cur_tmr[ev.sample]) {
+                cur_tgt[ev.sample] = ev.target;
+                cur_tmr[ev.sample] = ev.tmrca;
+                changed.push_back(ev.sample);
+                tree_changed = true;
+            }
+        }
+        if (!tree_changed) continue;
+
+        // Compact-and-merge sorted edges
+        if (need_init) {
+            for (int i = 1; i < n; i++)
+                sorted[i - 1] = {cur_tmr[i], i, cur_tgt[i]};
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            for (int i = 0; i < ne; i++) spos[sorted[i].c] = i;
+            need_init = false;
+        } else {
+            std::sort(changed.begin(), changed.end(),
+                      [&](int a, int b) { return spos[a] < spos[b]; });
+            int blen = 0, ci = 0;
+            for (int i = 0; i < ne; i++) {
+                if (ci < static_cast<int>(changed.size()) && i == spos[changed[ci]])
+                    ci++;
+                else
+                    merge_buf[blen++] = sorted[i];
+            }
+            new_entries.clear();
+            for (int s : changed)
+                new_entries.push_back({cur_tmr[s], s, cur_tgt[s]});
+            std::sort(new_entries.begin(), new_entries.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            int ri = 0, ni = 0, out = 0;
+            while (ri < blen && ni < static_cast<int>(new_entries.size())) {
+                if (merge_buf[ri].h <= new_entries[ni].h)
+                    sorted[out] = merge_buf[ri++];
+                else
+                    sorted[out] = new_entries[ni++];
+                spos[sorted[out].c] = out;
+                out++;
+            }
+            while (ri < blen) { sorted[out] = merge_buf[ri++]; spos[sorted[out].c] = out; out++; }
+            while (ni < static_cast<int>(new_entries.size())) { sorted[out] = new_entries[ni++]; spos[sorted[out].c] = out; out++; }
+        }
+
+        // Build dendrogram via UF
+        for (int i = 0; i < n; i++) {
+            uf_p[i] = i;
+            uf_r[i] = 0;
+            uf_dendro[i] = i;
+        }
+        dcount = 0;
+
+        for (int i = 0; i < ne; i++) {
+            int a = sorted[i].c, b = sorted[i].p;
+            int ra = a;
+            while (uf_p[ra] != ra) { uf_p[ra] = uf_p[uf_p[ra]]; ra = uf_p[ra]; }
+            int rb = b;
+            while (uf_p[rb] != rb) { uf_p[rb] = uf_p[uf_p[rb]]; rb = uf_p[rb]; }
+            if (ra == rb) continue;
+
+            int na = uf_dendro[ra], nb = uf_dendro[rb];
+            uint64_t ha = (na < n) ? lhash[na] : dendro[na - n].hash;
+            uint64_t hb = (nb < n) ? lhash[nb] : dendro[nb - n].hash;
+
+            int inode = dcount++;
+            dendro[inode] = {na, nb, sorted[i].h,
+                             dendro_combine(ha, hb, sorted[i].h)};
+
+            if (uf_r[ra] < uf_r[rb]) std::swap(ra, rb);
+            uf_p[rb] = ra;
+            if (uf_r[ra] == uf_r[rb]) uf_r[ra]++;
+            uf_dendro[ra] = n + inode;
+        }
+
+        // Single-map diff for branches
+        if (have_prev) {
+            old_map.clear();
+            for (int i = 0; i < static_cast<int>(prev_branches.size()); i++)
+                old_map[prev_branches[i].hash] = i;
+
+            enumerate_branches(dendro, dcount, branches);
+            for (const auto& br : branches) {
+                auto it = old_map.find(br.hash);
+                if (it != old_map.end())
+                    old_map.erase(it);   // persisted branch
+                else
+                    pending[br.hash] = bp;  // new branch
+            }
+
+            // Flush disappeared branches
+            for (const auto& [h, idx] : old_map) {
+                auto pit = pending.find(h);
+                if (pit != pending.end()) {
+                    const auto& br = prev_branches[idx];
+                    collect_desc(prev_dendro, br.child_node);
+                    callback(desc_buf, br.child_h, br.parent_h, pit->second, bp);
+                    pending.erase(pit);
                 }
+            }
+        } else {
+            enumerate_branches(dendro, dcount, branches);
+            for (const auto& br : branches)
+                pending[br.hash] = bp;
+        }
 
-                if (uf.height[rp] < e.height) {
-                    auto desc_p = uf.members[rp];
-                    std::sort(desc_p.begin(), desc_p.end());
-                    pending.push_back({desc_p, uf.height[rp], e.height, bp_pos});
-                }
+        // Save current state for next iteration
+        std::copy(dendro.begin(), dendro.begin() + dcount, prev_dendro.begin());
+        prev_dcount = dcount;
+        prev_branches.assign(branches.begin(), branches.end());
+        have_prev = true;
+    }
 
-                int root = uf.unite(rc, rp);
-                uf.height[root] = e.height;
+    // Flush remaining branches
+    if (have_prev) {
+        for (const auto& br : prev_branches) {
+            auto it = pending.find(br.hash);
+            if (it != pending.end()) {
+                collect_desc(prev_dendro, br.child_node);
+                callback(desc_buf, br.child_h, br.parent_h, it->second, end);
+                pending.erase(it);
             }
         }
     }
-
-    flush_pending(end);
 }
+
+
 
 
 double ThreadingInstructions::total_volume() const {
     const int n = num_samples;
-    if (n == 0 || num_sites == 0) return 0.0;
+    if (n <= 1 || num_sites == 0) return 0.0;
 
-    // Collect segment boundary bp positions
-    std::set<int> boundary_set;
-    boundary_set.insert(start);
-    for (int i = 0; i < n; i++) {
-        for (int s : instructions[i].starts) {
-            if (s > start && s < end)
-                boundary_set.insert(s);
+    // Key insight: total branch length of a coalescent tree built from n-1 merges
+    // at sorted heights h_1 <= ... <= h_{n-1} equals:
+    //
+    //   L = sum_{j=0}^{n-2} (h_{j+1} - h_j) * (n - j) = sum(h) + max(h)
+    //
+    // (telescoping sum). Since threading edges form a tree (target[i] < i), every
+    // edge creates a unique non-redundant merge (trees have no cycles, so adding
+    // any tree edge to a forest of tree edges always connects two components).
+    // Therefore the merge heights are exactly the n-1 tmrca values, and:
+    //
+    //   vol(position) = sum(tmrcas) + max(tmrcas)
+    //
+    // No UF or sorting needed — just a running sum and max, updated in O(k) when
+    // k edges change at a boundary. Total work: O(E) for E total edge events.
+
+    // Precompute edge-change events sorted by position.
+    struct EdgeEvent { int bp; int sample; double tmrca; };
+    std::vector<EdgeEvent> events;
+    events.reserve((n - 1) * 20);
+
+    for (int i = 1; i < n; i++) {
+        const auto& instr = instructions[i];
+        int seg0 = segment_at_bp(instr, start);
+        events.push_back({start, i, seg0 < 0 ? 0.0 : instr.tmrcas[seg0]});
+        for (int j = 0; j < static_cast<int>(instr.num_segments); j++) {
+            int s = instr.starts[j];
+            if (s <= start) continue;
+            if (s >= end) break;
+            events.push_back({s, i, instr.tmrcas[j]});
         }
     }
-    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+    std::sort(events.begin(), events.end(),
+              [](const EdgeEvent& a, const EdgeEvent& b) { return a.bp < b.bp; });
 
-    // Lightweight union-find: only tracks component heights, no member lists
-    std::vector<int> parent_uf(n);
-    std::vector<int> rank_uf(n, 0);
-    std::vector<double> comp_height(n, 0.0);
-
-    auto find = [&](int x) {
-        while (parent_uf[x] != x) { parent_uf[x] = parent_uf[parent_uf[x]]; x = parent_uf[x]; }
-        return x;
-    };
-    auto unite = [&](int a, int b) -> int {
-        if (rank_uf[a] < rank_uf[b]) std::swap(a, b);
-        parent_uf[b] = a;
-        if (rank_uf[a] == rank_uf[b]) rank_uf[a]++;
-        return a;
-    };
-
-    struct LightEdge { int child; int parent; double height; };
-    std::vector<LightEdge> edges;
-    edges.reserve(n);
-
-    std::vector<int> prev_target(n, -2);
-    std::vector<double> prev_tmrca(n, -1.0);
+    // Sweep: maintain sum and max of tmrcas incrementally.
+    std::vector<double> cur_h(n, 0.0);
+    double sum_h = 0.0;
+    double max_h = 0.0;
 
     double vol = 0.0;
-    double prev_vol = 0.0;
+    int ei = 0;
+    const int E = static_cast<int>(events.size());
 
-    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
-        int bp_pos = boundaries[b];
-        int bp_next = (b + 1 < static_cast<int>(boundaries.size()))
-                        ? boundaries[b + 1] : end;
-        double span = static_cast<double>(bp_next - bp_pos);
+    while (ei < E) {
+        int bp = events[ei].bp;
+        bool max_possibly_removed = false;
+        double new_max_candidate = 0.0;
 
-        // Check if topology changed
-        bool same = (b > 0);
-        edges.clear();
-        for (int i = 1; i < n; i++) {
-            int seg = segment_at_bp(instructions[i], bp_pos);
-            int tgt = (seg < 0) ? 0 : instructions[i].targets[seg];
-            double tmr = (seg < 0) ? 0.0 : instructions[i].tmrcas[seg];
-            if (same && (tgt != prev_target[i] || tmr != prev_tmrca[i]))
-                same = false;
-            prev_target[i] = tgt;
-            prev_tmrca[i] = tmr;
-            if (tgt >= 0)
-                edges.push_back({i, tgt, tmr});
-        }
-
-        if (same) {
-            vol += prev_vol * span;
-            continue;
-        }
-
-        // Build tree, sum branch lengths
-        for (int i = 0; i < n; i++) { parent_uf[i] = i; rank_uf[i] = 0; comp_height[i] = 0.0; }
-        std::sort(edges.begin(), edges.end(),
-                  [](const LightEdge& a, const LightEdge& b) { return a.height < b.height; });
-
-        double interval_vol = 0.0;
-        for (const auto& e : edges) {
-            int rc = find(e.child);
-            int rp = find(e.parent);
-            if (rc != rp) {
-                interval_vol += (e.height - comp_height[rc]) + (e.height - comp_height[rp]);
-                int root = unite(rc, rp);
-                comp_height[root] = e.height;
+        // Apply all events at this position
+        while (ei < E && events[ei].bp == bp) {
+            int s = events[ei].sample;
+            double new_h = events[ei].tmrca;
+            double old_h = cur_h[s];
+            ei++;
+            if (new_h != old_h) {
+                sum_h += (new_h - old_h);
+                if (old_h >= max_h) max_possibly_removed = true;
+                cur_h[s] = new_h;
+                if (new_h > new_max_candidate) new_max_candidate = new_h;
             }
         }
-        prev_vol = interval_vol;
-        vol += interval_vol * span;
+
+        // Fix max: O(n) rescan only when current max was removed; O(1) otherwise
+        if (max_possibly_removed) {
+            max_h = *std::max_element(cur_h.begin() + 1, cur_h.end());
+        } else if (new_max_candidate > max_h) {
+            max_h = new_max_candidate;
+        }
+
+        int bp_next = (ei < E) ? events[ei].bp : end;
+        double span = static_cast<double>(bp_next - bp);
+        vol += (sum_h + max_h) * span;
     }
     return vol;
 }
@@ -1552,87 +1796,149 @@ double ThreadingInstructions::total_volume() const {
 std::vector<double> ThreadingInstructions::allele_frequency_spectrum() const {
     const int n = num_samples;
     if (n == 0 || num_sites == 0) return std::vector<double>(n + 1, 0.0);
+    if (n == 1) return std::vector<double>(2, 0.0);
 
-    std::set<int> boundary_set;
-    boundary_set.insert(start);
-    for (int i = 0; i < n; i++)
-        for (int s : instructions[i].starts)
-            if (s > start && s < end)
-                boundary_set.insert(s);
-    std::vector<int> boundaries(boundary_set.begin(), boundary_set.end());
+    const int ne = n - 1;
 
-    // Union-find with component heights and sizes (no member lists)
-    std::vector<int> uf_parent(n), uf_rank(n, 0), uf_size(n, 1);
-    std::vector<double> uf_height(n, 0.0);
+    // Precompute edge-change events (same strategy as total_volume)
+    struct EdgeEvent { int bp; int sample; int target; double tmrca; };
+    std::vector<EdgeEvent> events;
+    events.reserve(ne * 20);
 
-    auto find = [&](int x) {
-        while (uf_parent[x] != x) { uf_parent[x] = uf_parent[uf_parent[x]]; x = uf_parent[x]; }
+    for (int i = 1; i < n; i++) {
+        const auto& instr = instructions[i];
+        int seg0 = segment_at_bp(instr, start);
+        events.push_back({start, i,
+            seg0 < 0 ? 0 : instr.targets[seg0],
+            seg0 < 0 ? 0.0 : instr.tmrcas[seg0]});
+        for (int j = 0; j < static_cast<int>(instr.num_segments); j++) {
+            int s = instr.starts[j];
+            if (s <= start) continue;
+            if (s >= end) break;
+            events.push_back({s, i, instr.targets[j], instr.tmrcas[j]});
+        }
+    }
+    std::sort(events.begin(), events.end(),
+              [](const EdgeEvent& a, const EdgeEvent& b) { return a.bp < b.bp; });
+
+    std::vector<int> cur_tgt(n, 0);
+    std::vector<double> cur_tmr(n, 0.0);
+
+    struct SE { double h; int c, p; };
+    std::vector<SE> sorted(ne), buf(ne);
+    std::vector<int> spos(n, -1);
+
+    // UF with sizes for frequency spectrum binning
+    std::vector<int> uf_p(n), uf_r(n), uf_sz(n);
+    std::vector<double> uf_h(n);
+    auto uf_find = [&](int x) {
+        while (uf_p[x] != x) { uf_p[x] = uf_p[uf_p[x]]; x = uf_p[x]; }
         return x;
     };
-    auto unite = [&](int a, int b) -> int {
-        if (uf_rank[a] < uf_rank[b]) std::swap(a, b);
-        uf_parent[b] = a;
-        uf_size[a] += uf_size[b];
-        if (uf_rank[a] == uf_rank[b]) uf_rank[a]++;
-        return a;
-    };
 
-    struct LightEdge { int child; int parent; double height; };
-    std::vector<LightEdge> edges;
-    edges.reserve(n);
-
-    std::vector<int> prev_target(n, -2);
-    std::vector<double> prev_tmrca(n, -1.0);
+    std::vector<SE> new_entries;
+    std::vector<int> changed;
+    changed.reserve(32);
 
     std::vector<double> afs(n + 1, 0.0);
-    // Cache per-interval AFS contribution (volume per bin, unscaled by span)
-    std::vector<double> prev_afs_contrib(n + 1, 0.0);
+    std::vector<double> prev_afs(n + 1, 0.0);
+    // Track which bins are non-zero for fast span multiplication
+    std::vector<int> active_bins;
+    active_bins.reserve(n);
 
-    for (int b = 0; b < static_cast<int>(boundaries.size()); b++) {
-        int bp_pos = boundaries[b];
-        int bp_next = (b + 1 < static_cast<int>(boundaries.size()))
-                        ? boundaries[b + 1] : end;
-        double span = static_cast<double>(bp_next - bp_pos);
+    int ei = 0;
+    const int E = static_cast<int>(events.size());
+    bool need_init = true;
 
-        bool same = (b > 0);
-        edges.clear();
-        for (int i = 1; i < n; i++) {
-            int seg = segment_at_bp(instructions[i], bp_pos);
-            int tgt = (seg < 0) ? 0 : instructions[i].targets[seg];
-            double tmr = (seg < 0) ? 0.0 : instructions[i].tmrcas[seg];
-            if (same && (tgt != prev_target[i] || tmr != prev_tmrca[i]))
-                same = false;
-            prev_target[i] = tgt;
-            prev_tmrca[i] = tmr;
-            if (tgt >= 0)
-                edges.push_back({i, tgt, tmr});
+    while (ei < E) {
+        int bp = events[ei].bp;
+
+        changed.clear();
+        bool tree_changed = false;
+        while (ei < E && events[ei].bp == bp) {
+            const auto& ev = events[ei++];
+            if (need_init || ev.target != cur_tgt[ev.sample] || ev.tmrca != cur_tmr[ev.sample]) {
+                cur_tgt[ev.sample] = ev.target;
+                cur_tmr[ev.sample] = ev.tmrca;
+                changed.push_back(ev.sample);
+                tree_changed = true;
+            }
         }
 
-        if (same) {
-            for (int k = 0; k <= n; k++)
-                afs[k] += prev_afs_contrib[k] * span;
+        int bp_next = (ei < E) ? events[ei].bp : end;
+        double span = static_cast<double>(bp_next - bp);
+
+        if (!tree_changed) {
+            for (int k : active_bins) afs[k] += prev_afs[k] * span;
             continue;
         }
 
-        for (int i = 0; i < n; i++) { uf_parent[i] = i; uf_rank[i] = 0; uf_size[i] = 1; uf_height[i] = 0.0; }
-        std::sort(edges.begin(), edges.end(),
-                  [](const LightEdge& a, const LightEdge& b) { return a.height < b.height; });
+        if (need_init) {
+            for (int i = 1; i < n; i++)
+                sorted[i - 1] = {cur_tmr[i], i, cur_tgt[i]};
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            for (int i = 0; i < ne; i++) spos[sorted[i].c] = i;
+            need_init = false;
+        } else {
+            std::sort(changed.begin(), changed.end(),
+                      [&](int a, int b) { return spos[a] < spos[b]; });
+            int blen = 0, ci = 0;
+            for (int i = 0; i < ne; i++) {
+                if (ci < static_cast<int>(changed.size()) && i == spos[changed[ci]]) {
+                    ci++;
+                } else {
+                    buf[blen++] = sorted[i];
+                }
+            }
+            new_entries.clear();
+            for (int s : changed)
+                new_entries.push_back({cur_tmr[s], s, cur_tgt[s]});
+            std::sort(new_entries.begin(), new_entries.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            int ri = 0, ni = 0, out = 0;
+            while (ri < blen && ni < static_cast<int>(new_entries.size())) {
+                if (buf[ri].h <= new_entries[ni].h) {
+                    sorted[out] = buf[ri++];
+                } else {
+                    sorted[out] = new_entries[ni++];
+                }
+                spos[sorted[out].c] = out;
+                out++;
+            }
+            while (ri < blen) { sorted[out] = buf[ri++]; spos[sorted[out].c] = out; out++; }
+            while (ni < static_cast<int>(new_entries.size())) { sorted[out] = new_entries[ni++]; spos[sorted[out].c] = out; out++; }
+        }
 
-        std::fill(prev_afs_contrib.begin(), prev_afs_contrib.end(), 0.0);
-        for (const auto& e : edges) {
-            int rc = find(e.child);
-            int rp = find(e.parent);
-            if (rc != rp) {
-                int sc = uf_size[rc], sp = uf_size[rp];
-                double hc = uf_height[rc], hp = uf_height[rp];
-                if (hc < e.height) prev_afs_contrib[sc] += e.height - hc;
-                if (hp < e.height) prev_afs_contrib[sp] += e.height - hp;
-                int root = unite(rc, rp);
-                uf_height[root] = e.height;
+        // UF rebuild with size tracking
+        for (int i = 0; i < n; i++) { uf_p[i] = i; uf_r[i] = 0; uf_sz[i] = 1; uf_h[i] = 0.0; }
+
+        // Clear previous AFS contributions (only non-zero bins)
+        for (int k : active_bins) prev_afs[k] = 0.0;
+        active_bins.clear();
+
+        for (int i = 0; i < ne; i++) {
+            int a = uf_find(sorted[i].c), b = uf_find(sorted[i].p);
+            if (a != b) {
+                int sa = uf_sz[a], sb = uf_sz[b];
+                double ha = uf_h[a], hb = uf_h[b];
+                if (ha < sorted[i].h) prev_afs[sa] += sorted[i].h - ha;
+                if (hb < sorted[i].h) prev_afs[sb] += sorted[i].h - hb;
+                if (uf_r[a] < uf_r[b]) std::swap(a, b);
+                uf_p[b] = a;
+                uf_sz[a] += uf_sz[b];
+                if (uf_r[a] == uf_r[b]) uf_r[a]++;
+                uf_h[a] = sorted[i].h;
             }
         }
-        for (int k = 0; k <= n; k++)
-            afs[k] += prev_afs_contrib[k] * span;
+
+        // Collect active bins and accumulate
+        for (int k = 1; k < n; k++) {
+            if (prev_afs[k] > 0.0) {
+                active_bins.push_back(k);
+                afs[k] += prev_afs[k] * span;
+            }
+        }
     }
     return afs;
 }
@@ -1729,28 +2035,281 @@ ThreadingInstructions::generate_mutations(double mutation_rate, int seed) const
     if (n == 0 || num_sites == 0) return result;
 
     std::mt19937 rng(seed);
+    const int ne = n - 1;
 
-    visit_branches([&](const std::vector<int>& descendants, double child_h, double parent_h,
-                        int start_bp, int end_bp) {
-        double branch_length = parent_h - child_h;
-        double span = static_cast<double>(end_bp - start_bp);
-        double expected = mutation_rate * branch_length * span;
+    // Event-based boundary processing (same pattern as AFS).
+    // Key optimization vs visit_branches: no hash maps, no persistence tracking,
+    // each boundary is processed independently. Only 1 Poisson sample per boundary
+    // (thinning), and DFS only for the rare branches that actually get mutations.
+    struct EdgeEvent { int bp; int sample; int target; double tmrca; };
+    std::vector<EdgeEvent> events;
+    events.reserve(ne * 20);
+    for (int i = 1; i < n; i++) {
+        const auto& instr = instructions[i];
+        int seg0 = segment_at_bp(instr, start);
+        events.push_back({start, i,
+            seg0 < 0 ? 0 : instr.targets[seg0],
+            seg0 < 0 ? 0.0 : instr.tmrcas[seg0]});
+        for (int j = 0; j < static_cast<int>(instr.num_segments); j++) {
+            int s = instr.starts[j];
+            if (s <= start) continue;
+            if (s >= end) break;
+            events.push_back({s, i, instr.targets[j], instr.tmrcas[j]});
+        }
+    }
+    std::sort(events.begin(), events.end(),
+              [](const EdgeEvent& a, const EdgeEvent& b) { return a.bp < b.bp; });
+
+    std::vector<int> cur_tgt(n, 0);
+    std::vector<double> cur_tmr(n, 0.0);
+
+    // Compact-and-merge sorted edges
+    struct SE { double h; int c, p; };
+    std::vector<SE> sorted(ne), merge_buf(ne);
+    std::vector<int> spos(n, -1);
+    std::vector<SE> new_entries;
+    std::vector<int> changed;
+    changed.reserve(32);
+
+    // UF arrays with sizes and heights (no hashing needed)
+    std::vector<int> uf_p(n), uf_r(n), uf_dendro(n);
+    std::vector<double> uf_h(n);
+    auto uf_find = [&](int x) {
+        while (uf_p[x] != x) { uf_p[x] = uf_p[uf_p[x]]; x = uf_p[x]; }
+        return x;
+    };
+
+    // Dendrogram for DFS (built alongside UF, no hash computation)
+    std::vector<DNode> dendro(ne);
+
+    // Branch records for weighted Poisson thinning
+    struct BranchRecord { int node; double vol; };
+    std::vector<BranchRecord> br_rec;
+    br_rec.reserve(2 * ne);
+    std::vector<double> cum_vol;
+    cum_vol.reserve(2 * ne);
+
+    // DFS buffers
+    std::vector<int> dfs_stack, desc_buf;
+    dfs_stack.reserve(n);
+    desc_buf.reserve(n);
+
+    int ei = 0;
+    const int E = static_cast<int>(events.size());
+    bool need_init = true;
+
+    while (ei < E) {
+        int bp = events[ei].bp;
+
+        changed.clear();
+        bool tree_changed = false;
+        while (ei < E && events[ei].bp == bp) {
+            const auto& ev = events[ei++];
+            if (need_init || ev.target != cur_tgt[ev.sample] || ev.tmrca != cur_tmr[ev.sample]) {
+                cur_tgt[ev.sample] = ev.target;
+                cur_tmr[ev.sample] = ev.tmrca;
+                changed.push_back(ev.sample);
+                tree_changed = true;
+            }
+        }
+
+        int bp_next = (ei < E) ? events[ei].bp : end;
+        double span = static_cast<double>(bp_next - bp);
+        if (!tree_changed || span <= 0) continue;
+
+        // Compact-and-merge sorted edges
+        if (need_init) {
+            for (int i = 1; i < n; i++)
+                sorted[i - 1] = {cur_tmr[i], i, cur_tgt[i]};
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            for (int i = 0; i < ne; i++) spos[sorted[i].c] = i;
+            need_init = false;
+        } else {
+            std::sort(changed.begin(), changed.end(),
+                      [&](int a, int b) { return spos[a] < spos[b]; });
+            int blen = 0, ci = 0;
+            for (int i = 0; i < ne; i++) {
+                if (ci < static_cast<int>(changed.size()) && i == spos[changed[ci]])
+                    ci++;
+                else
+                    merge_buf[blen++] = sorted[i];
+            }
+            new_entries.clear();
+            for (int s : changed)
+                new_entries.push_back({cur_tmr[s], s, cur_tgt[s]});
+            std::sort(new_entries.begin(), new_entries.end(),
+                      [](const SE& a, const SE& b) { return a.h < b.h; });
+            int ri = 0, ni = 0, out = 0;
+            while (ri < blen && ni < static_cast<int>(new_entries.size())) {
+                if (merge_buf[ri].h <= new_entries[ni].h)
+                    sorted[out] = merge_buf[ri++];
+                else
+                    sorted[out] = new_entries[ni++];
+                spos[sorted[out].c] = out;
+                out++;
+            }
+            while (ri < blen) { sorted[out] = merge_buf[ri++]; spos[sorted[out].c] = out; out++; }
+            while (ni < static_cast<int>(new_entries.size())) { sorted[out] = new_entries[ni++]; spos[sorted[out].c] = out; out++; }
+        }
+
+        // UF with dendrogram build + branch volume collection
+        for (int i = 0; i < n; i++) {
+            uf_p[i] = i; uf_r[i] = 0; uf_h[i] = 0.0; uf_dendro[i] = i;
+        }
+        int dcount = 0;
+        br_rec.clear();
+
+        for (int i = 0; i < ne; i++) {
+            int a = uf_find(sorted[i].c), b = uf_find(sorted[i].p);
+            if (a == b) continue;
+
+            double h = sorted[i].h;
+            double ha = uf_h[a], hb = uf_h[b];
+            int na = uf_dendro[a], nb = uf_dendro[b];
+
+            // Build dendrogram node (no hash needed)
+            dendro[dcount] = {na, nb, h, 0};
+
+            // Collect branch volumes for Poisson thinning
+            double vol_a = (h - ha) * span;
+            if (vol_a > 0) br_rec.push_back({na, vol_a});
+            double vol_b = (h - hb) * span;
+            if (vol_b > 0) br_rec.push_back({nb, vol_b});
+
+            // UF merge
+            if (uf_r[a] < uf_r[b]) std::swap(a, b);
+            uf_p[b] = a;
+            if (uf_r[a] == uf_r[b]) uf_r[a]++;
+            uf_h[a] = h;
+            uf_dendro[a] = n + dcount;
+            dcount++;
+        }
+
+        if (br_rec.empty()) continue;
+
+        // Poisson thinning: one sample for total volume, then distribute
+        double total_vol = 0;
+        cum_vol.resize(br_rec.size());
+        for (size_t i = 0; i < br_rec.size(); i++) {
+            total_vol += br_rec[i].vol;
+            cum_vol[i] = total_vol;
+        }
+
+        double expected = mutation_rate * total_vol;
+        if (expected <= 0) continue;
+
         std::poisson_distribution<int> pois(expected);
-        int n_mut = pois(rng);
+        int n_muts = pois(rng);
 
-        std::uniform_real_distribution<double> pos_dist(start_bp, end_bp);
-        for (int m = 0; m < n_mut; m++) {
-            int pos = static_cast<int>(pos_dist(rng));
-            result.positions.push_back(pos);
-            // Build genotype row: 1 for descendants, 0 otherwise
+        for (int m = 0; m < n_muts; m++) {
+            // Choose branch proportional to volume
+            double u = std::uniform_real_distribution<>(0, total_vol)(rng);
+            int idx = static_cast<int>(
+                std::lower_bound(cum_vol.begin(), cum_vol.end(), u) - cum_vol.begin());
+            if (idx >= static_cast<int>(br_rec.size()))
+                idx = static_cast<int>(br_rec.size()) - 1;
+
+            // Choose position within span
+            int pos = bp + static_cast<int>(
+                std::uniform_real_distribution<double>(0, span)(rng));
+
+            // DFS for descendants (only for branches that get mutations)
+            desc_buf.clear();
+            dfs_stack.clear();
+            dfs_stack.push_back(br_rec[idx].node);
+            while (!dfs_stack.empty()) {
+                int id = dfs_stack.back();
+                dfs_stack.pop_back();
+                if (id < n) {
+                    desc_buf.push_back(id);
+                } else {
+                    dfs_stack.push_back(dendro[id - n].left);
+                    dfs_stack.push_back(dendro[id - n].right);
+                }
+            }
+
+            // Add mutation to result
             int offset = result.n_mutations * n;
             result.genotypes.resize(offset + n, 0);
-            for (int d : descendants)
+            for (int d : desc_buf)
                 result.genotypes[offset + d] = 1;
+            result.positions.push_back(pos);
             result.n_mutations++;
         }
-    });
+    }
 
+    return result;
+}
+
+
+void ThreadingInstructions::visit_mutations(
+    std::function<void(int, const std::vector<int>&)> callback) const
+{
+    if (num_samples == 0 || num_sites == 0) return;
+
+    GenotypeIterator gi(*this);
+    std::vector<int> carriers;
+
+    for (int s = 0; s < num_sites; s++) {
+        const std::vector<int>& g = gi.next_genotype();
+        carriers.clear();
+        for (int i = 0; i < num_samples; i++) {
+            if (g[i] == 1) carriers.push_back(i);
+        }
+        if (!carriers.empty()) {
+            callback(positions[s], carriers);
+        }
+    }
+}
+
+
+double ThreadingInstructions::mrca(int id1, int id2, int position_bp) const {
+    if (id1 < 0 || id1 >= num_samples || id2 < 0 || id2 >= num_samples) {
+        throw std::runtime_error("Sample ID out of range");
+    }
+    if (id1 == id2) return 0.0;
+
+    // Trace path from id1 to root, recording max coalescence height at each node
+    std::unordered_map<int, double> path1;
+    path1.reserve(64);
+    double h1 = 0.0;
+    int cur = id1;
+    path1[cur] = 0.0;
+    while (cur != 0) {
+        int seg = segment_at_bp(instructions[cur], position_bp);
+        int tgt = (seg < 0) ? 0 : instructions[cur].targets[seg];
+        double edge_h = (seg < 0) ? 0.0 : instructions[cur].tmrcas[seg];
+        h1 = std::max(h1, edge_h);
+        cur = tgt;
+        path1[cur] = h1;
+    }
+
+    // Walk from id2 upward until hitting a node on path1
+    double h2 = 0.0;
+    cur = id2;
+    int steps = 0;
+    while (path1.find(cur) == path1.end()) {
+        int seg = segment_at_bp(instructions[cur], position_bp);
+        int tgt = (seg < 0) ? 0 : instructions[cur].targets[seg];
+        double edge_h = (seg < 0) ? 0.0 : instructions[cur].tmrcas[seg];
+        h2 = std::max(h2, edge_h);
+        cur = tgt;
+        if (++steps > num_samples) {
+            // Safety: avoid infinite loop on malformed instructions
+            return std::max(h1, h2);
+        }
+    }
+
+    return std::max(path1[cur], h2);
+}
+
+
+std::vector<double> ThreadingInstructions::mrca_vector(int id1, int id2) const {
+    std::vector<double> result(num_sites);
+    for (int s = 0; s < num_sites; s++) {
+        result[s] = mrca(id1, id2, positions[s]);
+    }
     return result;
 }
 

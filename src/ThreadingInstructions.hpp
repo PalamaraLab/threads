@@ -160,14 +160,28 @@ public:
     int get_dag_total_mutations() const;
     int get_dag_num_chunks() const { return dag_ready ? static_cast<int>(dag_chunks.size()) : 0; }
 
+    // -----------------------------------------------------------------------
     // ARG traversals directly on threading instructions (no materialized ARG).
     //
+    // These methods reconstruct the implicit coalescent tree at each genomic
+    // interval via union-find, giving O(n * B) total work where B is the
+    // number of tree-change boundaries (typically O(n), so O(n^2) overall).
+    //
+    // For large sample sizes (n > ~500), converting to an ARG first
+    // (threads_to_arg + arg_needle_lib) and traversing the materialized edge
+    // table is significantly faster (O(E) after an O(n * S * log^2 n) build).
+    // These methods remain useful for small n, testing, and quick analyses
+    // where the ARG conversion overhead is not justified.
+    // -----------------------------------------------------------------------
+
     // visit_clades: enumerates all clades (internal nodes + leaves) in the
     // implicit threading tree, interval by interval.
     // callback(descendants, height, start_bp, end_bp)
     //   descendants: sorted vector of leaf sample indices under this clade
     //   height: coalescence height of the clade (0 for leaves)
     //   start_bp, end_bp: physical position range
+    //
+    // Scaling: O(n^2). For large n, prefer arg_needle_lib traversal.
     void visit_clades(std::function<void(const std::vector<int>&, double, int, int)> callback) const;
 
     // visit_branches: enumerates all branches (edges between nodes).
@@ -175,21 +189,31 @@ public:
     //   descendants: sorted vector of leaf sample indices below this branch
     //   child_height: height of the child node (0 for leaf branches)
     //   parent_height: height of the parent node
+    //
+    // Scaling: O(n^2). For large n, prefer arg_needle_lib traversal.
     void visit_branches(std::function<void(const std::vector<int>&, double, double, int, int)> callback) const;
 
     // ARG summary statistics (optimized, no full descendant tracking).
     //
     // total_volume: sum of (parent_height - child_height) * (end_bp - start_bp).
+    // Uses an algebraic shortcut (sum + max of TMRCAs) — O(E) where E is the
+    // total number of edge events. Faster than arg_needle_lib at all sizes.
     double total_volume() const;
     //
     // allele_frequency_spectrum: afs[k] = total branch volume for branches
     //   with exactly k descendants, for k in 0..num_samples.
+    //
+    // Scaling: O(n^2). Competitive with tskit at n < ~500, but for large n
+    // prefer arg_needle_lib or tskit branch-mode AFS.
     std::vector<double> allele_frequency_spectrum() const;
     //
     // association_diploid: for each clade, compute chi-square association
     //   statistic against a diploid phenotype vector. Returns (positions,
     //   chi2_stats, p_values, n_descendants) for all clades with p < threshold.
     //   phenotypes has length num_samples/2.
+    //
+    // Scaling: O(n^2) (uses visit_clades internally). For large n, prefer
+    // building an ARG and using arg_needle_lib association testing.
     struct AssociationResult {
         std::vector<int> position;         // midpoint bp
         std::vector<double> chi2;          // chi-square statistic
@@ -202,12 +226,34 @@ public:
     // generate_mutations: Poisson-sample mutations on branches proportional to
     //   branch volume. Returns (positions_bp, genotype_flat) where genotype_flat
     //   is row-major (n_mutations × num_samples) with 0/1 values.
+    //
+    // Scaling: O(n^2). Competitive with arg_needle_lib at n < ~200, but the
+    // gap grows with n (~7x at n=1000, ~27x at n=2000). For large n, prefer
+    // arg_needle_lib.generate_mutations on a materialized ARG.
     struct MutationResult {
         std::vector<int> positions;
         std::vector<int> genotypes;  // flat row-major, n_mutations * num_samples
         int n_mutations;
     };
     MutationResult generate_mutations(double mutation_rate, int seed = 42) const;
+
+    // visit_mutations: iterate over all variant sites, calling the callback
+    // with the set of samples carrying the derived allele (allele=1).
+    // callback(position_bp, carriers)
+    //   position_bp: physical position of the variant site
+    //   carriers: sorted vector of sample indices with derived allele
+    // Only calls back for sites with at least one carrier.
+    void visit_mutations(std::function<void(int, const std::vector<int>&)> callback) const;
+
+    // mrca: return the TMRCA of two samples at a given genomic position.
+    // Traces both samples' ancestry chains through the threading tree and
+    // returns the coalescence height where their lineages first meet.
+    // O(tree_depth) per query (typically O(log n)).
+    double mrca(int id1, int id2, int position_bp) const;
+
+    // mrca_vector: return the TMRCA of two samples at every variant site.
+    // Returns a vector of length num_sites.
+    std::vector<double> mrca_vector(int id1, int id2) const;
 
     // Count heterozygous diploid individuals per site without materializing
     // the full genotype matrix.  Returns vector of length num_sites where
