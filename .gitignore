@@ -226,4 +226,5 @@ cython_debug/
 cmake-build*/
 
 example/example_data.threads
-example/example_data.argn
+example/example_data.argnthreads_cache/
+test/threads_cache/
