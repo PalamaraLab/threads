@@ -184,9 +184,10 @@ void ThreadsLowMem::process_all_sites_viterbi(const std::vector<std::vector<int>
 
 void ThreadsLowMem::process_all_sites_viterbi_flat(const int32_t* data, int n_sites, int n_haps) {
   static_assert(sizeof(int) == sizeof(int32_t), "int and int32_t must be the same size");
-  if (n_haps <= max_sample_id) {
+  if (n_haps < max_sample_id) {
     throw std::runtime_error(
-        "Genotype matrix should have at least " + std::to_string(max_sample_id) + " rows\n");
+        "Genotype matrix should have at least " + std::to_string(max_sample_id - 1) + " samples, found "
+        + std::to_string(max_sample_id) + "\n");
   }
   const int prune_interval = 500;
   for (int s = 0; s < n_sites; s++) {
